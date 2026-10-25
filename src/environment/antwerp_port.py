@@ -11,7 +11,6 @@ import math
 bbox = (4.2200, 51.2100, 4.4500, 51.3800)
 tags = {"natural": "water", "waterway": ["riverbank", "dock", "canal", "fairway"]}
 
-print("Pobieranie poligonów wodnych...")
 water_gdf = ox.features_from_bbox(bbox=bbox, tags=tags)
 water_proj = ox.projection.project_gdf(water_gdf)
 water_geom = water_proj.unary_union
