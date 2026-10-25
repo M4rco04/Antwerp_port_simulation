@@ -27,7 +27,6 @@ y_coords = np.arange(miny, maxy, step)
 grid_nodes = {} 
 node_id = 0
 
-print(f"Generowanie wierzchołków (krok: {step}m)...")
 for i, x in enumerate(x_coords):
     for j, y in enumerate(y_coords):
         if water_geom_prep.contains(Point(x, y)):
