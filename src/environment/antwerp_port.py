@@ -35,8 +35,6 @@ for i, x in enumerate(x_coords):
             grid_nodes[(i, j)] = node_id
             node_id += 1
 
-print(f"Wygenerowano |V| = {G.number_of_nodes()} węzłów. Tworzenie krawędzi...")
-
 directions = [
     (0, 1, 1), (0, -1, 1), (1, 0, 1), (-1, 0, 1),
     (1, 1, math.sqrt(2)), (1, -1, math.sqrt(2)),
