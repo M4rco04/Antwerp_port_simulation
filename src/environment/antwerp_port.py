@@ -19,14 +19,12 @@ GRAPH_FILE = "port_graph.pkl"
 GEOJSON_FILE = "custom_areas.geojson"
 
 if os.path.exists(GRAPH_FILE):
-    print(f"Znaleziono {GRAPH_FILE}. Wczytywanie z pliku...")
     with open(GRAPH_FILE, 'rb') as f:
         data = pickle.load(f)
         G = data['graph']
         crs = data['crs']
-    print(f"Wczytano graf: |V| = {G.number_of_nodes()}, |E| = {G.number_of_edges()}")
+    print(f"|V| = {G.number_of_nodes()}, |E| = {G.number_of_edges()}")
 else:
-    print("Brak zapisanego grafu. Pobieranie danych i budowa...")
     bbox = (4.2200, 51.2100, 4.4500, 51.3800)
     tags = {"natural": "water", "waterway": ["riverbank", "dock", "canal", "fairway"]}
 
@@ -45,7 +43,6 @@ else:
     grid_nodes = {} 
     node_id = 0
 
-    print(f"Generowanie wierzchołków (krok: {step}m)...")
     for i, x in enumerate(x_coords):
         for j, y in enumerate(y_coords):
             if water_geom_prep.contains(Point(x, y)):
@@ -53,7 +50,6 @@ else:
                 grid_nodes[(i, j)] = node_id
                 node_id += 1
 
-    print("Tworzenie krawędzi...")
     directions = [
         (0, 1, 1), (0, -1, 1), (1, 0, 1), (-1, 0, 1),
         (1, 1, math.sqrt(2)), (1, -1, math.sqrt(2)),
@@ -76,7 +72,6 @@ else:
 
 # Wczytywanie dodatkowych stref z GeoJSON
 if os.path.exists(GEOJSON_FILE):
-    print(f"Wczytywanie stref z pliku {GEOJSON_FILE}...")
     custom_areas = gpd.read_file(GEOJSON_FILE)
     custom_areas = custom_areas.to_crs(crs) # Dopasowanie koordynat do siatki grafu
     
@@ -86,7 +81,6 @@ if os.path.exists(GEOJSON_FILE):
     locks_prep = prep(locks) if locks else None
     unloading_prep = prep(unloading) if unloading else None
 
-    print("Przypisywanie stref do węzłów...")
     for n, data in G.nodes(data=True):
         p = Point(data['x'], data['y'])
         if locks_prep and locks_prep.contains(p):
@@ -94,8 +88,6 @@ if os.path.exists(GEOJSON_FILE):
         elif unloading_prep and unloading_prep.contains(p):
             G.nodes[n]['type'] = 'unloading'
 
-# Rysowanie
-print("Generowanie wizualizacji...")
 lines = [[(G.nodes[u]['x'], G.nodes[u]['y']), (G.nodes[v]['x'], G.nodes[v]['y'])] for u, v in G.edges()]
 lc = LineCollection(lines, colors="#0055ff", linewidths=0.5, alpha=0.5)
 
