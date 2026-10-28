@@ -60,15 +60,3 @@ W sekcji `properties` znajdują się biznesowe i techniczne dane o danym stanowi
 
 ---
 
-## 4. Jak wykorzystać te dane w praktyce?
-
-1. **Wyszukiwanie po numerze stanowiska:**  
-   Najlepiej filtrować obiekty po polu **`LPL_UN`** (np. `ANTW_128`) lub **`LPL`** (np. `128`).
-2. **Wyznaczenie prostokąta granicznego (Bounding Box):**  
-   Aby uzyskać skrajne punkty geograficzne danego slota, wystarczy wyciągnąć minimalną i maksymalną długość oraz szerokość geograficzną z tablicy `coordinates`:
-   * `min_lng` = najmniejsza wartość $X$
-   * `min_lat` = najmniejsza wartość $Y$
-   * `max_lng` = największa wartość $X$
-   * `max_lat` = największa wartość $Y$
-3. **Integracja z AIS/VTS:**  
-   Pole **`ISRS`** umożliwia bezpośrednie łączenie obrysów ze strumieniem danych o ruchu statków (systemy VTS/RIS w Europie).
