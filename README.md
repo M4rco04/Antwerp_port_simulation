@@ -32,7 +32,7 @@ A TEU (Twenty-foot Equivalent Unit) is the standard international unit used to m
 
 ### Tugs
 
-`data/equipment/tugs.csv` contains the list of tugs operating in the port of Antwerp, with their name, IMO number, Bollard Pull (in tons), dimensions, and max draft. Data about some tugs is not publicly available, so some fields are left empty.
+`data/equipment/tugs.csv` contains the list of tugs operating in the port of Antwerp, with their name, IMO number, Bollard Pull (in tons), dimensions, and max draft. Data about some tugs is not publicly available for free, so some fields are left empty.
 
 ### MDK Pilotage
 
