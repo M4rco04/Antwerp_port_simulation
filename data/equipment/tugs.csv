@@ -1,0 +1,43 @@
+Tug name;IMO number;Bollard pull (t);Length overall (m);Beam (m);"Max draft (m; verified)";Other published / reported draft (m);Data confidence
+Fairplay XI;9725108;90,60;29,67;14,22;6,80;5,70;High - operator datasheet
+Fairplay III;9365116;70,00;25,00;11,20;5,35;5,00;High - operator datasheet
+Multratug 33;9796054;77,00;31,90;13,20;6,30;;High - operator fleet page
+Fairplay XIV;9541708;52,00;25,00;11,00;;4,46;Medium - operator + AIS profile
+VB Hawk;9406439;86,00;29,30;12,20;;5,90;Medium - operator/register
+VB Southampton;9816672;"70-100 (operator range; exact not verified)";29,10;;;;Partial - register + operator
+INDUS;8884830;;25,00;7,00;;2,90;Partial - vessel profile
+VB Eagle;9406441;86,00;29,30;12,20;;5,90;Medium - operator/register
+Tug 92;9018579;;29,00;9,00;;;Partial - vessel directory
+Tug 54;9991422;70,00;24,73;12,50;4,95;3,60;High - newbuild/register + AIS
+Tug 53;9991410;70,00;24,73;12,50;4,95;3,60;High - newbuild/register + AIS
+Tug 40;9602095;70,00;30,80;12,55;;4,54;Medium - vessel technical record
+ASSI;;;;;;;Unverified - name only
+Tug 22;9247340;;;;;;Partial - vessel directory
+Multratug 7;9817808;61,90;28,57;10,43;4,60;;High - operator datasheet
+Multratug 6;9804095;61,60;28,57;10,43;4,60;;High - operator datasheet
+IVO;5062352;;23,53;6,40;;2,44;Partial - vessel technical record
+VB Ruby;9314284;65,00;33,00;11,00;;5,60;Medium - operator fleet page
+VB Amber;9365130;65,00;25,00;11,60;;5,30;Medium - operator fleet page
+VB Grizzly;9397121;66,00;32,30;12,20;;5,60;Medium - operator fleet page
+VB Shark;9410715;"60-70 (operator band; exact not verified)";32,00;;;;Partial - operator + Belgian register
+VB Kodiak;9397119;66,00;32,30;12,20;;5,60;Medium - operator fleet page
+Pinguin;;;;;;;Unverified - name only
+Annie IV;;;26,80;8,20;;3,30;Partial - vessel technical record
+Annie 5;;;;;;;Unverified - AIS identity only
+Tug 57;1027029;70,00;24,73;12,50;4,95;3,60;High - newbuild/register + AIS
+Tug 21;9247338;55,00;29,50;11,00;;5,13;Medium - vessel technical record
+Tug 32;;55,00;29,50;11,00;5,40;;Medium - vessel technical record
+Tug 31;9684031;;30,00;12,00;;;Partial - vessel directory
+Tug 90;8809402;32,00;28,50;9,50;;4,30;Medium - vessel technical record
+Hydrotug 1;9940875;65,00;30,00;12,50;;6,00;Medium - registry/operator sources
+Volta 1;9985162;70,00;24,73;12,50;4,95;;High - port authority / newbuild data
+Fipass VII;;;;;;;Unverified - name only
+Tug 11;9211717;50,00;29,50;11,00;;4,75;Medium - vessel technical record
+VB Seine;9476393;60 ahead / 57 astern;28,67;10,43;4,85;;High - vessel technical record
+Tug 56;9991446;70,00;24,73;12,50;4,95;3,60;High - newbuild/register + AIS
+Tug 43;9602124;;29,50;12,55;;4,54;Medium - vessel technical record
+Tug 30;9684029;;30,00;12,00;;;Partial - vessel directory
+Multratug 4;9360582;75,00;34,50;11,60;6,50;;High - operator fleet sheet
+Tug 20;9247326;;;;;;Partial - vessel directory
+Tug 42;9602112;;29,50;12,55;;4,54;Medium - vessel technical record
+Tug 55;9991434;70,00;24,73;12,50;4,95;3,60;High - newbuild/register + AIS
