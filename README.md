@@ -91,3 +91,35 @@ The pilots of the Agency for Maritime Services and Coast (MDK in Dutch) bring th
 `data/equipment/pilots_brabo.csv`
 
 Once you pass the lock in Antwerp, you can call on the Brabo Group dock pilots. These pilots have an excellent knowledge of the port regulations and the port infrastructure. They know the depth of the water, the channels and the moorings of pipelines.
+## Navigation graph
+
+`src/environment/antwerp_port.py` builds `cache/antwerp_scheldt_graph.pkl` (+ an HTML viewer):
+a 250 x 250 m grid at sea (only where Scheldt-bound AIS traffic sails, plus anchorages),
+a 200 x 50 m grid along the fairway centreline of the Western Scheldt / Zeeschelde and the
+canals, and a 50 x 50 m grid in the ports. No edge crosses land. Nodes carry lon/lat, region,
+zone and depth (m below LAT, negative = drying); edges carry length and their shallowest depth.
+
+```
+py src/environment/antwerp_port.py --no-browser      # ~3 min; --refresh-osm re-downloads OSM water
+```
+
+```python
+from antwerp_port import find_route, nearest_node
+path = find_route(G, nearest_node(G, 2.62, 51.42), G.graph["terminals"][0]["access_node"],
+                  draught_m=14.0, ukc_m=0.5)      # never uses an edge shallower than 14.5 m
+```
+
+### Locks
+
+Every lock is a single graph node (`type="lock"`) joined to both sides by `lock_gate` edges;
+`G.graph["locks"]` maps a lock name to its node, and `G.nodes[n]["lock"]` is a
+`src/environment/locks.py` `Lock` object holding the chambers (length x width, sill), the two
+sides (zone, tidal or not, gate nodes), a queue per chamber, 2-D packing (LOA x beam, greedy
+first fit, biggest at the front), the ULCV empty-chamber rule and the level-changing cycle
+(PLAN.md §7). Load the pickle with `src/environment` on `sys.path`.
+
+```python
+lock = G.nodes[G.graph["locks"]["Berendrecht"]]["lock"]
+lock.request(ShipRequest("MSC X", loa=366, beam=51, draught=14.0, from_side="b", container=True), now=0)
+events = lock.step(now=0, dt=5, levels={"a": 4.3, "b": 4.5})   # water levels above datum, m
+```
