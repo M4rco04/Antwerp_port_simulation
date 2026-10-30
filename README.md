@@ -25,6 +25,52 @@ A TEU (Twenty-foot Equivalent Unit) is the standard international unit used to m
 - Capacity Equivalents:
 	- 1 standard 20-foot container = 1 TEU
 	- 1 standard 40-foot container = 2 TEUs (also called an FEU, or Forty-foot Equivalent Unit)
+## Entry probabilities from AIS
+
+`src/data/fit_entry_probabilities.py` reads all snapshots in `data/ais/`, classifies the ships
+(container, bulk/general, tanker, inland cargo, inland tanker, passenger, service, unknown) and finds
+where each visit entered: open sea (west / north / south-west edge), an anchorage (Westhinder,
+Everingen, ...) or a port/canal feeding the Scheldt (Antwerp docks, Albert Canal, Upper Sea Scheldt,
+Schelde-Rijn canal, Hansweert, Terneuzen, Ghent canal, Vlissingen, Breskens). It writes the fitted
+tables to `src/data/entry_probabilities.py`; re-run it when more AIS data is in.
+
+```
+py src/data/fit_entry_probabilities.py --plot entries.png
+```
+
+```python
+import entry_probabilities as E
+E.p_source("container")                  # P(source | class), Scheldt-bound traffic
+E.p_category("tanker")                   # P(sea / anchorage / port_channel / non_scheldt | class)
+E.arrival_rate("inland_cargo", "albert_canal", hour=14)   # entries per hour
+E.sample_source("bulk_general", rng)     # rng: numpy Generator or random.Random
+```
+
+## Background traffic and container calls from AIS
+
+Two more fits share the visit pipeline in `src/data/ais_pipeline.py` (visits, entries, stops at
+berths and anchorages; Antwerp split by quay number from `slots_cords/`):
+
+```
+py src/data/fit_background_traffic.py   # -> src/data/background_traffic.py
+py src/data/fit_container_calls.py      # -> src/data/container_calls.py
+```
+
+- `background_traffic.py`: whole ships to bootstrap (LOA, beam, draught, DG category), destination
+  per class and entry source (origin-destination), exit after the berth stay, lognormal time at
+  berth and at anchor (censoring-aware), anchorage choice, lock passage times.
+- `container_calls.py`: TEU -> LOA / beam / draught power laws with correlated residuals, berth
+  arrival/departure delay versus the schedule CSV, time from entering the area to berthing, and
+  where each schedule terminal code berths.
+
+```python
+import background_traffic as B, container_calls as C
+B.sample_destination("tanker", rng, source="sea_north")   # e.g. "antwerp_right_bank_docks"
+B.sample_berth_dwell("inland_tanker", rng)                 # hours
+C.dimensions_for_teu(14000, rng)                           # {"loa": ..., "beam": ..., "draught": ...}
+C.sample_arrival_delay(rng)                                # hours late against the schedule
+```
+
 
 ## Port Equipment
 

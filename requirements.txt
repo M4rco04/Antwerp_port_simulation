@@ -3,3 +3,6 @@ networkx
 matplotlib
 shapely
 websockets
+numpy
+pandas
+geopandas
