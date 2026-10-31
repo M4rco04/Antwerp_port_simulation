@@ -23,7 +23,7 @@ shallow.
 
     C = build_coarse(G)
     path = coarse_route(C, a, b, draught_m, ukc_m, loa_m, beam_m, G=G)   coarse nodes
-    fine = refine(G, C, path, a_fine, b_fine, draught_m, ...)            fine nodes
+    fine = refine(G, C, path, a_fine, b_fine, draught_m, ...)            fine nodes (fast=FastGraph: arrays)
     expand(C, path)                                                      fine path along the seeds (no depth check)
     RouteCache(C, G).get(a, b, draught_m, ...)                           cached coarse routes
 """
@@ -40,7 +40,7 @@ import numpy as np
 log = logging.getLogger("coarse")
 
 SPACING_M = {"sea": 4000.0, "river": 2000.0, "canal": 2000.0, "port": 800.0}
-SPECIAL = ("lock", "anchorage")
+SPECIAL = ("lock", "anchorage", "approach")
 
 
 def _seeds(G):
@@ -211,9 +211,18 @@ def corridor(G, C, path, neighbours=True):
 
 
 def refine(G, C, path, source, target, draught_m, ukc_m=0.0, loa_m=0.0, beam_m=0.0, water_level=None,
-           lock_penalty_m=10_000.0):
+           lock_penalty_m=10_000.0, fast=None, level=None):
     """Fine route source -> target (fine nodes) inside the corridor of a coarse path; the whole
-    graph if the corridor is too shallow."""
+    graph if the corridor is too shallow. With fast (a fast_graph.FastGraph) and level (its level
+    vector) it runs on the arrays, else on networkx with water_level(node)."""
+    if fast is not None:
+        regions = set(path) | {m for n in path for m in C[n] if C.nodes[m]["kind"] not in SPECIAL}
+        mask = np.isin(fast.coarse, [fast.index[r] for r in regions])
+        try:
+            return fast.route(source, target, draught_m, ukc_m, loa_m, beam_m, level, mask, lock_penalty_m)
+        except nx.NetworkXNoPath:
+            log.info("corridor of %d regions too shallow, routing on the whole graph", len(path))
+            return fast.route(source, target, draught_m, ukc_m, loa_m, beam_m, level, None, lock_penalty_m)
     from antwerp_port import find_route
 
     nodes = corridor(G, C, path) | {source, target}

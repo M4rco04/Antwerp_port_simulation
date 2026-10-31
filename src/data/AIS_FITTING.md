@@ -67,3 +67,22 @@ dims = C.dimensions_for_teu(14000, rng)
 - **Container delays.** Ships berth roughly 1–2 days later than the schedule CSV says, which reflects congestion or stale planned times. Schedule times are read as Brussels local time, and delays are only matched within ±96 h.
 - **Hand-tuned zones.** The zone boxes and thresholds are constants at the top of `ais_pipeline.py`. After changing them, check the result with `--plot`.
 - **Self-reported AIS fields.** Draught is the largest value a ship reported, not its design maximum. Ship type and destination are also self-reported and sometimes stale.
+
+## Port infrastructure (`fit_port_infrastructure.py` → `port_infrastructure.py`)
+
+- `BERTH_USE`: berth stops of at least 0.5 h within 150 m of a charted berth, counted by ship class per
+  berth. A berth is a tanker berth if it had ≥ 2 tanker or tank-barge calls and they were ≥ 50 % of its calls.
+- `TUG_BASES` / `PILOT_BASES`: clusters (600 m) of the stops of tugs and pilot boats, with ≥ 50 vessel-hours
+  from ≥ 2 vessels:
+  - tugs: the 42 of `data/equipment/tugs.csv` plus every other ship with AIS type 52;
+  - pilot boats: Brabo, LRD and "PILOT" in the name.
+- `MOORING_MIN`: arrival and departure manoeuvre of sea-going ships, t = base + k·LOA with lognormal noise,
+  fitted separately for tidal quays and docks:
+  - arrival: from the last fix ≥ 1 km from the berth to lying still;
+  - departure: from leaving to the first fix ≥ 1 km away.
+
+- `DOCK_SPEED_KN`: speed over ground of sea-going ships under way (≥ 1 kn), per dock basin and in the outer
+  harbours and docks within 600 m of a lock: median and 95th percentile. It snaps fixes to the navigation
+  graph, so build the graph first.
+
+Rerun: `py src/data/fit_port_infrastructure.py`, then rebuild the graph (`py src/environment/antwerp_port.py --no-browser`).

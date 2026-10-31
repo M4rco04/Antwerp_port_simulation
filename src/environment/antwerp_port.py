@@ -66,7 +66,11 @@ from shapely.geometry import LineString, Polygon
 
 from anchorages import Anchorage
 from coarse_graph import build_coarse
+from fast_graph import FastGraph
 from locks import Chamber, Lock
+from navigation_rules import assign_cell_attributes
+from places import add_places
+from terminals import build_berth_catalogue, build_terminals
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEPTH_RASTER = PROJECT_ROOT / "data" / "charts" / "scheldt_depth_LAT_wgs84.tif"
@@ -221,13 +225,18 @@ NOMINAL_DEPTH_M = {
 
 # container terminals: berth polygons in slots_cords with this TERMINAL code
 TERMINALS = (
-    {"name": "MPET", "code": "1700", "quay_m": 3700, "draft_m": 17.0, "capacity": "9 ULCV / 12-14 mieszanych"},
-    {"name": "DP World Antwerp Gateway", "code": "1742", "quay_m": 2500, "draft_m": 17.0,
+    # quay codes of slots_cords: 1742 (east quay of Deurganckdok) is MSC's MPET, 1700 (west quay)
+    # DP World, as the schedules show (MSC calls at K1718/K1742, CMA CGM and COSCO at 1700)
+    {"name": "MPET", "code": "1742", "quay_m": 3700, "draft_m": 17.0, "capacity": "9 ULCV / 12-14 mieszanych"},
+    {"name": "DP World Antwerp Gateway", "code": "1700", "quay_m": 2500, "draft_m": 17.0,
      "capacity": "6 ULCV / 8-10 mieszanych"},
     {"name": "PSA Noordzee Terminal", "code": "S913", "quay_m": 1225, "draft_m": 17.0, "capacity": "3 ULCV"},
     {"name": "PSA Europa Terminal", "code": "S869", "quay_m": 1180, "draft_m": 16.0, "capacity": "2-3 duże statki"},
 )
 BERTH_SNAP_M = 60.0
+# berth zones by quay number, as src/data/ais_pipeline.py ANTWERP_BERTH_ZONES (destinations of background traffic)
+BERTH_ZONES = ((1, 799, "antwerp_right_bank_docks"), (800, 999, "antwerp_river_quays"),
+               (1100, 1699, "antwerp_left_bank_docks"), (1700, 1799, "antwerp_deurganckdok"))
 
 # Locks (PLAN.md §7). Per chamber: name, OSM way id of its centreline (or its (lon, lat) points
 # where OSM has none), length x width (m; None =
@@ -773,6 +782,26 @@ def tag_berths(graph, berths, X, Y, ids):
     return berth_nodes
 
 
+def berth_zone(number):
+    """Berth zone of a quay number, as background_traffic.py uses them (ais_pipeline.ANTWERP_BERTH_ZONES)."""
+    if number == number:
+        for lo, hi, zone in BERTH_ZONES:
+            if lo <= number <= hi:
+                return zone
+    return "antwerp_other"
+
+
+def berth_use():
+    """Calls per class and tanker berths from src/data/port_infrastructure.py (None if not fitted)."""
+    sys.path.insert(0, str(PROJECT_ROOT / "src" / "data"))
+    try:
+        import port_infrastructure
+    except ImportError:
+        log.warning("src/data/port_infrastructure.py missing: run src/data/fit_port_infrastructure.py")
+        return None
+    return port_infrastructure.BERTH_USE
+
+
 def place_terminals(graph, berths, X, Y, ids):
     tree = shapely.STRtree(shapely.points(X, Y))
     placed = []
@@ -1189,16 +1218,23 @@ def build_graph(refresh_osm: bool = False) -> nx.Graph:
     unreached = sorted(set(berths.LPL_UN) - set(berth_nodes))
     log.info("Berth polygons without a node within %.0f m: %d %s", BERTH_SNAP_M, len(unreached), unreached)
     insert_anchorages(graph, water, anchorages)
-    coarse = build_coarse(graph)
 
     graph.graph.update({
         "crs": PROJECTED_CRS, "coordinate_crs": GEOGRAPHIC_CRS, "depth_datum": "LAT",
         "spacing_m": {"sea": [SEA_SPACING, SEA_SPACING], "river": [RIVER_ALONG, RIVER_ACROSS],
                       "canal": [RIVER_ALONG, RIVER_ACROSS], "port": [PORT_SPACING, PORT_SPACING]},
-        "nominal_depth_m": NOMINAL_DEPTH_M, "terminals": terminals, "berth_nodes": berth_nodes, "coarse": coarse,
+        "nominal_depth_m": NOMINAL_DEPTH_M, "terminals": terminals, "berth_nodes": berth_nodes,
+        "centrelines": {name: [(round(x, 1), round(y, 1)) for x, y in line.coords] for name, line in lines.items()},
         "sources": {"depth": str(DEPTH_RASTER.relative_to(PROJECT_ROOT)), "osm_water": list(OSM_AREAS),
                     "berths": str(SLOT_DATA.relative_to(PROJECT_ROOT)), "traffic": "data/ais via src/data/ais_pipeline.py"},
     })
+    buoys = gpd.read_file(CHARTS, layer="buoys_nl").to_crs(PROJECTED_CRS)
+    zones_be = gpd.read_file(CHARTS, layer="shipping_zones_be").to_crs(PROJECTED_CRS)
+    assign_cell_attributes(graph, buoys, zones_be, lines)
+    build_berth_catalogue(graph, berths, berth_nodes, berth_zone, berth_use())
+    build_terminals(graph)
+    add_places(graph)
+    graph.graph["coarse"] = build_coarse(graph)
     return graph
 
 
@@ -1259,10 +1295,11 @@ def save_graph(graph: nx.Graph, output: Path = DEFAULT_OUTPUT) -> Path:
 
 def save_web_visualization(graph: nx.Graph, output: Path = DEFAULT_HTML) -> Path:
     regions = ["sea", "river", "canal", "port", "lock", "anchorage"]
-    index = {n: i for i, n in enumerate(graph.nodes)}
+    shown = [n for n, d in graph.nodes(data=True) if d["region"] in regions]      # not the virtual approach nodes
+    index = {n: i for i, n in enumerate(shown)}
     nodes = [[round(d["longitude"], 6), round(d["latitude"], 6), d["depth_m"], regions.index(d["region"]),
-              1 if d["is_berth"] else 0] for _, d in graph.nodes(data=True)]
-    edges = [[index[u], index[v]] for u, v in graph.edges]
+              1 if d["is_berth"] else 0] for d in (graph.nodes[n] for n in shown)]
+    edges = [[index[u], index[v]] for u, v in graph.edges if u in index and v in index]
     berths = []
     if SLOT_DATA.is_file():
         slot_data = json.loads(SLOT_DATA.read_text(encoding="utf-8"))
@@ -1329,6 +1366,7 @@ def main() -> None:
 
     graph = build_graph(args.refresh_osm)
     output = save_graph(graph, args.output)
+    FastGraph.from_graph(graph).save(args.output.with_suffix(".arrays.npz"))
     html_output = save_web_visualization(graph, args.html)
     print(f"Stworzono graf: |V| = {graph.number_of_nodes()}, |E| = {graph.number_of_edges()}. "
           f"Zapisano w {output}\nWizualizacja HTML: {html_output}")
