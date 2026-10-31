@@ -22,6 +22,11 @@ nodes, "basin" = the basin behind locks otherwise, and "tide_gauge" = the neares
 currents (currents.py): tidal river/port nodes get "chainage_m" (along the estuary axis from the
 mouth) and "flow_dir" (unit vector pointing upstream, i.e. the flood direction).
 
+Every anchorage is ONE node (type "anchorage") holding an anchorages.Anchorage (capacity, queue,
+maximum stay); graph.graph["anchorages"] maps a name to its node. graph.graph["coarse"] is the
+coarse routing graph (coarse_graph.py); every fine node has "coarse_node", fine edges between two
+coarse regions "coarse_edge".
+
 Every lock is ONE node (type "lock", region "lock"): the grid cells inside its chambers are
 removed, and "lock_gate" edges join the lock node to the water at both ends of each chamber
 (depth = the chamber's sill). The node's "lock" attribute is a locks.Lock object with the
@@ -59,6 +64,8 @@ from pyproj import Transformer
 from scipy import ndimage
 from shapely.geometry import LineString, Polygon
 
+from anchorages import Anchorage
+from coarse_graph import build_coarse
 from locks import Chamber, Lock
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -251,6 +258,13 @@ LOCKS = {
 RIVER_GAUGES = ("vlissingen", "terneuzen", "hansweert", "walsoorden", "schaarvandenoord", "rilland.bath",
                 "fortliefkenshoek", "kallosluis.schelde", "antwerpen.loodsgebouw")
 SEA_GAUGES = ("westkapelle", "cadzand.2", "vlissingen")
+# anchorages besides the chart's polygons: (name, (lon, lat), radius m). Schaar van Ouden Doel is
+# Rijkswaterstaat's location point; the other Beneden-Zeeschelde anchorages (regs §11.4: Liefkenshoek,
+# Meestoof, Oosterweel, Rede van Antwerpen) still need their positions from the notices to mariners.
+EXTRA_ANCHORAGES = (("Schaar van Ouden Doel", (4.250659, 51.350292), 400.0),)
+SEA_ANCHORAGES = ("Westhinder", "Oostdyck", "Schouwenbank")
+ZEESCHELDE_ANCHORAGES = ("Schaar van Ouden Doel",)
+ANCHORAGE_LINKS = 6
 # routing cost of passing a lock, as an equivalent distance (~45 min at 7 kn)
 LOCK_PASSAGE_PENALTY_M = 10_000.0
 # a chamber end is joined to the nearest water nodes within this distance
@@ -1054,6 +1068,66 @@ def assign_estuary_axis(graph, western, zeeschelde):
 
 
 # ---------------------------------------------------------------------------
+# anchorages
+
+
+def insert_anchorages(graph, water, anchorages):
+    """One node per anchorage (type "anchorage") holding an anchorages.Anchorage, joined by
+    "anchorage_access" edges to the cells nearest its middle; the cells stay (ships sail through
+    anchorage areas). Anchorages outside the graph get a "virtual" edge to the nearest sea cell."""
+    rows = [(r["name"], geom_to_km_utm(r.geometry), r["kind"], r.get("radius_m"), str(r.get("accuracy") or ""))
+            for _, r in anchorages.to_crs(4326).iterrows()]
+    for name, (lon, lat), radius in EXTRA_ANCHORAGES:
+        x, y = TO_UTM(lon, lat)
+        rows.append((name, shapely.Point(x, y).buffer(radius), "anchor area", radius, "approximate: single point"))
+    ids = np.array([n for n, d in graph.nodes(data=True) if d["type"] not in ("lock",) and not d.get("basin")])
+    X = np.array([graph.nodes[n]["x"] for n in ids])
+    Y = np.array([graph.nodes[n]["y"] for n in ids])
+    tree = shapely.STRtree(shapely.points(X, Y))
+    next_id = max(graph.nodes) + 1
+    graph.graph["anchorages"] = {}
+    for name, poly, kind, radius, accuracy in rows:
+        inside = tree.query(poly, predicate="contains")
+        cells = [(int(ids[i]), float(X[i]), float(Y[i]), graph.nodes[int(ids[i])]["depth_m"]) for i in inside]
+        centre = poly.representative_point()
+        off_graph = not cells
+        if off_graph:
+            depth, _ = water.chart.sample([centre.x], [centre.y])
+            cells = [(None, centre.x, centre.y, float(depth[0]) if np.isfinite(depth[0]) else 20.0)]
+        berth = kind == "anchor berth"
+        anchorage = Anchorage(name, "anchor berth" if berth else "area", float(poly.area), cells,
+                              berth_radius_m=float(radius) if berth and radius == radius else None,
+                              max_stay_h=None if name in SEA_ANCHORAGES or name in ZEESCHELDE_ANCHORAGES else 24.0,
+                              sea_anchorage=name in SEA_ANCHORAGES, approximate="approximate" in accuracy,
+                              off_graph=off_graph)
+        node = next_id
+        next_id += 1
+        lon, lat = TO_LONLAT(centre.x, centre.y)
+        if off_graph:
+            j = int(np.argmin(np.hypot(X - centre.x, Y - centre.y)))
+            links = [(int(ids[j]), "virtual")]
+        else:
+            order = np.argsort([math.hypot(x - centre.x, y - centre.y) for _, x, y, _ in cells])[:ANCHORAGE_LINKS]
+            links = [(cells[k][0], "anchorage_access") for k in order]
+        near = graph.nodes[links[0][0]]
+        graph.add_node(node, x=float(centre.x), y=float(centre.y), longitude=float(lon), latitude=float(lat),
+                       region="anchorage", zone="anchorage", type="anchorage", name=name, depth_m=anchorage.depth_m,
+                       depth_source="anchorage", drying=False, is_berth=False, berths=[], terminal=None, basin=None,
+                       tide=near.get("tide"), tide_gauge=near.get("tide_gauge"), anchorage=anchorage)
+        for n, kind_ in links:
+            d = graph.nodes[n]
+            graph.add_edge(node, n, weight=float(math.hypot(d["x"] - centre.x, d["y"] - centre.y)),
+                           depth_m=round(min(anchorage.depth_m, d["depth_m"]), 2), kind=kind_)
+        graph.graph["anchorages"][name] = node
+        log.info("anchorage %-34s %-12s %4d cells, %5.1f km2, median depth %5.1f m%s", name, anchorage.kind,
+                 0 if off_graph else len(cells), poly.area / 1e6, anchorage.depth_m, " (outside the area)" if off_graph else "")
+
+
+def geom_to_km_utm(geom):
+    return shapely.transform(geom, lambda c: np.column_stack(TO_UTM(c[:, 0], c[:, 1])))
+
+
+# ---------------------------------------------------------------------------
 # build
 
 
@@ -1114,12 +1188,14 @@ def build_graph(refresh_osm: bool = False) -> nx.Graph:
             graph.nodes[t["access_node"]]["name"] = t["name"]
     unreached = sorted(set(berths.LPL_UN) - set(berth_nodes))
     log.info("Berth polygons without a node within %.0f m: %d %s", BERTH_SNAP_M, len(unreached), unreached)
+    insert_anchorages(graph, water, anchorages)
+    coarse = build_coarse(graph)
 
     graph.graph.update({
         "crs": PROJECTED_CRS, "coordinate_crs": GEOGRAPHIC_CRS, "depth_datum": "LAT",
         "spacing_m": {"sea": [SEA_SPACING, SEA_SPACING], "river": [RIVER_ALONG, RIVER_ACROSS],
                       "canal": [RIVER_ALONG, RIVER_ACROSS], "port": [PORT_SPACING, PORT_SPACING]},
-        "nominal_depth_m": NOMINAL_DEPTH_M, "terminals": terminals, "berth_nodes": berth_nodes,
+        "nominal_depth_m": NOMINAL_DEPTH_M, "terminals": terminals, "berth_nodes": berth_nodes, "coarse": coarse,
         "sources": {"depth": str(DEPTH_RASTER.relative_to(PROJECT_ROOT)), "osm_water": list(OSM_AREAS),
                     "berths": str(SLOT_DATA.relative_to(PROJECT_ROOT)), "traffic": "data/ais via src/data/ais_pipeline.py"},
     })
@@ -1151,6 +1227,9 @@ def find_route(graph: nx.Graph, source: int, target: int, draught_m: float, ukc_
     level = water_level or (lambda n: 0.0)
 
     def weight(u, v, data):
+        for n in (u, v):
+            if nodes[n]["type"] == "anchorage" and n not in (source, target):
+                return None                                  # anchorages are destinations, not waypoints
         if nodes[u]["type"] == "lock" or nodes[v]["type"] == "lock":
             lock_node, water_node = (u, v) if nodes[u]["type"] == "lock" else (v, u)
             lock, h = nodes[lock_node]["lock"], level(water_node)
@@ -1179,7 +1258,7 @@ def save_graph(graph: nx.Graph, output: Path = DEFAULT_OUTPUT) -> Path:
 
 
 def save_web_visualization(graph: nx.Graph, output: Path = DEFAULT_HTML) -> Path:
-    regions = ["sea", "river", "canal", "port", "lock"]
+    regions = ["sea", "river", "canal", "port", "lock", "anchorage"]
     index = {n: i for i, n in enumerate(graph.nodes)}
     nodes = [[round(d["longitude"], 6), round(d["latitude"], 6), d["depth_m"], regions.index(d["region"]),
               1 if d["is_berth"] else 0] for _, d in graph.nodes(data=True)]
@@ -1209,7 +1288,7 @@ canvas{display:block;width:100%;height:100%;cursor:grab} canvas.dragging{cursor:
 </style></head><body><canvas id="map"></canvas><div id="info"></div>
 <script>
 const data=__PAYLOAD__, canvas=document.getElementById("map"), ctx=canvas.getContext("2d");
-const colors=["#3a7bd5","#35c8e8","#7bd389","#ff6b5e","#ffd400"], all=data.nodes;
+const colors=["#3a7bd5","#35c8e8","#7bd389","#ff6b5e","#ffd400","#c77dff"], all=data.nodes;
 let scale=1, ox=0, oy=0, dragging=false, px=0, py=0;
 let minLon=Infinity,maxLon=-Infinity,minLat=Infinity,maxLat=-Infinity;
 for(const n of all){minLon=Math.min(minLon,n[0]);maxLon=Math.max(maxLon,n[0]);minLat=Math.min(minLat,n[1]);maxLat=Math.max(maxLat,n[1])}
@@ -1218,7 +1297,7 @@ function base(){return Math.min(innerWidth/((maxLon-minLon)*k),innerHeight/(maxL
 function project(x,y){const b=base()*scale;return [(x-minLon)*k*b+ox,(maxLat-y)*b+oy]}
 function resize(){canvas.width=innerWidth*devicePixelRatio;canvas.height=innerHeight*devicePixelRatio;ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);draw()}
 function draw(){ctx.clearRect(0,0,innerWidth,innerHeight);
- for(let r=0;r<5;r++){ctx.strokeStyle=colors[r]+"99";ctx.lineWidth=.5;ctx.beginPath();
+ for(let r=0;r<6;r++){ctx.strokeStyle=colors[r]+"99";ctx.lineWidth=.5;ctx.beginPath();
   for(const e of data.edges){const a=all[e[0]],b=all[e[1]];if(a[3]!==r&&b[3]!==r)continue;const p=project(a[0],a[1]),q=project(b[0],b[1]);ctx.moveTo(p[0],p[1]);ctx.lineTo(q[0],q[1])}ctx.stroke()}
  if(scale>4){for(const n of all){const p=project(n[0],n[1]);ctx.fillStyle=n[4]?"#ffb347":(n[2]<0?"#e377c2":colors[n[3]]);ctx.fillRect(p[0]-1,p[1]-1,2,2)}}
  for(const ring of data.berths){ctx.strokeStyle="#ffad3d99";ctx.beginPath();ring.forEach((p,i)=>{const q=project(p[0],p[1]);i?ctx.lineTo(q[0],q[1]):ctx.moveTo(q[0],q[1])});ctx.closePath();ctx.stroke()}
