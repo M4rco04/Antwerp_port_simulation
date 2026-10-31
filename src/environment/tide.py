@@ -43,6 +43,11 @@ BASIN_LEVELS_NAP_M = {
 KNOT = 1852.0 / 3600.0
 
 
+def _ns(index):
+    """Times as int64 nanoseconds, whatever unit pandas stores them in (ns, us, ...)."""
+    return pd.DatetimeIndex(index).as_unit("ns").asi8
+
+
 def basin_key(basin):
     return "antwerp" if basin.startswith("antwerp") else basin
 
@@ -103,7 +108,7 @@ class TideModel:
         if weather is not None:
             for g in self.gauges:
                 s = self.surge(g, weather).dropna()
-                out[g] += np.interp(times.asi8, s.index.asi8, s.to_numpy())
+                out[g] += np.interp(_ns(times), _ns(s.index), s.to_numpy())
         if noise is not None:
             out += noise.reindex(times).fillna(0.0)
         return out
@@ -119,7 +124,7 @@ class TideModel:
             e[0] = rng.normal(0.0, m["error_std_cm"])
             for i in range(1, len(hours)):
                 e[i] = m["phi"] * e[i - 1] + rng.normal(0.0, m["sigma_cm"])
-            out[g] = np.interp(times.asi8, hours.asi8, e / 100.0)
+            out[g] = np.interp(_ns(times), _ns(hours), e / 100.0)
         return pd.DataFrame(out, index=times)
 
     # -- weather -----------------------------------------------------------------------------
@@ -178,14 +183,41 @@ def node_levels(graph, levels, model):
     return out
 
 
-def tidal_window(graph, path, model, departures, speed_kn, draught_m, ukc_m=0.0, weather=None):
-    """For each departure time, whether the ship (sailing the path at speed_kn) finds enough water
-    on every edge when it gets there. Returns a Series of bool indexed by departure time."""
-    departures = pd.DatetimeIndex(departures)
+def arrival_times(graph, path, departures, speed_kn, field=None):
+    """Seconds after departure at which the ship reaches each node of the path, sailing speed_kn
+    through the water; with a CurrentField (currents.py) over the period the speed over the ground
+    on each edge includes the current at the time the ship gets there. Shape (departures, nodes)."""
     xy = np.array([(graph.nodes[n]["x"], graph.nodes[n]["y"]) for n in path])
-    arrive_s = np.concatenate([[0.0], np.cumsum(np.hypot(*np.diff(xy, axis=0).T))]) / (speed_kn * KNOT)
-    span = pd.date_range(departures[0], departures[-1] + pd.Timedelta(seconds=float(arrive_s[-1])) + pd.Timedelta("10min"),
-                         freq="5min")
+    seg = np.hypot(*np.diff(xy, axis=0).T)
+    n_dep = len(departures)
+    if field is None:
+        return np.tile(np.concatenate([[0.0], np.cumsum(seg)]) / (speed_kn * KNOT), (n_dep, 1))
+    t0 = (pd.DatetimeIndex(departures).as_unit("ns").asi8 - field.times[0].value) / 1e9
+    step = (field.times[1] - field.times[0]).total_seconds()
+    along = np.array([field.along_unit(graph, u, v) for u, v in zip(path, path[1:])])        # (edges, 2): slice, cos
+    out = np.zeros((n_dep, len(path)))
+    t = np.zeros(n_dep)
+    for e in range(len(seg)):
+        j, cos = int(along[e, 0]), along[e, 1]
+        if j >= 0:
+            i = np.clip(((t0 + t) / step).round().astype(int), 0, len(field.times) - 1)
+            sog = np.maximum(speed_kn * KNOT + field.u[i, j] * cos, 0.5 * KNOT)
+        else:
+            sog = speed_kn * KNOT
+        t = t + seg[e] / sog
+        out[:, e + 1] = t
+    return out
+
+
+def tidal_window(graph, path, model, departures, speed_kn, draught_m, ukc_m=0.0, weather=None, currents=None):
+    """For each departure time, whether the ship (sailing the path at speed_kn through the water)
+    finds enough water on every edge when it gets there. With currents (a currents.CurrentModel)
+    the arrival times include the tidal current. Returns a Series of bool indexed by departure time."""
+    departures = pd.DatetimeIndex(departures)
+    rough = arrival_times(graph, path, departures[:1], speed_kn)[0, -1] * 2 + 3600       # room for a foul current
+    span = pd.date_range(departures[0], departures[-1] + pd.Timedelta(seconds=float(rough)), freq="5min")
+    field = currents.compute(span, weather) if currents is not None else None
+    arrive = arrival_times(graph, path, departures, speed_kn, field)
     levels = model.levels(span, weather)
     L = levels.to_numpy()
     col = {g: i for i, g in enumerate(levels.columns)}
@@ -204,7 +236,7 @@ def tidal_window(graph, path, model, departures, speed_kn, draught_m, ukc_m=0.0,
     w = np.nan_to_num(w)
     depth = np.array([graph.edges[u, v]["depth_m"] for u, v in zip(path, path[1:])])
     step = (span[1] - span[0]).total_seconds()
-    rows = np.clip(((departures - span[0]).total_seconds().to_numpy()[:, None] + arrive_s[None, :]) / step, 0,
+    rows = np.clip(((departures - span[0]).total_seconds().to_numpy()[:, None] + arrive) / step, 0,
                    len(span) - 1).round().astype(int)                  # (departures, path nodes)
     level = np.where(tidal, (1.0 - w) * L[rows, ia] + w * L[rows, ib], const)
     ok = np.all(depth[None, :] + np.minimum(level[:, :-1], level[:, 1:]) >= draught_m + ukc_m, axis=1)

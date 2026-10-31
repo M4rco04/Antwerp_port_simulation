@@ -18,7 +18,9 @@ Every node has x, y (UTM 31N, m), longitude, latitude, region, zone, depth_m (m 
 negative on drying banks), depth_source ("chart_LAT" or "nominal"), drying, is_berth,
 berths (the slots_cords berth ids it serves) and terminal; graph.graph["berth_nodes"] maps a
 berth id to its nodes. For the tide (tide.py): "tide" = (gauge_a, gauge_b, weight_b) on tidal
-nodes, "basin" = the basin behind locks otherwise, and "tide_gauge" = the nearest gauge.
+nodes, "basin" = the basin behind locks otherwise, and "tide_gauge" = the nearest gauge. For the
+currents (currents.py): tidal river/port nodes get "chainage_m" (along the estuary axis from the
+mouth) and "flow_dir" (unit vector pointing upstream, i.e. the flood direction).
 
 Every lock is ONE node (type "lock", region "lock"): the grid cells inside its chambers are
 removed, and "lock_gate" edges join the lock node to the water at both ends of each chamber
@@ -1031,6 +1033,26 @@ def assign_tide(graph):
     log.info("Tide gauges assigned; lock sills converted from TAW to LAT")
 
 
+def assign_estuary_axis(graph, western, zeeschelde):
+    """One axis from the mouth to Antwerp: the Western Scheldt centreline up to where the Zeeschelde
+    centreline starts, then the Zeeschelde one. Tidal river and port nodes get their distance along
+    it (chainage_m) and the local upstream direction (flow_dir)."""
+    start = shapely.Point(zeeschelde.coords[0])
+    cut = western.project(start)
+    coords = list(shapely.ops.substring(western, 0.0, cut).coords) + list(zeeschelde.coords)
+    axis = LineString(coords)
+    nodes = [n for n, d in graph.nodes(data=True)
+             if d["region"] in ("river", "port") and d.get("tide") is not None]
+    pts = shapely.points([graph.nodes[n]["x"] for n in nodes], [graph.nodes[n]["y"] for n in nodes])
+    s = shapely.line_locate_point(axis, pts)
+    t = _tangents(axis, s, h=200.0)
+    for n, si, (tx, ty) in zip(nodes, s, t):
+        graph.nodes[n]["chainage_m"] = round(float(si), 1)
+        graph.nodes[n]["flow_dir"] = (round(float(tx), 4), round(float(ty), 4))
+    graph.graph["estuary_axis"] = [(round(x, 1), round(y, 1)) for x, y in axis.coords]
+    log.info("Estuary axis %.1f km; %d nodes given a chainage", axis.length / 1000, len(nodes))
+
+
 # ---------------------------------------------------------------------------
 # build
 
@@ -1042,8 +1064,10 @@ def build_graph(refresh_osm: bool = False) -> nx.Graph:
     traffic = scheldt_traffic()
     builder = Builder(water, area)
 
+    lines = {}
     for name, spec in CHANNELS.items():
-        channel_grid(builder, name, spec, fit_centreline(spec, traffic, water))
+        lines[name] = fit_centreline(spec, traffic, water)
+        channel_grid(builder, name, spec, lines[name])
     berths = load_berths()
     dock_zones = antwerp_dock_zones(berths)
     for name, bounds in PORTS.items():
@@ -1076,6 +1100,7 @@ def build_graph(refresh_osm: bool = False) -> nx.Graph:
     graph = nx.convert_node_labels_to_integers(graph.subgraph(largest).copy())
     refresh_locks(graph)
     assign_tide(graph)
+    assign_estuary_axis(graph, lines["western_scheldt"], lines["zeeschelde"])
     log.info("Kept the largest connected part: %d nodes (%d isolated nodes dropped)", graph.number_of_nodes(), dropped)
 
     ids = np.array([n for n, d in graph.nodes(data=True) if d["type"] != "lock"])

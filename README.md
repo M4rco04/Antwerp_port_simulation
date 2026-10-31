@@ -149,3 +149,22 @@ ok = tidal_window(G, path, model, departures, speed_kn=12, draught_m=15.5, ukc_m
 
 Tidal graph nodes interpolate between the two gauges either side of them (`tide` attribute);
 basins behind locks keep a fixed level (`basin`, `tide.BASIN_LEVELS_NAP_M`).
+
+### Tidal currents
+
+`src/environment/currents.py` derives the along-river current from the tide by continuity: the flow
+through a cross-section is the water needed to raise or lower everything upstream (wet surface x
+dh/dt, from the graph's cells and the tide model), divided by the wet cross-section. It is
+calibrated on AIS (`fit_currents.py`: within each passage, speed over the ground vs the modelled
+current) to `data/tides/current_calibration.json`.
+
+```
+py src/environment/fit_currents.py --plot currents.png      # needs the graph and tide_model.pkl
+```
+
+```python
+from currents import CurrentModel
+field = CurrentModel(G, model).compute(times, weather)          # m/s per 500 m slice, + = flood
+field.speed_over_ground(G, u, v, i_time, stw_kn=12)            # kn over the ground on edge u -> v
+ok = tidal_window(G, path, model, departures, 12, 15.5, 1.55, currents=CurrentModel(G, model))
+```
