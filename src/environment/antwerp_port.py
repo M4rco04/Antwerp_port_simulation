@@ -17,7 +17,8 @@ has no data). Only the largest connected part is kept.
 Every node has x, y (UTM 31N, m), longitude, latitude, region, zone, depth_m (m below LAT,
 negative on drying banks), depth_source ("chart_LAT" or "nominal"), drying, is_berth,
 berths (the slots_cords berth ids it serves) and terminal; graph.graph["berth_nodes"] maps a
-berth id to its nodes.
+berth id to its nodes. For the tide (tide.py): "tide" = (gauge_a, gauge_b, weight_b) on tidal
+nodes, "basin" = the basin behind locks otherwise, and "tide_gauge" = the nearest gauge.
 
 Every lock is ONE node (type "lock", region "lock"): the grid cells inside its chambers are
 removed, and "lock_gate" edges join the lock node to the water at both ends of each chamber
@@ -244,6 +245,10 @@ LOCKS = {
     "Vlissingen (Kanaal door Walcheren)": {"chambers": [("Walcheren canal lock", 491657969, None, 24, 6.0, "nominal"),
                                                          ("Walcheren canal small lock", 491657979, None, 10, 3.0, "nominal")]},
 }
+# tide gauges (fetch_tide_data.py): along the estuary, and at sea
+RIVER_GAUGES = ("vlissingen", "terneuzen", "hansweert", "walsoorden", "schaarvandenoord", "rilland.bath",
+                "fortliefkenshoek", "kallosluis.schelde", "antwerpen.loodsgebouw")
+SEA_GAUGES = ("westkapelle", "cadzand.2", "vlissingen")
 # routing cost of passing a lock, as an equivalent distance (~45 min at 7 kn)
 LOCK_PASSAGE_PENALTY_M = 10_000.0
 # a chamber end is joined to the nearest water nodes within this distance
@@ -926,12 +931,14 @@ def label_basins(graph):
         tidal = any(graph.nodes[n]["region"] == "sea" for n in basin)
         if tidal:
             tidal_water |= basin
+        docks = collections.Counter(graph.nodes[n]["zone"] for n in basin if graph.nodes[n]["zone"] not in tidal_zones)
+        for n in basin:
+            graph.nodes[n]["basin"] = None if tidal else (docks.most_common(1)[0][0] if docks else graph.nodes[n]["zone"])
         if tidal:
             wrong = [n for n in basin if graph.nodes[n]["zone"] not in tidal_zones and graph.nodes[n]["region"] == "port"
                      and graph.nodes[n]["zone"].startswith("antwerp_")]
             new = river_zones(np.array([graph.nodes[n]["x"] for n in wrong]), np.array([graph.nodes[n]["y"] for n in wrong])) if wrong else []
         else:
-            docks = collections.Counter(graph.nodes[n]["zone"] for n in basin if graph.nodes[n]["zone"] not in tidal_zones)
             if not docks:
                 continue
             wrong = [n for n in basin if graph.nodes[n]["zone"] in tidal_zones]
@@ -971,6 +978,57 @@ def refresh_locks(graph):
                 "nodes": nodes,
             }
         graph.graph["locks"][lock.name] = node
+
+
+# ---------------------------------------------------------------------------
+# tide
+
+
+def assign_tide(graph):
+    """Give every tidal node the two gauges its water level is interpolated from, and every node
+    its nearest gauge; turn the lock sills given below TAW into depths below LAT (tide.py)."""
+    from fetch_tide_data import GAUGES
+    import tide
+
+    xy = {g: np.array(TO_UTM(lon, lat)) for g, (_, lon, lat) in GAUGES.items()}
+    names = list(GAUGES)
+    G = np.array([xy[g] for g in names])
+    chain = [g for g in RIVER_GAUGES if g in xy]
+    line = LineString([xy[g] for g in chain])
+    marks = np.array([line.project(shapely.Point(*xy[g])) for g in chain])
+    sea = [g for g in SEA_GAUGES if g in xy]
+    for n, d in graph.nodes(data=True):
+        p = np.array([d["x"], d["y"]])
+        d["tide_gauge"] = names[int(np.argmin(np.hypot(*(G - p).T)))]
+        if d["type"] == "lock" or d.get("basin"):
+            d["tide"] = None
+            continue
+        if d["region"] == "sea":
+            dist = sorted((math.hypot(*(xy[g] - p)), g) for g in sea)[:2]
+            (da, a), (db, b) = dist
+            d["tide"] = (a, b, round(da / (da + db), 3))
+            continue
+        s = line.project(shapely.Point(*p))
+        i = int(np.clip(np.searchsorted(marks, s) - 1, 0, len(chain) - 2))
+        w = float(np.clip((s - marks[i]) / (marks[i + 1] - marks[i]), 0.0, 1.0))
+        d["tide"] = (chain[i], chain[i + 1], round(w, 3))
+    if not tide.MODEL_FILE.is_file():
+        log.warning("No tide model (%s): lock sills stay below TAW; run fit_tide.py and rebuild", tide.MODEL_FILE)
+        return
+    model = tide.TideModel.load()
+    for node, d in graph.nodes(data=True):
+        if d["type"] != "lock":
+            continue
+        for chamber in d["lock"].chambers:
+            if chamber.sill_datum == "TAW":
+                chamber.sill_depth_m = round(model.taw_to_lat_depth(chamber.sill_depth_m, d["tide_gauge"]), 2)
+                chamber.sill_datum = "LAT (from TAW)"
+        sill = {c.name: c.sill_depth_m for c in d["lock"].chambers}
+        for v in graph[node]:
+            graph.edges[node, v]["depth_m"] = sill[graph.edges[node, v]["chamber"]]
+        d["depth_m"] = d["lock"].max_sill_depth_m
+    graph.graph["tide"] = {"model": str(tide.MODEL_FILE.relative_to(PROJECT_ROOT)), "river_gauges": chain, "sea_gauges": sea}
+    log.info("Tide gauges assigned; lock sills converted from TAW to LAT")
 
 
 # ---------------------------------------------------------------------------
@@ -1017,6 +1075,7 @@ def build_graph(refresh_osm: bool = False) -> nx.Graph:
     dropped = graph.number_of_nodes() - len(largest)
     graph = nx.convert_node_labels_to_integers(graph.subgraph(largest).copy())
     refresh_locks(graph)
+    assign_tide(graph)
     log.info("Kept the largest connected part: %d nodes (%d isolated nodes dropped)", graph.number_of_nodes(), dropped)
 
     ids = np.array([n for n, d in graph.nodes(data=True) if d["type"] != "lock"])
@@ -1054,23 +1113,27 @@ def nearest_node(graph: nx.Graph, longitude: float, latitude: float, min_depth_m
 
 
 def find_route(graph: nx.Graph, source: int, target: int, draught_m: float, ukc_m: float = 0.0,
-               loa_m: float = 0.0, beam_m: float = 0.0, lock_penalty_m: float = LOCK_PASSAGE_PENALTY_M) -> list[int]:
+               loa_m: float = 0.0, beam_m: float = 0.0, lock_penalty_m: float = LOCK_PASSAGE_PENALTY_M,
+               water_level=None) -> list[int]:
     """Shortest path (A*, straight-line heuristic) that never uses an edge shallower than
     draught_m + ukc_m, nor a lock with no chamber the ship (loa_m x beam_m) fits. Every lock
     passage costs lock_penalty_m extra, standing in for the time a lockage takes. Depths are
-    below LAT: add the tide height to the edges' depth_m for tidal routing. Raises
+    below LAT; water_level(node) -> m above LAT (e.g. from tide.node_level) adds the water level,
+    else LAT is assumed. For timing along the route use tide.tidal_window. Raises
     networkx.NetworkXNoPath if no route exists."""
     need = draught_m + ukc_m
     nodes = graph.nodes
+    level = water_level or (lambda n: 0.0)
 
     def weight(u, v, data):
-        if data["depth_m"] < need:
-            return None
-        if data["kind"] == "lock_gate":
-            lock = nodes[u if nodes[u]["type"] == "lock" else v]["lock"]
-            if not any(c.fits_size(loa_m, beam_m) and need <= c.sill_depth_m for c in lock.chambers):
+        if nodes[u]["type"] == "lock" or nodes[v]["type"] == "lock":
+            lock_node, water_node = (u, v) if nodes[u]["type"] == "lock" else (v, u)
+            lock, h = nodes[lock_node]["lock"], level(water_node)
+            if not any(c.fits_size(loa_m, beam_m) and need <= c.sill_depth_m + h for c in lock.chambers):
                 return None
             return data["weight"] + lock_penalty_m / 2      # in and out: two gate edges
+        if data["depth_m"] + min(level(u), level(v)) < need:
+            return None
         return data["weight"]
 
     def heuristic(u, v):

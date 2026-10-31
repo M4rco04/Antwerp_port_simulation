@@ -123,3 +123,29 @@ lock = G.nodes[G.graph["locks"]["Berendrecht"]]["lock"]
 lock.request(ShipRequest("MSC X", loa=366, beam=51, draught=14.0, from_side="b", container=True), now=0)
 events = lock.step(now=0, dt=5, levels={"a": 4.3, "b": 4.5})   # water levels above datum, m
 ```
+
+### Tides and wind surge
+
+```
+py src/environment/fetch_tide_data.py   # 2 years of 10-min water levels (Rijkswaterstaat, 11 gauges
+                                        # Westkapelle -> Antwerpen) + hourly KNMI wind/pressure (Vlissingen)
+py src/environment/fit_tide.py          # -> data/tides/tide_model.pkl (~15 min)
+py src/environment/antwerp_port.py --no-browser   # rebuild: tide gauges on the nodes, lock sills to LAT
+```
+
+`fit_tide.py` fits per gauge a harmonic tide (UTide, ~68 constituents incl. the shallow-water
+overtides), the gauge's LAT (lowest of 19 years of predicted tide, so tide heights and chart depths
+share a datum), and a surge model (water level minus tide explained by 48 h of wind stress and
+air pressure, rest as AR(1) noise); plus an hourly wind Markov chain (Beaufort class x 8 directions)
+to drive the surge in the simulation. `src/environment/tide.py` gives levels in m above LAT:
+
+```python
+from tide import TideModel, node_level, tidal_window
+model = TideModel.load()
+levels = model.levels(times, weather)            # per gauge: tide + surge (weather: hourly, or None)
+weather = model.sample_weather("2026-11-01", 24 * 14, rng)
+ok = tidal_window(G, path, model, departures, speed_kn=12, draught_m=15.5, ukc_m=1.55)
+```
+
+Tidal graph nodes interpolate between the two gauges either side of them (`tide` attribute);
+basins behind locks keep a fixed level (`basin`, `tide.BASIN_LEVELS_NAP_M`).

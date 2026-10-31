@@ -6,3 +6,6 @@ websockets
 numpy
 pandas
 geopandas
+rasterio
+scipy
+utide
