@@ -45,6 +45,9 @@ class LockTimes:
     level_min_per_m: float = 3.0      # ... plus this per metre of level difference
     entry_min: float = 12.0           # one ship entering and making fast
     exit_min: float = 8.0             # one ship leaving
+    small_loa_m: float = 135.0        # ships up to this long (inland craft) enter and leave faster:
+    small_entry_min: float = 4.0
+    small_exit_min: float = 3.0
     free_passage_min: float = 10.0    # one ship passing an open tidal gate
     gap_long_m: float = 10.0          # clearance between ships in a chamber, lengthwise
     gap_side_m: float = 2.0           # ... and side by side
@@ -153,10 +156,14 @@ class Lock:
 
     # -- requests ---------------------------------------------------------------------------
 
-    def request(self, ship: ShipRequest, now: float) -> Chamber:
+    def request(self, ship: ShipRequest, now: float, level_m: float | None = None) -> Chamber:
         """Queue a ship (turn number in order of request) at the chamber that suits it best:
-        big enough, fewest waiting on its side, preferably already at its level."""
+        big enough (and deep enough at level_m, the higher side level, when given), fewest
+        waiting on its side, preferably already at its level."""
         options = [c for c in self.chambers if c.fits_size(ship.loa, ship.beam)]
+        if level_m is not None:
+            deep = [c for c in options if ship.draught + self.ukc_m <= c.sill_depth_m + level_m]
+            options = deep or sorted(options, key=lambda c: -c.sill_depth_m)[:1]
         if not options:
             raise ValueError(f"{ship.ship_id} ({ship.loa} x {ship.beam} m) fits no chamber of {self.name}")
         ship.turn, ship.requested_at = self.next_turn, now
@@ -210,7 +217,8 @@ class Lock:
         if c.state == "open":
             leaving = [p for p in c.ships if p.ship.from_side != here]
             if leaving:
-                c.task, c.timer_min = ("exit", leaving[0]), self.times.exit_min
+                small = leaving[0].ship.loa <= self.times.small_loa_m
+                c.task, c.timer_min = ("exit", leaving[0]), self.times.small_exit_min if small else self.times.exit_min
                 return True
             if self.lock_type == "A" and abs(levels.get("a", 0.0) - levels.get("b", 0.0)) < self.tidal_gate_eps_m:
                 for side in (here, there):
@@ -221,7 +229,8 @@ class Lock:
             ship = self._next_to_enter(c, t, levels, events)
             if ship is not None:
                 c.queue[here].remove(ship)
-                c.task, c.timer_min = ("enter", ship), self.times.entry_min
+                small = ship.loa <= self.times.small_loa_m
+                c.task, c.timer_min = ("enter", ship), self.times.small_entry_min if small else self.times.entry_min
                 return True
             if c.ships or c.queue[there]:
                 c.state, c.task, c.timer_min = "closing", None, self.times.gate_min

@@ -98,9 +98,28 @@ class Terminal:
             out.append((a, self.quay_length_m))
         return out
 
-    def find_position(self, loa, near_s=None):
-        """Quay metre where a ship of this length can lie (first fit, or the fit nearest near_s)."""
-        fits = [(a, b) for a, b in self.free_intervals() if b - a >= loa]
+    def suitable_intervals(self, draught=None, sea_going=True):
+        """Stretches of quay whose berth slots take this ship: sea-going slots (harbour master's
+        category) allowing its draught; slots without data count as suitable."""
+        spans = sorted((r["s0"], r["s1"]) for r in self.berths.values()
+                       if (draught is None or r.get("max_draught") is None or r["max_draught"] >= draught)
+                       and (not sea_going or r.get("category") in (None, "zeevaart")))
+        out = []
+        for a, b in spans:
+            if out and a <= out[-1][1] + 1.0:
+                out[-1] = (out[-1][0], max(out[-1][1], b))
+            else:
+                out.append((a, b))
+        return out
+
+    def find_position(self, loa, near_s=None, draught=None, sea_going=True):
+        """Quay metre where a ship of this length can lie (first fit, or the fit nearest near_s):
+        free quay that is also suitable for its draught and kind (suitable_intervals)."""
+        free = self.free_intervals()
+        if draught is not None or sea_going:
+            ok = self.suitable_intervals(draught, sea_going)
+            free = [(max(a, c), min(b, d)) for a, b in free for c, d in ok if min(b, d) > max(a, c)]
+        fits = [(a, b) for a, b in free if b - a >= loa]
         if not fits:
             return None
         if near_s is None:
@@ -216,6 +235,24 @@ def quay_edge(poly, water_tree, probe_m=60.0, radius_m=40.0):
     return (best[1], best[2]), length, width
 
 
+HARBOUR_MASTER_FIELDS = ("max_draught_m", "sounded_depth_taw_m", "design_depth_taw_m", "min_ukc_m", "max_loa_m",
+                         "max_beam_m", "max_moored_width_m", "max_moored_length_m", "mooring_side", "swing_min",
+                         "berth_length_m", "category", "quay_type", "berth_type")
+
+
+def _value(v):
+    if v is None or (isinstance(v, float) and v != v):
+        return None
+    return v.item() if hasattr(v, "item") else v
+
+
+def _int(v):
+    try:
+        return int(float(v))
+    except (TypeError, ValueError):
+        return None
+
+
 def build_berth_catalogue(graph, berths, berth_nodes, zone_of, use=None):
     """graph.graph["berths"]: every charted berth slot (see the module docstring).
     berths: GeoDataFrame in the graph CRS with LPL_UN, LPL, TYPE, TERMINAL, HOEK, number;
@@ -236,22 +273,29 @@ def build_berth_catalogue(graph, berths, berth_nodes, zone_of, use=None):
         basins = {graph.nodes[n].get("basin") for n in nodes}
         lon, lat = to_lonlat(row.geometry.centroid.x, row.geometry.centroid.y)
         u = use.get(row.LPL_UN)
+        hm = {k: _value(getattr(row, k, None)) for k in HARBOUR_MASTER_FIELDS}
+        quay, kind = hm["quay_type"], hm["berth_type"] or ""
+        official_tanker = None if quay is None and not kind else (quay == "Tanker" or "Tank" in kind or "Gas" in kind)
         out[row.LPL_UN] = {
             "lpl": row.LPL, "number": None if row.number != row.number else int(row.number),
-            "type_code": None if row.TYPE != row.TYPE else int(row.TYPE),
+            "type_code": _int(row.TYPE),
             "size_class": "seagoing" if width >= 40 else "inland" if width >= 20 else "small_craft",
-            "length_m": round(length, 1), "width_m": round(width, 1), "heading_deg": float(row.HOEK),
+            "length_m": round(length, 1), "width_m": round(width, 1), "heading_deg": float(row.HOEK) if _value(row.HOEK) is not None else None,
             "terminal_code": row.TERMINAL if isinstance(row.TERMINAL, str) else None,
             "zone": zone_of(row.number), "longitude": round(float(lon), 6), "latitude": round(float(lat), 6),
             "quay_edge": [(round(float(p[0]), 1), round(float(p[1]), 1)), (round(float(q[0]), 1), round(float(q[1]), 1))],
             "nodes": nodes, "depth_m": round(float(np.median(depths)), 2) if depths else None,
             "tidal": None if not nodes else basins == {None}, "basin": next(iter(basins - {None}), None),
             "calls": u["calls"] if u else {}, "max_loa_seen_m": u["max_loa_m"] if u else None,
-            "tanker_berth": u["tanker_berth"] if u else None,
+            # the harbour master's data (None where it gives none)
+            **hm, "tanker_official": official_tanker,
+            "tanker_berth": official_tanker if official_tanker is not None else (u["tanker_berth"] if u else None),
         }
     graph.graph["berths"] = out
-    log.info("berth catalogue: %d berths (%d with nodes, %d tanker berths from AIS)", len(out),
-             sum(bool(b["nodes"]) for b in out.values()), sum(bool(b["tanker_berth"]) for b in out.values()))
+    log.info("berth catalogue: %d berths (%d with nodes, %d with an allowed draught, %d tanker berths: %d official)",
+             len(out), sum(bool(b["nodes"]) for b in out.values()),
+             sum(b["max_draught_m"] is not None for b in out.values()), sum(bool(b["tanker_berth"]) for b in out.values()),
+             sum(bool(b["tanker_official"]) for b in out.values()))
     return out
 
 
@@ -284,7 +328,8 @@ def build_terminals(graph, specs=TERMINAL_SPECS):
         berths = {}
         for b in ids:
             s = sorted(line.project(shapely.Point(pt)) for pt in catalogue[b]["quay_edge"])
-            berths[b] = {"s0": round(s[0], 1), "s1": round(s[1], 1), "nodes": catalogue[b]["nodes"]}
+            berths[b] = {"s0": round(s[0], 1), "s1": round(s[1], 1), "nodes": catalogue[b]["nodes"],
+                         "max_draught": catalogue[b].get("max_draught_m"), "category": catalogue[b].get("category")}
         term = Terminal(t["name"], t["code"], [(round(x, 1), round(y, 1)) for x, y in line.coords], round(line.length, 1),
                         t["quay_m"], t["draft_m"], spec.get("sts", 0), spec.get("moves_per_crane_h", 37.0),
                         spec.get("max_cranes_per_ship"), spec.get("head_out_over_m"), spec.get("tide_windows", []), berths)

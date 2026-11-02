@@ -37,6 +37,7 @@ EDGE_KINDS = ("sea", "river", "canal", "port", "link", "lock_gate", "anchorage_a
 NODE_FIELDS_FLOAT = ("x", "y", "longitude", "latitude", "depth_m", "chainage_m", "lane_offset_m", "speed_limit_kn")
 NODE_FIELDS_CODE = ("region", "zone", "type", "basin", "speed_zone")
 LOCK_PENALTY_M = 10_000.0
+KEEP_RIGHT_PENALTY = 0.3
 
 
 def _codes(values):
@@ -99,7 +100,7 @@ class FastGraph:
         return fg
 
     def save(self, path):
-        arrays = {k: v for k, v in self.__dict__.items() if isinstance(v, np.ndarray)}
+        arrays = {k: v for k, v in self.__dict__.items() if isinstance(v, np.ndarray) and not k.startswith("_")}
         np.savez_compressed(path, **arrays, labels=np.array([repr(self.labels)]))
 
     @classmethod
@@ -170,44 +171,96 @@ class FastGraph:
             out[int(i)] = max(sills) if sills else -np.inf
         return out
 
-    def passable_entries(self, level, need, loa_m=0.0, beam_m=0.0, ends=()):
-        """Bool mask over the CSR entries a ship may sail along."""
-        rows, cols = self.entry_rows, self.indices
-        depth = self.edge_depth[self.entry_edge]
-        ok = depth + np.minimum(level[rows], level[cols]) >= need
-        is_lock = self.mask("type", "lock")
-        lock_entry = is_lock[rows] | is_lock[cols]
+    def _static(self):
+        if getattr(self, "_st", None) is None:
+            is_lock, anch = self.mask("type", "lock"), self.mask("type", "anchorage")
+            rows, cols = self.entry_rows, self.indices
+            self._st = {"is_lock": is_lock, "anch": anch, "depth": self.edge_depth[self.entry_edge],
+                        "weight": self.edge_weight[self.entry_edge],
+                        "lock_entry": is_lock[rows] | is_lock[cols], "anch_entry": anch[rows] | anch[cols]}
+        return self._st
+
+    def passable_entries(self, level, need, loa_m=0.0, beam_m=0.0, ends=(), entries=None):
+        """Bool mask over the CSR entries a ship may sail along (over entries, an index array of
+        CSR entries, when given)."""
+        st = self._static()
+        e = np.arange(len(self.indices)) if entries is None else entries
+        rows, cols = self.entry_rows[e], self.indices[e]
+        ok = st["depth"][e] + np.minimum(level[rows], level[cols]) >= need
+        lock_entry = st["lock_entry"][e]
         if lock_entry.any():
+            is_lock = st["is_lock"]
             sill = self.lock_sill(loa_m, beam_m)
             k = np.flatnonzero(lock_entry)
             lock_i = np.where(is_lock[rows[k]], rows[k], cols[k])
             water_i = np.where(is_lock[rows[k]], cols[k], rows[k])
             ok[k] = np.array([sill[int(l)] for l in lock_i]) + level[water_i] >= need
-        anch = self.mask("type", "anchorage")
-        if anch.any():
-            ends = np.zeros(self.n, dtype=bool) if not len(ends) else np.isin(np.arange(self.n), list(ends))
-            blocked = anch & ~ends
-            ok &= ~(blocked[rows] | blocked[cols])
+        anch_entry = st["anch_entry"][e]
+        if anch_entry.any():
+            k = np.flatnonzero(anch_entry)
+            ends = set(int(x) for x in ends)
+            ok[k] &= np.array([(not st["anch"][r] or r in ends) and (not st["anch"][c] or c in ends)
+                               for r, c in zip(rows[k], cols[k])])
         return ok
 
+    def keep_right_factor(self, penalty=KEEP_RIGHT_PENALTY, margin_m=25.0):
+        """Per CSR entry: 1 + penalty where the move u -> v ends on the wrong side of the axis for
+        its direction (upstream on the left bank / downstream on the right bank), else 1. Moves
+        across the axis and cells without an axis (sea, docks, canals) are neutral."""
+        if getattr(self, "_keep_right", None) is None:
+            rows, cols = self.entry_rows, self.indices
+            dx, dy = self.x[cols] - self.x[rows], self.y[cols] - self.y[rows]
+            n = np.maximum(np.hypot(dx, dy), 1e-9)
+            cos = (dx * self.flow_dir[rows, 0] + dy * self.flow_dir[rows, 1]) / n
+            off = self.lane_offset_m[cols]
+            with np.errstate(invalid="ignore"):
+                wrong = ((cos > 0.3) & (off < -margin_m)) | ((cos < -0.3) & (off > margin_m))
+            self._keep_right = np.where(wrong, 1.0 + penalty, 1.0)
+        return self._keep_right
+
+    def reachable(self, source, draught_m, ukc_m=0.0, loa_m=0.0, beam_m=0.0, level=None):
+        """Bool per node: can a ship of this size get there from source (one Dijkstra for all
+        nodes; anchorages are not passed through)."""
+        s = self.index[int(source)]
+        level = np.zeros(self.n) if level is None else level
+        e = np.arange(len(self.indices))
+        ok = self.passable_entries(level, draught_m + ukc_m, loa_m, beam_m, ends=(s,), entries=e)
+        e = e[ok]
+        M = sparse.csr_matrix((self._static()["weight"][e], (self.entry_rows[e], self.indices[e])), shape=(self.n, self.n))
+        dist = dijkstra(M, directed=True, indices=s)
+        out = np.isfinite(dist)
+        anch = self._static()["anch"]
+        if anch.any():                          # an anchorage is reachable when a cell next to it is
+            for a in np.flatnonzero(anch):
+                out[a] = out[self.neighbours(a)].any()
+        return out
+
     def route(self, source, target, draught_m, ukc_m=0.0, loa_m=0.0, beam_m=0.0, level=None, nodes_mask=None,
-              lock_penalty_m=LOCK_PENALTY_M):
+              lock_penalty_m=LOCK_PENALTY_M, keep_right=False, min_clearance=None):
         """Shortest allowed path between two graph node ids (list of node ids); raises
-        networkx.NetworkXNoPath like find_route."""
+        networkx.NetworkXNoPath like find_route. keep_right: prefer the starboard half of the
+        river (regs §5.1), see keep_right_factor. min_clearance: only cells with at least this
+        much water to either side (self.clearance, see clearance.py), for wide ships."""
         import networkx as nx
 
         s, t = self.index[int(source)], self.index[int(target)]
         level = np.zeros(self.n) if level is None else level
-        ok = self.passable_entries(level, draught_m + ukc_m, loa_m, beam_m, ends=(s, t))
-        rows, cols = self.entry_rows, self.indices
+        st = self._static()
+        if min_clearance is not None and getattr(self, "clearance", None) is not None:
+            wide = self.clearance >= min_clearance
+            nodes_mask = wide if nodes_mask is None else (nodes_mask & wide)
         if nodes_mask is not None:
             keep = nodes_mask.copy()
             keep[[s, t]] = True
-            ok &= keep[rows] & keep[cols]
-        w = self.edge_weight[self.entry_edge].copy()
-        is_lock = self.mask("type", "lock")
-        w[is_lock[rows] | is_lock[cols]] += lock_penalty_m / 2
-        M = sparse.csr_matrix((w[ok], (rows[ok], cols[ok])), shape=(self.n, self.n))
+            entries = np.flatnonzero(keep[self.entry_rows] & keep[self.indices])
+        else:
+            entries = np.arange(len(self.indices))
+        ok = self.passable_entries(level, draught_m + ukc_m, loa_m, beam_m, ends=(s, t), entries=entries)
+        e = entries[ok]
+        w = st["weight"][e] + np.where(st["lock_entry"][e], lock_penalty_m / 2, 0.0)
+        if keep_right:
+            w = w * self.keep_right_factor()[e]
+        M = sparse.csr_matrix((w, (self.entry_rows[e], self.indices[e])), shape=(self.n, self.n))
         dist, pred = dijkstra(M, directed=True, indices=s, return_predecessors=True)
         if not np.isfinite(dist[t]):
             raise nx.NetworkXNoPath(f"Node {target} not reachable from {source}")

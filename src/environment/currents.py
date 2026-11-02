@@ -4,15 +4,18 @@ The water that flows through a cross-section of the estuary is the water needed 
 or lower (ebb) everything upstream of it:
 
     Q(s, t) = sum over slices upstream of s of  wet surface(h) * dh/dt
-              + upstream_storage_m2 * dh/dt at the head   (Upper Sea Scheldt, Rupel: beyond the graph)
+              + upstream_storage_m2 * dh/dt at the head, upstream_lag_min earlier
+                                                  (Upper Sea Scheldt, Rupel: beyond the graph, where
+                                                  the tide arrives later than at the head)
               - river_discharge_m3s
     u(s, t) = scale(reach) * Q / A(s, h)                  (m/s, positive = flood = upstream)
 
 The estuary is cut into SLICE_M slices along the axis the graph builder stores (node attribute
 "chainage_m"). The wet surface and the cross-section A of a slice at a water level h come from
 the graph's own cells (depth below LAT + h > 0), and h from the tide model (tide.py). scale and
-the upstream storage are calibrated on AIS speeds over ground by fit_currents.py
-(data/tides/current_calibration.json).
+the upstream storage are calibrated by fit_currents.py on AIS speeds over ground (Western Scheldt)
+and by fit_currents_atlas.py on the Flemish current atlas (Zeeschelde: scale, storage and its lag),
+both into data/tides/current_calibration.json.
 
     field = CurrentModel(graph, tide_model).compute(times, weather=None)
     field.at(chainage_m, i_time)                    current (m/s, + = flood) at a chainage
@@ -43,10 +46,21 @@ CELL_AREA_M2 = {"river": 200.0 * 50.0, "canal": 200.0 * 50.0, "port": 50.0 * 50.
 # of river ~250 m wide plus tributaries. A rough estimate: AIS cannot pin it down (see fit_currents.py).
 UPSTREAM_STORAGE_M2 = 15e6
 DEFAULTS = {"scale": {"western_scheldt": 1.0, "zeeschelde": 1.0}, "upstream_storage_m2": UPSTREAM_STORAGE_M2,
-            "river_discharge_m3s": 120.0}
+            "river_discharge_m3s": 120.0, "upstream_lag_min": 0.0}
 # the calibration scale changes here (about the Dutch-Belgian border)
 REACH_SPLIT_LON = 4.2
 KNOT = 1852.0 / 3600.0
+
+
+def scale_profile(km, cal, ws=None):
+    """The scale at chainages km (array). With cal["scale_profile"] (knots km -> scale, piecewise
+    linear; the value "western_scheldt" stands for that reach's AIS scale, or for ws when given) the
+    scale follows the knots; otherwise None (one scale per reach)."""
+    prof = cal.get("scale_profile")
+    if prof is None or not isinstance(cal["scale"], dict):
+        return None
+    w = cal["scale"]["western_scheldt"] if ws is None else ws
+    return np.interp(km, prof["km"], [w if v == "western_scheldt" else v for v in prof["scale"]])
 
 
 def load_calibration():
@@ -90,6 +104,7 @@ class CurrentModel:
         mid = shapely.get_coordinates(shapely.line_interpolate_point(axis, (np.arange(self.n_slices) + 0.5) * slice_m))
         lon, _ = Transformer.from_crs("EPSG:32631", "EPSG:4326", always_xy=True).transform(mid[:, 0], mid[:, 1])
         self.reach = np.where(lon < REACH_SPLIT_LON, "western_scheldt", "zeeschelde")
+        self.slice_km = (np.arange(self.n_slices) + 0.5) * slice_m / 1000
         empty = self.weights.sum(axis=1) == 0                 # a slice without cells: copy the neighbour
         for j in np.flatnonzero(empty):
             k = j - 1 if j > 0 else j + 1
@@ -125,11 +140,19 @@ class CurrentModel:
         section = np.maximum(section, np.maximum(0.8 * median, MIN_SECTION_M2))
         inflow = surface * dHdt                               # m3/s each slice needs (+ = filling)
         q_graph = np.cumsum(inflow[:, ::-1], axis=1)[:, ::-1]   # through the downstream face of each slice
-        head = dHdt[:, -1:] * np.ones((1, self.n_slices))
+        lag = float(self.cal.get("upstream_lag_min", 0.0))
+        if lag:                                               # the storage above the head fills later
+            Lh = self.tide.levels(times - pd.Timedelta(minutes=lag), weather).to_numpy() @ self.weights[-1]
+            dhead = np.gradient(Lh, dt)
+        else:
+            dhead = dHdt[:, -1]
+        head = dhead[:, None] * np.ones((1, self.n_slices))
         u_graph, u_head = q_graph / section, head / section
         u_river = -self.cal["river_discharge_m3s"] / section
         scale = self.cal["scale"]
-        k = np.array([scale[r] for r in self.reach]) if isinstance(scale, dict) else scale
+        k = scale_profile(self.slice_km, self.cal)
+        if k is None:
+            k = np.array([scale[r] for r in self.reach]) if isinstance(scale, dict) else scale
         u = k * (u_graph + self.cal["upstream_storage_m2"] * u_head) + u_river
         field = CurrentField(times, u, self.slice_m, self.slice_of)
         if components:

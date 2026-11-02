@@ -8,6 +8,10 @@ mooring and unmooring times.
     PILOT_BASES      the same for pilot boats (Brabo, LRD tenders, "PILOT" in the name)
     MOORING_MIN      approach and departure manoeuvre time of sea-going ships at a berth,
                      t = base + k * LOA (+ lognormal noise), per berth area (tidal / behind a lock)
+    PILOT_DEMAND     ships needing a pilot (sea-going, LOA > 80 m, under way) at the same moment, per
+                     pilotage zone (sea: west of Vlissingen; river: Vlissingen to Antwerp; dock: in the
+                     basins behind the locks), over the AIS snapshots: median, 95th, 99th percentile, max.
+                     The pilot pools of the simulation are sized from it (data/equipment has no pilot count).
     DOCK_SPEED_KN    speed over ground of sea-going ships under way (>= 1 kn) per dock basin and
                      within LOCK_APPROACH_M of a lock: median, 95th percentile, fixes. No published
                      dock speed limit was found, so the graph takes the 95th percentile as the limit.
@@ -189,6 +193,34 @@ def fit_manoeuvres(m):
     return out
 
 
+def pilot_demand(df, ships):
+    """Simultaneous ships needing a pilot, per zone, over the snapshots."""
+    import pickle
+    import sys
+
+    from pyproj import Transformer
+    from scipy.spatial import cKDTree
+
+    sys.path.insert(0, str(REPO_ROOT / "src" / "environment"))
+    graph = pickle.load(open(GRAPH, "rb"))["graph"]
+    nodes = [d for _, d in graph.nodes(data=True) if d["type"] not in ("lock", "anchorage", "approach")]
+    tree = cKDTree([(d["x"], d["y"]) for d in nodes])
+    loa = df.mmsi.map(ships.length)
+    f = df[(df.sog >= UNDER_WAY_KN) & df.mmsi.map(ships["class"]).isin(SEA_GOING) & (loa > 80) & df.in_scheldt].copy()
+    x, y = Transformer.from_crs("EPSG:4326", graph.graph["crs"], always_xy=True).transform(f.lon.to_numpy(), f.lat.to_numpy())
+    idx = tree.query(np.column_stack([x, y]))[1]
+    zone = np.array([nodes[i].get("speed_zone") or "" for i in idx])
+    f["zone"] = np.where(np.isin(zone, ("dock", "canal")), "dock", np.where(zone == "river", "river",
+                         np.where(zone == "sea", "sea", "")))
+    counts = f[f.zone != ""].groupby(["t", "zone"]).mmsi.nunique().unstack(fill_value=0)
+    counts = counts.reindex(sorted(df.t.unique()), fill_value=0)
+    out = {z: {"p50": float(counts[z].median()), "p95": float(np.percentile(counts[z], 95)),
+               "p99": float(np.percentile(counts[z], 99)), "max": int(counts[z].max()), "snapshots": len(counts)}
+           for z in counts.columns}
+    log.info("pilot demand: %s", out)
+    return out
+
+
 def dock_speeds(df, ships):
     """Speeds of sea-going ships under way in the docks, per basin and near the locks."""
     import pickle
@@ -273,6 +305,7 @@ def main():
         "PILOT_BASES": bases(stops, ships.index[is_pilot], "pilot_base"),
         "MOORING_MIN": fit_manoeuvres(m),
         "DOCK_SPEED_KN": dock_speeds(data.df, ships),
+        "PILOT_DEMAND": pilot_demand(data.df, ships),
     }
     period = f"{data.df.t.min():%Y-%m-%d %H:%M} to {data.df.t.max():%Y-%m-%d %H:%M} UTC"
     docstring = __doc__.split("Usage:")[0].replace("Fit the port", "Port", 1) + \

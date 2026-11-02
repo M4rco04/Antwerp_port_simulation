@@ -76,7 +76,16 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEPTH_RASTER = PROJECT_ROOT / "data" / "charts" / "scheldt_depth_LAT_wgs84.tif"
 DEPTH_SOURCE_RASTER = PROJECT_ROOT / "data" / "charts" / "scheldt_depth_source_wgs84.tif"
 CHARTS = PROJECT_ROOT / "data" / "charts" / "scheldt_navigation.gpkg"
-SLOT_DATA = PROJECT_ROOT / "slots_cords" / "paczka_final.json"
+# berths: the harbour master's berth layer (src/environment/fetch_berth_data.py) with the allowed
+# draught and depths per berth; the older slots_cords file (same berth ids, no depths) as a fallback
+BERTH_DATA = PROJECT_ROOT / "data" / "berths" / "havenmeester_ligplaatsen.geojson"
+SLOT_DATA = BERTH_DATA if BERTH_DATA.is_file() else PROJECT_ROOT / "slots_cords" / "paczka_final.json"
+DEFAULT_BERTH_UKC_M = 0.5            # when the harbour master gives no minimum UKC
+NOT_BERTHS = ("Sluis",)              # berth types that are not places to moor (the lock chambers)
+# the port's sounded bed levels (src/environment/fetch_port_soundings.py): docks and Zeeschelde
+PORT_SOUNDINGS = PROJECT_ROOT / "data" / "charts" / "antwerp_port_soundings_taw.tif"
+SOUNDING_HALF_WINDOW_M = 25.0        # a cell's depth: the median bed level within this of its centre
+SOUNDING_MIN_VALID = 0.3             # ... where at least this share of those pixels has a sounding
 OSM_CACHE = PROJECT_ROOT / "cache" / "osm"
 OSM_WATER_FILE = PROJECT_ROOT / "cache" / "osm_water.gpkg"
 DEFAULT_OUTPUT = PROJECT_ROOT / "cache" / "antwerp_scheldt_graph.pkl"
@@ -274,6 +283,7 @@ EXTRA_ANCHORAGES = (("Schaar van Ouden Doel", (4.250659, 51.350292), 400.0),)
 SEA_ANCHORAGES = ("Westhinder", "Oostdyck", "Schouwenbank")
 ZEESCHELDE_ANCHORAGES = ("Schaar van Ouden Doel",)
 ANCHORAGE_LINKS = 6
+LOCK_APPROACH_DREDGED_M = 3000.0
 # routing cost of passing a lock, as an equivalent distance (~45 min at 7 kn)
 LOCK_PASSAGE_PENALTY_M = 10_000.0
 # a chamber end is joined to the nearest water nodes within this distance
@@ -739,6 +749,8 @@ def check_edges(water, X, Y, charted, depth, edges, chunk=200_000):
 
 def load_berths():
     berths = gpd.read_file(SLOT_DATA).to_crs(PROJECTED_CRS)
+    berths = berths[~berths.LPL_UN.astype(str).str.startswith("ZEEBR")].copy()     # Zeebrugge: outside the model
+    berths["LPL"] = berths.LPL.astype(str)
     berths["number"] = berths.LPL.str.extract(r"^[A-Z]?(\d+)")[0].astype(float)
     return berths
 
@@ -780,6 +792,217 @@ def tag_berths(graph, berths, X, Y, ids):
             if row.LPL_UN not in data["berths"]:
                 data["berths"].append(row.LPL_UN)
     return berth_nodes
+
+
+def apply_port_soundings(graph):
+    """Measured depths for every cell the port's sounding raster covers (docks, Zeeschelde): the
+    median bed level within SOUNDING_HALF_WINDOW_M of the cell centre (m TAW), as a depth below LAT
+    at the cell's gauge. Replaces the nominal and charted depths there (depth_source
+    "port_sounding"); edges touching such a cell get the shallower of their two cells."""
+    import rasterio
+
+    from tide import TideModel
+
+    if not PORT_SOUNDINGS.is_file():
+        log.warning("%s missing: run src/environment/fetch_port_soundings.py", PORT_SOUNDINGS)
+        return
+    model = TideModel.load()
+    nodes = graph.nodes
+    ids = np.array([n for n, d in graph.nodes(data=True) if d["type"] not in ("lock", "anchorage", "approach")])
+    to_bl = Transformer.from_crs(PROJECTED_CRS, "EPSG:31370", always_xy=True).transform
+    bx, by = to_bl(np.array([nodes[n]["x"] for n in ids]), np.array([nodes[n]["y"] for n in ids]))
+    with rasterio.open(PORT_SOUNDINGS) as src:
+        bed = src.read(1).astype(np.float32)
+        nodata, inv = src.nodata, ~src.transform
+        res = src.res[0]
+    bed[(bed == nodata) | ~np.isfinite(bed)] = np.nan
+    cols, rows = inv * (bx, by)
+    rows, cols = np.floor(rows).astype(int), np.floor(cols).astype(int)
+    k = int(round(SOUNDING_HALF_WINDOW_M / res))
+    inside = (rows >= k) & (rows < bed.shape[0] - k) & (cols >= k) & (cols < bed.shape[1] - k)
+    off = np.arange(-k, k + 1)
+    rr = rows[inside][:, None, None] + off[None, :, None]
+    cc = cols[inside][:, None, None] + off[None, None, :]
+    win = bed[rr, cc].reshape(int(inside.sum()), -1)
+    valid = np.isfinite(win).mean(axis=1) >= SOUNDING_MIN_VALID
+    med = np.full(len(win), np.nan)
+    med[valid] = np.nanmedian(win[valid], axis=1)
+    changed = {}
+    for n, b in zip(ids[inside][valid], med[valid]):
+        d = nodes[n]
+        gauge = d.get("tide_gauge") or "antwerpen.loodsgebouw"
+        depth = round(float(model.taw_to_lat_depth(-b, gauge)), 2)
+        changed[int(n)] = (d["depth_m"], depth)
+        d.update(depth_m=depth, depth_source="port_sounding", drying=depth < 0)
+    for n in changed:
+        for m in graph[n]:
+            if nodes[m]["type"] in ("lock", "anchorage", "approach"):
+                continue
+            graph.edges[n, m]["depth_m"] = round(min(nodes[n]["depth_m"], nodes[m]["depth_m"]), 2)
+    diff = np.array([new - old for old, new in changed.values()])
+    graph.graph.setdefault("sources", {})["port_soundings"] = str(PORT_SOUNDINGS.relative_to(PROJECT_ROOT))
+    graph.graph["port_soundings"] = {"cells": len(changed), "median_change_m": round(float(np.median(diff)), 2) if len(diff) else None}
+    log.info("port soundings: %d cells get measured depths (change: median %+.1f m, p10 %+.1f, p90 %+.1f)",
+             len(changed), np.median(diff), np.percentile(diff, 10), np.percentile(diff, 90))
+
+
+def _mean_high_water(model, days=30):
+    """Mean high water (m above LAT) at every gauge over a month of predicted tide."""
+    times = pd.date_range("2026-11-01", periods=int(days * 24 * 6), freq="10min", tz="UTC")
+    out = {}
+    for g in model.gauges:
+        h = pd.Series(model.tide(g, times), index=times)
+        out[g] = float(h.resample("745min").max().mean())        # one high water per 12 h 25 min
+    return out
+
+
+def apply_berth_data(graph):
+    """Make the berths follow the harbour master's data and make every berth reachable.
+
+    1. A berth's cells get its sounded depth (m TAW, converted to m below LAT at the nearest gauge).
+    2. From the deepest cell of the main channel, the deepest way to every cell is found (one
+       widest-path search: the path whose shallowest point is deepest), counting the water level a
+       ship can expect: the fixed level in the docks, mean high water on tidal water, and at a lock
+       its sill plus the level on the side the ship comes from.
+    3. A berth whose way in is shallower than its allowed draught + minimum UKC gets that way
+       deepened to exactly that (cells and edges marked depth_source "berth_access"). Locks are not
+       deepened: a lock that limits a berth is reported (catalogue "access": "lock_limited").
+    """
+    import heapq
+
+    from tide import TideModel
+
+    berths = graph.graph["berths"]
+    try:
+        model = TideModel.load()
+    except FileNotFoundError:
+        log.warning("no tide model: berth depths and access not applied")
+        return
+    gauge_default = "antwerpen.loodsgebouw"
+    mhw = _mean_high_water(model)
+    nodes = graph.nodes
+
+    def level(n):
+        d = nodes[n]
+        if d.get("tide") is not None:
+            a, b, w = d["tide"]
+            return (1 - w) * mhw[a] + w * mhw[b]
+        if d.get("basin"):
+            return model.basin_level_m(d["basin"], d.get("tide_gauge") or gauge_default)
+        return 0.0
+
+    lv = {n: level(n) for n in graph.nodes}
+
+    # 1. sounded depths at the berths (overlapping berths: the deepest)
+    official = {}
+    for b in berths.values():
+        taw = b.get("sounded_depth_taw_m")
+        if taw is None or not b["nodes"]:
+            continue
+        gauge = nodes[b["nodes"][0]].get("tide_gauge") or gauge_default
+        lat_depth = round(model.taw_to_lat_depth(-taw, gauge), 2)
+        b["berth_sounding_m"] = lat_depth
+        for n in b["nodes"]:
+            if nodes[n]["depth_source"] != "port_sounding":    # the cell's own soundings are better
+                official[n] = max(official.get(n, -99.0), lat_depth)
+    for n, depth in official.items():
+        nodes[n].update(depth_m=depth, depth_source="berth_sounding", drying=depth < 0)
+    # every edge touching a berth cell is no deeper than its two cells (routing reads edge depths,
+    # the VTS tide check cell depths: they must agree)
+    for n in official:
+        for m in graph[n]:
+            if nodes[m]["type"] in ("lock", "anchorage", "approach"):
+                continue
+            graph.edges[n, m]["depth_m"] = round(min(graph.edges[n, m]["depth_m"], nodes[n]["depth_m"], nodes[m]["depth_m"]), 2)
+
+    # 2. + 3. per draught class (deepest first): the deepest way to the berths through locks deep
+    # enough for that draught (a lock cannot be dredged, the docks behind it can), then deepen the
+    # cells and edges on that way that are too shallow
+    skip = {n for n, d in graph.nodes(data=True) if d["type"] in ("anchorage", "approach")}
+    river = [n for n, d in graph.nodes(data=True) if d["region"] == "river"]
+    source = max(river, key=lambda n: nodes[n]["depth_m"])
+
+    def lock_capacity(u, v):
+        """A lock passage: its deepest chamber's sill plus the level on the water side."""
+        lock_node, water = (u, v) if nodes[u]["type"] == "lock" else (v, u)
+        return nodes[lock_node]["lock"].max_sill_depth_m + lv[water]
+
+    def capacity(u, v):
+        if nodes[u]["type"] == "lock" or nodes[v]["type"] == "lock":
+            return lock_capacity(u, v)
+        return graph.edges[u, v]["depth_m"] + min(lv[u], lv[v])
+
+    def deepen(n, need):
+        depth = math.ceil((need - lv[n]) * 100 + 1) / 100            # rounded up, 1 cm margin
+        if nodes[n]["depth_m"] < depth:
+            nodes[n].update(depth_m=depth, depth_source="berth_access", drying=False)
+            cells_changed.add(n)
+
+    def widest(need):
+        best, parent = {source: float("inf")}, {}
+        heap, done = [(-float("inf"), source)], set()
+        while heap:
+            negw, n = heapq.heappop(heap)
+            if n in done:
+                continue
+            done.add(n)
+            for m in graph[n]:
+                if m in done or m in skip:
+                    continue
+                if (nodes[n]["type"] == "lock" or nodes[m]["type"] == "lock") and lock_capacity(n, m) < need:
+                    continue                                          # this lock cannot take the ship
+                w = min(-negw, capacity(n, m))
+                if w > best.get(m, -float("inf")):
+                    best[m], parent[m] = w, n
+                    heapq.heappush(heap, (-w, m))
+        return best, parent
+
+    stats = {"ok": 0, "deepened": 0, "lock_limited": 0, "no_draught": 0, "no_nodes": 0}
+    cells_changed = set()
+    groups = {}
+    for bid, b in berths.items():
+        if not b["nodes"]:
+            b["access"] = "no_nodes"
+            stats["no_nodes"] += 1
+        elif b.get("berth_type") in NOT_BERTHS:
+            b["access"] = "not_a_berth"                    # a lock chamber listed in the berth layer
+            stats["not_a_berth"] = stats.get("not_a_berth", 0) + 1
+        elif b.get("max_draught_m") is None:
+            b["access"] = "no_draught"
+            stats["no_draught"] += 1
+        else:
+            need = b["max_draught_m"] + (b.get("min_ukc_m") or DEFAULT_BERTH_UKC_M)
+            b["need_m"] = round(need, 2)
+            groups.setdefault(math.ceil(need * 10) / 10, []).append(bid)   # 10 cm draught classes
+    for need in sorted(groups, reverse=True):
+        best, parent = widest(need)
+        for bid in groups[need]:
+            b = berths[bid]
+            for n in b["nodes"]:                                   # the berth itself holds the ship
+                deepen(n, need)
+            target = b["nodes"][len(b["nodes"]) // 2]
+            if target not in parent and target != source:
+                b["access"] = "lock_limited"                        # only through a lock too shallow for it
+                stats["lock_limited"] += 1
+                continue
+            if best.get(target, -float("inf")) >= need:
+                b["access"] = "ok"
+                stats["ok"] += 1
+                continue
+            n = target
+            while n != source:
+                p = parent[n]
+                if capacity(p, n) < need and nodes[p]["type"] != "lock" and nodes[n]["type"] != "lock":
+                    deepen(p, need)
+                    deepen(n, need)
+                    graph.edges[p, n]["depth_m"] = math.ceil((need - min(lv[p], lv[n])) * 100 + 1) / 100
+                n = p
+            b["access"] = "deepened"
+            stats["deepened"] += 1
+    graph.graph["berth_access"] = {"stats": stats, "cells_deepened": len(cells_changed),
+                                   "levels": "docks: fixed level; tidal: mean high water; locks: sill + level"}
+    log.info("berths from the harbour master: %d with a sounded depth; access %s, %d cells deepened",
+             sum(b.get("sounded_depth_taw_m") is not None for b in berths.values()), stats, len(cells_changed))
 
 
 def berth_zone(number):
@@ -1006,6 +1229,51 @@ def label_basins(graph):
                 graph.edges[node, v]["tidal"] = v in tidal_water
 
 
+def deepen_lock_approaches(graph, max_m=LOCK_APPROACH_DREDGED_M):
+    """The chart misses some dredged lock approaches (Hansweert, the Walcheren canal at Vlissingen):
+    their outer harbours join the river only over drying cells. From each tidal side of a lock,
+    the shortest way (at most max_m) to water as deep as the lock's deepest sill is given that
+    depth (never more), marked depth_source "lock_approach". "Deep water" is water joined to the
+    main channel at that depth, not an isolated pocket in the outer harbour."""
+    deepest = max((m for m, d in graph.nodes(data=True) if d["region"] == "river"), key=lambda m: graph.nodes[m]["depth_m"])
+    main = {}
+
+    def main_water(depth):
+        if depth not in main:
+            sub = graph.edge_subgraph([(u, v) for u, v, e in graph.edges(data=True) if e["depth_m"] >= depth
+                                       and e["kind"] != "lock_gate"])
+            main[depth] = nx.node_connected_component(sub, deepest) if deepest in sub else set()
+        return main[depth]
+
+    for n, d in list(graph.nodes(data=True)):
+        if d["type"] != "lock":
+            continue
+        lock = d["lock"]
+        sill = lock.max_sill_depth_m
+        for side in lock.sides.values():
+            if not side["tidal"] or not side["nodes"]:
+                continue
+            dist, paths = nx.single_source_dijkstra(graph.subgraph([m for m in graph if graph.nodes[m]["type"] == "water"
+                                                                     or m in side["nodes"]]), side["nodes"][0],
+                                                     cutoff=max_m, weight="weight")
+            core = main_water(sill)
+            deep = [m for m in dist if m in core]
+            if not deep:
+                continue
+            target = min(deep, key=dist.get)
+            path = paths[target]
+            changed = 0
+            for u, v in zip(path, path[1:]):
+                for m in (u, v):
+                    if graph.nodes[m]["depth_m"] < sill:
+                        graph.nodes[m].update(depth_m=round(sill, 2), depth_source="lock_approach", drying=False)
+                        changed += 1
+                if graph.edges[u, v]["depth_m"] < sill:
+                    graph.edges[u, v]["depth_m"] = round(sill, 2)
+            if changed:
+                log.info("lock %s: dredged approach %.0f m, %d cells deepened to %.1f m", lock.name, dist[target], changed, sill)
+
+
 def refresh_locks(graph):
     """Fill each lock's sides (zone, tidal, nodes) from its gate edges; call after relabelling."""
     graph.graph["locks"] = {}
@@ -1168,7 +1436,10 @@ def build_graph(refresh_osm: bool = False) -> nx.Graph:
     builder = Builder(water, area)
 
     lines = {}
-    for name, spec in CHANNELS.items():
+    # canals first: the wide river grids (up to max_offset_m from their centreline) would otherwise
+    # put river cells on canal water near the river (Schelde-Rijn canal at Bath), and the canal grid,
+    # skipping cells too close to existing ones, would be cut in two
+    for name, spec in sorted(CHANNELS.items(), key=lambda kv: kv[1]["region"] != "canal"):
         lines[name] = fit_centreline(spec, traffic, water)
         channel_grid(builder, name, spec, lines[name])
     berths = load_berths()
@@ -1202,6 +1473,7 @@ def build_graph(refresh_osm: bool = False) -> nx.Graph:
     dropped = graph.number_of_nodes() - len(largest)
     graph = nx.convert_node_labels_to_integers(graph.subgraph(largest).copy())
     refresh_locks(graph)
+    deepen_lock_approaches(graph)
     assign_tide(graph)
     assign_estuary_axis(graph, lines["western_scheldt"], lines["zeeschelde"])
     log.info("Kept the largest connected part: %d nodes (%d isolated nodes dropped)", graph.number_of_nodes(), dropped)
@@ -1231,7 +1503,9 @@ def build_graph(refresh_osm: bool = False) -> nx.Graph:
     buoys = gpd.read_file(CHARTS, layer="buoys_nl").to_crs(PROJECTED_CRS)
     zones_be = gpd.read_file(CHARTS, layer="shipping_zones_be").to_crs(PROJECTED_CRS)
     assign_cell_attributes(graph, buoys, zones_be, lines)
+    apply_port_soundings(graph)
     build_berth_catalogue(graph, berths, berth_nodes, berth_zone, berth_use())
+    apply_berth_data(graph)
     build_terminals(graph)
     add_places(graph)
     graph.graph["coarse"] = build_coarse(graph)

@@ -214,8 +214,11 @@ def _buoy_fairway(axis, buoys):
 def _end_node(graph, end, basin_nodes, to_xy):
     kind, what = end
     if kind == "lock":
-        lock = next(n for n, d in graph.nodes(data=True) if d["type"] == "lock" and d["name"] == what)
-        return next(m for m in graph[lock] if m in basin_nodes)
+        lock = next((n for n, d in graph.nodes(data=True) if d["type"] == "lock" and d["name"] == what), None)
+        if lock is None:
+            log.warning("main dock waterway: lock %s is not in the graph", what)
+            return None
+        return next((m for m in graph[lock] if m in basin_nodes), None)
     x, y = to_xy(*what)
     return min(basin_nodes, key=lambda n: math.hypot(graph.nodes[n]["x"] - x, graph.nodes[n]["y"] - y))
 
@@ -231,6 +234,9 @@ def assign_dock_waterways(graph):
     for name, spec in MAIN_DOCK_WATERWAYS.items():
         basin_nodes = {n for n, d in graph.nodes(data=True) if d.get("basin") == spec["basin"] and d["type"] != "lock"}
         a, b = (_end_node(graph, spec[k], basin_nodes, to_xy) for k in ("from", "to"))
+        if a is None or b is None:
+            log.warning("main dock waterway %s skipped: an end is missing", name)
+            continue
         path = nx.shortest_path(graph.subgraph(basin_nodes), a, b, weight="weight")
         line = LineString([(graph.nodes[n]["x"], graph.nodes[n]["y"]) for n in path])
         ids = np.array([n for n in basin_nodes if graph.nodes[n]["region"] == "port"])

@@ -10,7 +10,9 @@ regressing each visit's speed over ground on the modelled along-track current gi
 and one for the Zeeschelde.
 The fit uses moving ships (>= MIN_SOG_KN) within MAX_OFF_AXIS_M of the estuary axis whose course
 is within COURSE_TOLERANCE of the axis, and the tide + surge for the AIS period (KNMI weather).
-Writes data/tides/current_calibration.json.
+Writes data/tides/current_calibration.json. When that file already holds a Zeeschelde calibration
+from the current atlas (fit_currents_atlas.py), only the Western Scheldt scale is fitted and the
+atlas values are kept; the R2 per reach then checks the atlas currents against the AIS.
 
 Usage:
     py src/environment/fit_currents.py --plot currents.png
@@ -86,7 +88,12 @@ def main():
     weather = fit_tide.load_weather()
     times = pd.date_range(fixes.t.min().floor("5min") - pd.Timedelta("10min"), fixes.t.max().ceil("5min") + pd.Timedelta("10min"),
                           freq="5min")
-    model = C.CurrentModel(graph, tide, calibration=dict(C.DEFAULTS, scale=1.0, upstream_storage_m2=0.0))
+    # Zeeschelde from the current atlas (fit_currents_atlas.py) when present: kept, and only checked here
+    existing = C.load_calibration()
+    atlas = "zeeschelde_source" in existing
+    lag = existing.get("upstream_lag_min", 0.0) if atlas else 0.0
+    model = C.CurrentModel(graph, tide, calibration=dict(C.DEFAULTS, scale=1.0, upstream_storage_m2=0.0,
+                                                         upstream_lag_min=lag))
     fixes["reach"] = model.reach[np.clip((fixes.chainage_m // model.slice_m).astype(int), 0, model.n_slices - 1)]
     field, (u_graph, u_head, u_river) = model.compute(times, weather, components=True)
     i = np.clip(times.searchsorted(fixes.t), 0, len(times) - 1)
@@ -100,18 +107,37 @@ def main():
     # one scale per reach. The storage above Antwerp is not fitted: its current follows dh/dt at the
     # head just like the in-graph part, so the two cannot be told apart and trade off (tried: the
     # Zeeschelde scale then drops to ~0.5 with ~12 km2 of storage). It stays at currents.UPSTREAM_STORAGE_M2.
-    storage = C.DEFAULTS["upstream_storage_m2"]           # fixed at the physical estimate
+    storage = existing["upstream_storage_m2"] if atlas else C.DEFAULTS["upstream_storage_m2"]
     ws = (fixes.reach == "western_scheldt").to_numpy()
     X = np.column_stack([d.x_graph * ws, (d.x_graph + storage * d.x_head) * ~ws])
     beta, *_ = np.linalg.lstsq(X, d.y.to_numpy(), rcond=None)
     k_ws, k_zs = float(beta[0]), float(beta[1])
-    k = np.where(ws, k_ws, k_zs)
-    pred = k * (d.x_graph + storage * d.x_head)
+    if atlas:
+        # Zeeschelde from the atlas (scale profile along the chainage): fit the Western Scheldt scale
+        # and how much of the atlas current the ships' SOG shows (pilots take back part of it)
+        km = fixes.chainage_m.to_numpy() / 1000
+        w_ws = C.scale_profile(km, existing, ws=1.0) - C.scale_profile(km, existing, ws=0.0)
+        k_fix = C.scale_profile(km, existing, ws=0.0)
+        xt = (d.x_graph + storage * d.x_head).to_numpy()
+        (k_ws, resp), *_ = np.linalg.lstsq(np.column_stack([w_ws * xt, k_fix * xt]), d.y.to_numpy(), rcond=None)
+        k_ws, resp = float(k_ws), float(resp)
+        log.info("Western Scheldt scale %.3f; upstream of Bath the ships' SOG shows %.0f %% of the atlas current",
+                 k_ws, 100 * resp)
+        sog_response = {"western_scheldt": 1.0, "zeeschelde": round(resp, 3)}
+        k_zs = existing["scale"]["zeeschelde"]
+        pred = (w_ws * k_ws + resp * k_fix) * xt              # the SOG the simulation gives
+    else:
+        k = np.where(ws, k_ws, k_zs)
+        pred = k * (d.x_graph + storage * d.x_head)
     r2 = 1 - np.var(d.y - pred) / np.var(d.y)
     reach = {name: {"fixes": int(m.sum()), "r2": round(float(1 - np.var((d.y - pred)[m]) / np.var(d.y[m])), 3)}
              for name, m in (("western_scheldt", ws), ("zeeschelde", ~ws))}
     scale = {"western_scheldt": round(k_ws, 3), "zeeschelde": round(k_zs, 3)}
-    cal = {"scale": scale, "upstream_storage_m2": round(storage, -4),
+    if atlas:
+        existing["sog_response"] = sog_response
+    else:
+        existing.pop("sog_response", None)
+    cal = {**(existing if atlas else {}), "scale": scale, "upstream_storage_m2": round(storage, -4),
            "river_discharge_m3s": C.DEFAULTS["river_discharge_m3s"],
            "fit": {"fixes": len(fixes), "passages": int(fixes.visit.nunique()), "r2_within_passage": round(float(r2), 3),
                    "per_reach_scale": reach, "period": [str(fixes.t.min()), str(fixes.t.max())]}}

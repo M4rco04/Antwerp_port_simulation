@@ -36,6 +36,9 @@ log = logging.getLogger("places")
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 APPROACH_EDGE_M = 50_000.0
+CORE_MIN_DEPTH_M = 8.0          # places snap to cells joined to the main river by water at least this deep ...
+INLAND_CORE_DEPTH_M = 3.0       # ... or this for places only inland craft use
+INLAND_ONLY = ("albert_canal", "upper_sea_scheldt", "schelde_rijn_canal", "zuid_beveland_canal")
 SEA_GATES = ("sea_west", "sea_southwest", "sea_north")
 OUTSIDE = ("zeebrugge", "oosterschelde")
 # entry source -> what to snap it to: a node region, a canal zone, or an anchorage name
@@ -87,12 +90,22 @@ class _Snapper:
         self.region = np.array([d["region"] for _, d in rows])
         self.zone = np.array([d["zone"] for _, d in rows])
         self.depth = np.array([d["depth_m"] for _, d in rows])
+        import networkx as nx
+        self.cores = {}
+        for depth in (CORE_MIN_DEPTH_M, INLAND_CORE_DEPTH_M):
+            deep = graph.edge_subgraph([(u, v) for u, v, e in graph.edges(data=True) if e["depth_m"] >= depth])
+            self.cores[depth] = np.isin(self.ids, list(max(nx.connected_components(deep), key=len)))
+        self.core = self.cores[CORE_MIN_DEPTH_M]
 
-    def __call__(self, lon, lat, mask=None):
+    def __call__(self, lon, lat, mask=None, core_depth=CORE_MIN_DEPTH_M):
+        self.core = self.cores[core_depth]
         x, y = self.to_xy(lon, lat)
         d = np.hypot(self.X - x, self.Y - y)
-        if mask is not None:
-            d = np.where(mask, d, np.inf)
+        in_core = self.core if mask is None else (mask & self.core)
+        if not in_core.any():                       # nothing deep enough there: nearest cell of the mask
+            log.warning("no cell joined to the river by %.0f m of water near %.4f, %.4f", CORE_MIN_DEPTH_M, lon, lat)
+            in_core = np.ones(len(d), dtype=bool) if mask is None else mask
+        d = np.where(in_core, d, np.inf)
         i = int(np.argmin(d))
         return int(self.ids[i]), float(d[i])
 
@@ -133,7 +146,7 @@ def add_places(graph):
                 mask = snap.zone == rule["zone"]
             elif "region" in rule:
                 mask = np.isin(snap.region, rule["region"])
-            node, dist = snap(lon, lat, mask)
+            node, dist = snap(lon, lat, mask, INLAND_CORE_DEPTH_M if name in INLAND_ONLY else CORE_MIN_DEPTH_M)
         places[name] = _place(graph, "source", node, lon, lat, dist,
                               (entry.SOURCE_DESCRIPTION.get(name, name) if hasattr(entry, "SOURCE_DESCRIPTION") else name),
                               outside=name in OUTSIDE, exit=f"exit_{name}")

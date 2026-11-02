@@ -86,3 +86,19 @@ dims = C.dimensions_for_teu(14000, rng)
   graph, so build the graph first.
 
 Rerun: `py src/data/fit_port_infrastructure.py`, then rebuild the graph (`py src/environment/antwerp_port.py --no-browser`).
+
+## Data used by the current fits
+
+Refitted 2026-11-01 on 1,559 snapshots (2026-10-26 to 2026-11-01): 1,001,361 positions of 3,391 ships, with 123
+observed hours of entries (52 h in the first fits). Compared with the first fits:
+- **Arrival rates fell:** inland cargo 6.7 → 4.3 per hour.
+- **Dwell at berth changed:** bulk median 61 → 41 h, inland cargo 13 → 18 h.
+- **Anchorage waits** were fitted on more ships.
+- **Container schedule delays** now come from 45 matched calls (28 before).
+
+Rerun all fits after the collector has added data (the infrastructure fit needs the graph), then rebuild the graph:
+
+    py src/data/fit_entry_probabilities.py; py src/data/fit_background_traffic.py; py src/data/fit_container_calls.py
+    py src/data/fit_port_infrastructure.py; cd src/environment; py fit_currents.py; cd ../..
+    py src/environment/antwerp_port.py --no-browser
+
