@@ -1,7 +1,8 @@
 """The time-stepped simulation (PLAN.md §0): Δt = 5 min, every step in the plan's order
 
     1. environment     water level at every node (tide), current along the estuary
-    2. arrivals        new ships from the generator (schedule replay + background NHPP)
+    2. arrivals        new ships from the generator (containers: schedule replay or fitted NHPP;
+                       background NHPP)
     3. VTS             clearance every 3 steps (agents/vts.py, the simple version)
     4. resources       locks step, timers of boarding / pilot change / mooring / handling / dwell
     5. movement        two-phase moves on the mesh (agents/movement.py)
@@ -17,7 +18,8 @@ exit. Pilots change zone at Vlissingen and at the locks.
 
 Usage:
     py src/sim/engine.py --days 7 --seed 1 [--progress-hours 2] [--max-minutes 60]
-Writes results/<run>/: events.csv, ships.csv, timeseries.csv, summary.json, positions.csv.gz
+Writes results/<run>/: events.csv, ships.csv, timeseries.csv, summary.json, positions.csv.gz (+ routes.json),
+levels.csv.gz
 """
 
 from __future__ import annotations
@@ -82,7 +84,7 @@ PILOT_ZONE = {"sea": "sea", "river": "river", "dock": "dock", "canal": "dock"}
 
 class Simulation:
     def __init__(self, start="2026-10-21 00:00", days=7.0, seed=1, delays=True, warmup_days=2.0, background=True,
-                 weather_mode="bootstrap"):
+                 weather_mode="bootstrap", container_mode="replay", container_rate=1.0, bunching=True):
         t0 = time.time()
         self.start = pd.Timestamp(start, tz="UTC")
         self.n_steps = int(days * 24 * 60 / DT_MIN)
@@ -137,7 +139,13 @@ class Simulation:
         # agents
         self.mover = Mover(self)
         self.vts = SimpleVTS(self)
-        self.generator = Generator(self.start, self.rng, delays=delays, background=background)
+        self.generator = Generator(self.start, self.rng, delays=delays, background=background,
+                                   container_mode=container_mode, rate_factor=container_rate, bunching=bunching)
+        if self.generator.nhpp:
+            f = self.generator.nhpp
+            log.info("container arrivals: fitted Poisson process, %.2f calls/day x %.2f%s",
+                     f["base_per_h"] * 24, f["rate_factor"],
+                     f", daily gamma factor shape {f['gamma_shape']:.1f}" if f["gamma_shape"] else "")
         self.ships, self.done, self.by_id = [], [], {}
         self.route_cache, self.failed, self.reachable = {}, {}, {}
         self.held_exits = {}                           # lock name -> ships kept in it during a ULCV passage
@@ -153,6 +161,7 @@ class Simulation:
         river = np.flatnonzero(fg.region == fg.code("region", "river")) if "region" in fg.labels else np.arange(fg.n)
         self.reach_from = int(river[np.argmax(fg.depth_m[river])])      # the deepest cell of the main channel
         self.events, self.series, self.positions = [], [], []
+        self.routes_rec, self._last_pos = [], {}   # routes sailed (node lists) and last fixed position per ship
         self.t, self.k = 0.0, 0
         self.level_now = self._levels(0)
         log.info("simulation ready in %.0f s: %d steps, pilots %s, %d pilot boats, %d boatmen crews, %d tugs",
@@ -425,8 +434,25 @@ class Simulation:
         ship.pilots, ship.pilot_zone = [], None
 
     # ------------------------------------------------------------------ life cycle
+    def terminal_draught(self, ship):
+        """A container ship's draught drawn from its TEU can exceed what its terminal allows; a real one
+        calls loaded to what the quay allows. Capped at the deepest allowed draught of a stretch of
+        quay long enough for it (unchanged when that is deeper)."""
+        if ship.cls != "container" or not ship.terminal or ship.terminal not in self.terminals:
+            return
+        T = self.terminals[ship.terminal]
+        fits = lambda d: any(b - a >= ship.loa for a, b in T.suitable_intervals(d, ship.sea_going))
+        if fits(ship.draught):
+            return
+        allowed = sorted({r["max_draught"] for r in T.berths.values() if r.get("max_draught")}, reverse=True)
+        cap = next((d for d in allowed if d < ship.draught and fits(d)), None)
+        if cap is not None:
+            ship.note(self.t, "draught_capped", drawn=ship.draught, allowed=cap, terminal=T.name)
+            ship.draught = float(cap)
+
     def spawn(self, ship):
         now = self.t
+        self.terminal_draught(ship)
         ship.set_state(State.SPAWNED, now, source=ship.source, destination=ship.destination, cls=ship.cls)
         self.ships.append(ship)
         self.by_id[ship.id] = ship
@@ -435,7 +461,9 @@ class Simulation:
             self.finish(ship, now, "no_source")
             return
         node = place["node"]
-        if ship.source.startswith("anchorage_"):
+        # an anchorage source on an anchorage node starts at anchor; "anchorage_other" (AIS: anchored
+        # somewhere else) lies on a sea cell and starts at sea like the other arrivals
+        if ship.source.startswith("anchorage_") and self.graph.nodes[node].get("type") == "anchorage":
             ship.at = node
             name = self.graph.nodes[node]["name"]
             ship.request_t = now
@@ -921,12 +949,27 @@ class Simulation:
                **{f"pilots_busy_{z}": self.pilots.busy(z, now) for z in self.pilots.sizes},
                **{f"free_quay_{k}": round(T.free_quay_m()) for k, T in self.terminals.items()}}
         self.series.append(row)
-        if self.k % 3 == 0:
-            for s in self.ships:
-                node = s.cells[-1] if s.cells else s.at
-                if node is not None:
-                    self.positions.append((self.k, s.id, s.cls, s.state.value, round(float(self.fg.longitude[node]), 5),
-                                           round(float(self.fg.latitude[node]), 5)))
+        # positions for the viewer, every step: a ship under way as (route, distance of its bow along it),
+        # so it can be drawn along the water it sails; a ship lying still as its node, only when it changes
+        for s in self.ships:
+            if s.state in MOVING and s.cells and s.route and s.s is not None:
+                self._last_pos[s.id] = None
+                self.positions.append((self.k, s.id, s.state.value, self._route_id(s), round(float(min(s.head, s.s[-1])), 1)))
+                continue
+            node = s.cells[-1] if s.cells else s.at
+            if node is None:
+                continue
+            key = (int(node), s.state.value)
+            if self._last_pos.get(s.id) != key:
+                self._last_pos[s.id] = key
+                self.positions.append((self.k, s.id, s.state.value, -1, int(node)))
+
+    def _route_id(self, ship):
+        """Index of the ship's current route in routes_rec (each route list is stored once)."""
+        if getattr(ship, "_rec_route", None) is not ship.route:
+            ship._rec_route, ship._rec_rid = ship.route, len(self.routes_rec)
+            self.routes_rec.append([int(n) for n in ship.route])
+        return ship._rec_rid
 
     def progress(self, wall_s):
         """One status line: the state of the port and how fast the run goes."""
@@ -982,6 +1025,7 @@ class Simulation:
         done = ships[ships.finished & (ships.spawn_min >= self.warmup_min)]
         how = pd.Series([s.log[-1].get("how") for s in self.done if s.log])
         out = {"steps": self.k, "days": round(self.t / 1440, 2), "stopped_early": getattr(self, "stopped_early", False),
+               "start": str(self.start), "warmup_min": self.warmup_min, "step_min": DT_MIN,
                "ships_generated": len(ships),
                "removed_infeasible": int((how == "infeasible").sum()),
                "ships_finished_after_warmup": len(done), "still_in_area": int((~ships.finished).sum())}
@@ -1004,8 +1048,15 @@ class Simulation:
         events = [e for s in self.done + self.ships for e in s.log] + self.events
         pd.DataFrame(events).sort_values("t").to_csv(out / "events.csv", index=False)
         pd.DataFrame(self.series).to_csv(out / "timeseries.csv", index=False)
-        pd.DataFrame(self.positions, columns=["step", "ship", "class", "state", "lon", "lat"]).to_csv(
+        # water level at the tide gauges each step (m above LAT, tide + surge): the viewer's live depth
+        gauges = self.fg.labels["gauges"]
+        lv = pd.DataFrame(self.L[:self.k + 1], columns=gauges).round(3)
+        lv.insert(0, "t", np.arange(len(lv)) * DT_MIN)
+        lv.to_csv(out / "levels.csv.gz", index=False)
+        # route = -1: the ship lies at node `value`; else it is `value` m along routes[route] (route.json)
+        pd.DataFrame(self.positions, columns=["step", "ship", "state", "route", "value"]).to_csv(
             out / "positions.csv.gz", index=False)
+        (out / "routes.json").write_text(json.dumps(self.routes_rec, separators=(",", ":")))
         summary = self.summary(ships)
         (out / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
         return summary
@@ -1021,13 +1072,20 @@ def main():
     parser.add_argument("--no-background", action="store_true")
     parser.add_argument("--weather", choices=("bootstrap", "replay"), default="bootstrap",
                         help="weather: real days of the same season drawn at random, or the observed dates")
+    parser.add_argument("--containers", choices=("replay", "nhpp"), default="replay",
+                        help="container ships: replay the schedule, or a Poisson process fitted to it")
+    parser.add_argument("--container-rate", type=float, default=1.0,
+                        help="nhpp: multiply the fitted container arrival rate (scenarios)")
+    parser.add_argument("--no-bunching", action="store_true",
+                        help="nhpp: plain Poisson, without the daily gamma factor")
     parser.add_argument("--out", type=Path, default=None)
     parser.add_argument("--progress-hours", type=float, default=2.0, help="simulated hours between status lines")
     parser.add_argument("--max-minutes", type=float, default=60.0, help="stop (and save) after this much wall-clock time")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     sim = Simulation(args.start, args.days, args.seed, not args.no_delays, args.warmup, not args.no_background,
-                     weather_mode=args.weather)
+                     weather_mode=args.weather, container_mode=args.containers, container_rate=args.container_rate,
+                     bunching=not args.no_bunching)
     sim.run(args.progress_hours, args.max_minutes)
     out = args.out or ROOT / "results" / f"run_{pd.Timestamp.now():%Y%m%d_%H%M%S}"
     summary = sim.save(out)

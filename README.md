@@ -1,5 +1,32 @@
 # Antwerp Port Simulation
 
+The model itself (its mathematics, every mechanic, and what is taken from each dataset) is described,
+independent of the code, in [docs/MODEL.md](docs/MODEL.md).
+
+## Viewing a run
+
+`src/viz/build_viewer.py` turns a run folder into one self-contained page (`<run>/viewer.html`; open it
+in a browser, no server needed, internet for the map tiles and chart library):
+
+```
+py src/sim/engine.py --days 7 --out results/my_run
+py src/viz/build_viewer.py results/my_run --open
+```
+
+- **Live:** the ships on the map, animated (play / pause, speed, time slider; space and the arrow
+  keys work too), coloured by activity or kind of ship, with anchorages, locks, terminals, pilot
+  points and the simulation mesh as layers. The charts beside it (ships by activity, pilots on duty,
+  tugs / pilot boats / boatmen, wind, visibility) follow the playhead; click one to jump there. Click
+  a ship for its track, its state timeline and every event it logged.
+- **Live depth:** the water over every cell at the playhead (charted depth below LAT + the water level
+  there, or the basin level behind the locks), coloured by depth class; optionally the water too shallow
+  for a chosen draught (+10 % under-keel clearance) in red, and the depth of a cell on hover. Runs save
+  their gauge levels (`levels.csv.gz`, tide + surge); for older runs the viewer uses the astronomical tide.
+- **Analysis:** time in the area by phase and class, container delays against the schedule, why ships
+  waited for VTS clearance, lock passages, traffic-rule events, free quay at the container terminals,
+  and a searchable, sortable table of all ships (click a row to see that ship on the map).
+
+Runs saved before the summary recorded the warm-up need `--warmup <days>`.
 
 ## Live AIS data
 
@@ -352,6 +379,7 @@ ok = tidal_window(G, path, model, departures, 12, 15.5, 1.55, currents=CurrentMo
 ## Simulation and agents
 
 `py src/sim/engine.py --days 14 --warmup 2 --seed 1` runs the time-stepped simulation (Δt = 5 min).
+`py src/sim/engine.py --start "2027-01-04 00:00" --days 14 --containers nhpp --container-rate 1.2` runs with fitted container arrivals (+20 %).
 
 - **Progress:** it logs a status line every `--progress-hours` simulated hours (default 2): ships in the area, finished,
   removed, sailing, blocked, at berth, at anchor, waiting for the VTS, lock queue, busy pilots and tugs, and seconds per
@@ -373,7 +401,7 @@ It writes `results/<run>/`:
 | Module | What it does |
 |---|---|
 | `ship.py` | One `Ship` class for both levels. Derived flags from regs §2 (pilot, ULCV, marginal, tide-dependent, oversized by zone, IMO2 gas, boatmen, tugs needed). A state machine (sail → pilot station → VTS → anchorage / boarding → sailing → lock → mooring → berth → departure → exit) with timers. Minutes per state are kept for the KPIs. |
-| `generator.py` | Containers replayed from the schedule: TEU gives dimensions, call size and cranes; the AIS schedule delay is optional; ships enter 8 h before berthing at a sea source. Background traffic is a non-homogeneous Poisson process per class and source, from `entry_probabilities`, with bootstrapped AIS ships and destinations.  Ships entering from or leaving to a canal behind a lock (Schelde-Rijn, Zuid-Beveland, Albert) are redrawn until they fit its largest chamber. |
+| `generator.py` | Containers replayed from the schedule (`--containers replay`, default): TEU gives dimensions, call size and cranes; the AIS schedule delay is optional; ships enter 8 h before berthing at a sea source. Or (`--containers nhpp`) a Poisson process fitted to the schedule: 9.8 calls/day × weekday factor × hour-of-day factor (Brussels time) × a daily gamma factor (shape 23.6) for the bunching of liner calls, each arrival one schedule line drawn at random (TEU, terminal, time at berth); `--container-rate` scales it, `--no-bunching` drops the daily factor; runs can lie outside the schedule's dates. A container's TEU-drawn draught is capped at what its terminal's quay allows. Background traffic is a non-homogeneous Poisson process per class and source, from `entry_probabilities`, with bootstrapped AIS ships and destinations.  Ships entering from or leaving to a canal behind a lock (Schelde-Rijn, Zuid-Beveland, Albert) are redrawn until they fit its largest chamber. |
 | `movement.py` | Ships as hulls: a centre line along the route over the ship's length, with its real beam, so ships can be longer and wider than the cells. Two hulls must stay (B1 + B2) / 2 + 20 % of the wider beam apart, less what each can shift sideways inside its own lane ((lane − B) / 2). Two-phase moves are resolved by priority, checking the swept hull. Speed is the JA22 planning speed plus current, capped by the cell's limit. The encounter rules of regs §6 and the 3 nm spacing are applied. Blocked ships detour round the other hulls (head-on: the lower-ranked ship gives way); a deadlock with no detour is let through after an hour. |
 | `vts.py` | The simple VTS: first come first served, tide-dependent ships first. A ship is cleared when its route exists, the tide holds along it leaving now and 60 min later, a pilot (two for the largest ships) and a pilot boat are free, and its berth or quay has room. Otherwise it is sent to an anchorage (regs §11). No reservations or optimisation yet. |
 | `services.py` | Pools with fleet sizes from the repo: 42 tugs (`tugs.csv`) at the AIS tug bases, plus the tugs AIS saw at Vlissingen, Terneuzen and Zeebrugge; 8 pilot boats (`pilots_mdk.csv`); 42 boatmen crews (`pilots_brabo.csv`, the Brabo boats). The repo has no pilot count, so pilots per zone = 1.25 × the AIS peak demand (`PILOT_DEMAND`) × (1 + return time / time on board):

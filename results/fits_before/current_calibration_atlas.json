@@ -1,0 +1,84 @@
+{
+  "scale": {
+    "western_scheldt": 1.041,
+    "zeeschelde": 2.123
+  },
+  "upstream_storage_m2": 10400000.0,
+  "river_discharge_m3s": 120.0,
+  "upstream_lag_min": 75.0,
+  "fit": {
+    "fixes": 54186,
+    "passages": 1655,
+    "r2_within_passage": 0.215,
+    "per_reach_scale": {
+      "western_scheldt": {
+        "fixes": 34003,
+        "r2": 0.316
+      },
+      "zeeschelde": {
+        "fixes": 20183,
+        "r2": 0.085
+      }
+    },
+    "period": [
+      "2026-10-26 01:00:16+00:00",
+      "2026-11-01 12:33:41+00:00"
+    ]
+  },
+  "zeeschelde_source": {
+    "atlas": "Stroomatlas Zeeschelde, WL rapporten 18_085_1 (2022), 95th percentile of the vector speeds",
+    "points": 150,
+    "rmse_ms": 0.218,
+    "rmse_before_ms": 0.641,
+    "peaks_ms": {
+      "antwerpen_hoboken/neap/ebb": {
+        "atlas": 1.13,
+        "model": 1.32
+      },
+      "antwerpen_hoboken/neap/flood": {
+        "atlas": 1.17,
+        "model": 1.11
+      },
+      "antwerpen_hoboken/spring/ebb": {
+        "atlas": 1.29,
+        "model": 1.61
+      },
+      "antwerpen_hoboken/spring/flood": {
+        "atlas": 1.6,
+        "model": 1.37
+      },
+      "boudewijnsluis_antwerpen/neap/ebb": {
+        "atlas": 1.06,
+        "model": 0.85
+      },
+      "boudewijnsluis_antwerpen/neap/flood": {
+        "atlas": 1.09,
+        "model": 0.76
+      },
+      "boudewijnsluis_antwerpen/spring/ebb": {
+        "atlas": 1.19,
+        "model": 1.02
+      },
+      "boudewijnsluis_antwerpen/spring/flood": {
+        "atlas": 1.42,
+        "model": 0.92
+      },
+      "prosperpolder_boudewijnsluis/neap/ebb": {
+        "atlas": 0.84,
+        "model": 0.9
+      },
+      "prosperpolder_boudewijnsluis/neap/flood": {
+        "atlas": 0.86,
+        "model": 0.82
+      },
+      "prosperpolder_boudewijnsluis/spring/ebb": {
+        "atlas": 1.02,
+        "model": 1.09
+      },
+      "prosperpolder_boudewijnsluis/spring/flood": {
+        "atlas": 1.17,
+        "model": 1.06
+      }
+    }
+  }
+}

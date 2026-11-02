@@ -1,0 +1,27 @@
+{
+  "scale": {
+    "western_scheldt": 1.041,
+    "zeeschelde": 0.531
+  },
+  "upstream_storage_m2": 15000000.0,
+  "river_discharge_m3s": 120.0,
+  "fit": {
+    "fixes": 54186,
+    "passages": 1655,
+    "r2_within_passage": 0.215,
+    "per_reach_scale": {
+      "western_scheldt": {
+        "fixes": 34003,
+        "r2": 0.316
+      },
+      "zeeschelde": {
+        "fixes": 20183,
+        "r2": 0.085
+      }
+    },
+    "period": [
+      "2026-10-26 01:00:16+00:00",
+      "2026-11-01 12:33:41+00:00"
+    ]
+  }
+}

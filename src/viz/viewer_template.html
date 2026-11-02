@@ -1,0 +1,678 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Simulation viewer · __RUN__</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface-1: #fcfcfb; --text-primary: #0b0b0b; --text-secondary: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7; --ring: rgba(11,11,11,0.10);
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4;
+  --accent-wash: rgba(42,120,214,0.10);
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface-1: #1a1a19; --text-primary: #f0efec; --text-secondary: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181;
+    --accent-wash: rgba(57,135,229,0.16);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface-1: #1a1a19; --text-primary: #f0efec; --text-secondary: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181;
+  --accent-wash: rgba(57,135,229,0.16);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--page); color: var(--text-primary); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 10px 16px; border-bottom: 1px solid var(--ring); background: var(--surface-1); }
+header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+header h1 small { font-weight: 400; color: var(--text-secondary); }
+.tabs { display: flex; gap: 4px; }
+.tabs button, .btn { border: 1px solid var(--ring); background: var(--surface-1); color: var(--text-primary); border-radius: 8px; padding: 6px 12px; font: inherit; cursor: pointer; }
+.tabs button[aria-selected="true"] { background: var(--accent-wash); border-color: var(--s1); font-weight: 600; }
+.btn:hover, .tabs button:hover { background: var(--accent-wash); }
+.player { display: flex; align-items: center; gap: 10px; flex: 1 1 420px; min-width: 0; }
+.player input[type=range] { flex: 1; min-width: 80px; accent-color: var(--s1); }
+.player .clock { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--text-secondary); min-width: 150px; }
+select { font: inherit; color: var(--text-primary); background: var(--surface-1); border: 1px solid var(--ring); border-radius: 8px; padding: 5px 8px; }
+main { height: calc(100% - 58px); }
+.view { display: none; height: 100%; }
+.view.on { display: flex; }
+#live { gap: 0; }
+#mapwrap { position: relative; flex: 1 1 auto; min-width: 0; }
+#map { position: absolute; inset: 0; background: var(--page); }
+#mesh, #shipcanvas { position: absolute; inset: 0; pointer-events: none; z-index: 450; }
+#mesh { z-index: 440; }
+#depthcanvas { position: absolute; inset: 0; pointer-events: none; z-index: 445; opacity: 0.8; }
+.ramp { display: flex; margin: 4px 0 2px; }
+.ramp span { flex: 1; height: 10px; }
+.ramp span + span { margin-left: 2px; }
+.rampl { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-secondary); }
+.maptools select { width: 100%; margin-top: 2px; }
+.maptools { position: absolute; top: 10px; right: 10px; z-index: 600; background: var(--surface-1); border: 1px solid var(--ring); border-radius: 8px; padding: 8px 10px; font-size: 13px; max-width: 220px; }
+.maptools label { display: block; margin: 2px 0; cursor: pointer; }
+.maptools .h { font-weight: 600; margin: 6px 0 2px; }
+.maptools .h:first-child { margin-top: 0; }
+.legend { position: absolute; left: 10px; bottom: 22px; z-index: 600; background: var(--surface-1); border: 1px solid var(--ring); border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+.legend .row { display: flex; align-items: center; gap: 8px; margin: 2px 0; color: var(--text-primary); }
+.sw { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.legend .note { color: var(--text-secondary); font-size: 12px; margin-top: 4px; }
+#tip { position: absolute; z-index: 700; pointer-events: none; background: var(--surface-1); color: var(--text-primary); border: 1px solid var(--ring); border-radius: 8px; padding: 6px 8px; font-size: 12px; display: none; box-shadow: 0 2px 8px rgba(0,0,0,0.12); white-space: nowrap; }
+aside { width: 440px; flex: none; overflow-y: auto; border-left: 1px solid var(--ring); background: var(--page); padding: 12px 16px 24px; }
+.kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
+.kpi { background: var(--surface-1); border: 1px solid var(--ring); border-radius: 8px; padding: 8px 10px; }
+.kpi .v { font-size: 20px; font-weight: 600; }
+.kpi .l { font-size: 12px; color: var(--text-secondary); }
+.card { background: var(--surface-1); border: 1px solid var(--ring); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+.card h2 { font-size: 14px; margin: 0 0 2px; font-weight: 600; }
+.card .sub { font-size: 12px; color: var(--text-secondary); margin: 0 0 8px; }
+.chartbox { position: relative; height: 170px; }
+.chartbox.tall { height: 260px; }
+.chartbox.xtall { height: 340px; }
+#shipcard .attrs { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-size: 13px; margin: 8px 0; }
+#shipcard .attrs div:nth-child(odd) { color: var(--text-secondary); }
+.timeline { display: flex; height: 14px; border-radius: 4px; overflow: hidden; margin: 6px 0 2px; background: var(--grid); }
+.timeline div { height: 100%; border-right: 2px solid var(--surface-1); }
+.tlaxis { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
+.evlist { max-height: 280px; overflow-y: auto; font-size: 12px; border-top: 1px solid var(--grid); margin-top: 8px; }
+.evlist div { padding: 3px 0; border-bottom: 1px solid var(--grid); cursor: pointer; }
+.evlist div:hover { background: var(--accent-wash); }
+.evlist b { font-weight: 600; }
+.evlist .t { color: var(--text-secondary); font-variant-numeric: tabular-nums; margin-right: 6px; }
+.empty { color: var(--text-secondary); font-size: 13px; }
+#analysis { overflow-y: auto; display: none; padding: 16px; }
+#analysis.on { display: block; }
+.agrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 12px; max-width: 1500px; }
+.agrid .wide { grid-column: 1 / -1; }
+.akpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-bottom: 12px; max-width: 1500px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+th { color: var(--text-secondary); font-weight: 600; cursor: pointer; position: sticky; top: 0; background: var(--surface-1); }
+td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: var(--accent-wash); }
+.tablewrap { max-height: 520px; overflow: auto; }
+.filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+.filters input[type=search] { font: inherit; padding: 5px 8px; border: 1px solid var(--ring); border-radius: 8px; background: var(--surface-1); color: var(--text-primary); min-width: 200px; }
+.leaflet-container { font: inherit; }
+.leaflet-tooltip { font-size: 12px; }
+@media (max-width: 900px) {
+  main { height: auto; }
+  .view.on { display: block; }
+  #mapwrap { height: 60vh; }
+  aside { width: auto; border-left: 0; }
+  .agrid { grid-template-columns: 1fr; }
+  .kpis { grid-template-columns: repeat(2, 1fr); }
+  .player .clock { min-width: 0; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>Simulation viewer <small>· __RUN__</small></h1>
+  <div class="tabs" role="tablist">
+    <button role="tab" aria-selected="true" data-view="live">Live</button>
+    <button role="tab" aria-selected="false" data-view="analysis">Analysis</button>
+  </div>
+  <div class="player">
+    <button class="btn" id="play" aria-label="Play">▶ Play</button>
+    <select id="speed" aria-label="Playback speed">
+      <option value="0.0833333">5 min / s</option><option value="0.5">½ h / s</option><option value="1">1 h / s</option><option value="3" selected>3 h / s</option>
+      <option value="6">6 h / s</option><option value="12">12 h / s</option><option value="24">1 day / s</option>
+    </select>
+    <input type="range" id="slider" min="0" max="1" step="1" value="0" aria-label="Simulation time">
+    <span class="clock" id="clock"></span>
+  </div>
+</header>
+<main>
+<section class="view on" id="live">
+  <div id="mapwrap">
+    <div id="map"></div>
+    <canvas id="mesh"></canvas>
+    <canvas id="depthcanvas"></canvas>
+    <canvas id="shipcanvas"></canvas>
+    <div id="tip"></div>
+    <div class="maptools">
+      <div class="h">Colour ships by</div>
+      <label><input type="radio" name="colour" value="activity" checked> Activity</label>
+      <label><input type="radio" name="colour" value="kind"> Kind of ship</label>
+      <div class="h">Base map</div>
+      <label><input type="radio" name="base" value="gray" checked> Grey map</label>
+      <label><input type="radio" name="base" value="satellite"> Satellite</label>
+      <label><input type="radio" name="base" value="none"> None (offline: shows the mesh)</label>
+      <div class="h">Layers</div>
+      <label><input type="checkbox" data-layer="anchorages" checked> Anchorages</label>
+      <label><input type="checkbox" data-layer="locks" checked> Locks</label>
+      <label><input type="checkbox" data-layer="terminals" checked> Container terminals</label>
+      <label><input type="checkbox" data-layer="places"> Pilot stations and points</label>
+      <label><input type="checkbox" data-layer="mesh"> Simulation mesh</label>
+      <div class="h">Live depth</div>
+      <label><input type="checkbox" id="depthon"> Water depth now</label>
+      <label for="draught" style="color:var(--text-secondary)">Mark water too shallow for a draught of</label>
+      <select id="draught" aria-label="Draught to check">
+        <option value="0">- (off)</option><option value="6">6 m</option><option value="8">8 m</option><option value="10">10 m</option>
+        <option value="12">12 m</option><option value="13.1">13.1 m (tide-dependent above)</option><option value="14.5">14.5 m</option><option value="16">16 m</option>
+      </select>
+      <label><input type="checkbox" id="follow"> Follow the selected ship</label>
+    </div>
+    <div class="legend" id="legend"></div>
+  </div>
+  <aside>
+    <div class="kpis" id="kpis"></div>
+    <div class="card" id="shipcard"><h2>Selected ship</h2><p class="empty">Click a ship on the map, or a row in the Analysis table.</p></div>
+    <div class="card"><h2>Ships in the area by activity</h2><p class="sub">Click a chart to jump to that time</p><div class="chartbox"><canvas id="c_activity"></canvas></div></div>
+    <div class="card"><h2>Water level (m above LAT)</h2><p class="sub" id="level_sub"></p><div class="chartbox"><canvas id="c_level"></canvas></div></div>
+    <div class="card"><h2>Pilots on duty</h2><div class="chartbox"><canvas id="c_pilots"></canvas></div></div>
+    <div class="card"><h2>Tugs, pilot boats and boatmen in use</h2><div class="chartbox"><canvas id="c_services"></canvas></div></div>
+    <div class="card"><h2>Wind force (Beaufort)</h2><div class="chartbox"><canvas id="c_wind"></canvas></div></div>
+    <div class="card"><h2>Visibility (km)</h2><div class="chartbox"><canvas id="c_vis"></canvas></div></div>
+  </aside>
+</section>
+<section class="view" id="analysis">
+  <div class="akpis" id="akpis"></div>
+  <div class="agrid">
+    <div class="card wide"><h2>Mean time in the area by phase</h2><p class="sub" id="phase_sub"></p><div class="chartbox tall"><canvas id="c_phase"></canvas></div>
+      <div class="tablewrap" style="max-height:none;margin-top:10px"><table id="phase_table"></table></div></div>
+    <div class="card"><h2>Container ships: berth arrival against the schedule</h2><p class="sub" id="delay_sub"></p><div class="chartbox tall"><canvas id="c_delay"></canvas></div></div>
+    <div class="card"><h2>Why ships waited for VTS clearance</h2><p class="sub">Number of holds by first failing check</p><div class="chartbox tall"><canvas id="c_hold"></canvas></div></div>
+    <div class="card"><h2>Lock passages</h2><p class="sub">Ships entering a chamber, whole run</p><div class="chartbox tall"><canvas id="c_locks"></canvas></div></div>
+    <div class="card"><h2>Traffic-rule and exception events</h2><p class="sub">Whole run</p><div class="chartbox tall"><canvas id="c_rules"></canvas></div></div>
+    <div class="card wide"><h2>Free quay at the container terminals (m)</h2><div class="chartbox tall"><canvas id="c_quay"></canvas></div></div>
+    <div class="card wide"><h2>Ships</h2>
+      <div class="filters">
+        <input type="search" id="q" placeholder="Search id, name, place…" aria-label="Search ships">
+        <select id="fclass" aria-label="Class"><option value="">All classes</option></select>
+        <select id="fstatus" aria-label="Status"><option value="">Any status</option><option>finished</option><option>in area</option><option>removed</option></select>
+        <label><input type="checkbox" id="fwarm" checked> Only after warm-up</label>
+        <span class="empty" id="tcount"></span>
+      </div>
+      <div class="tablewrap"><table id="shiptable"></table></div>
+    </div>
+  </div>
+</section>
+</main>
+<script type="application/json" id="data">__DATA__</script>
+<script>
+"use strict";
+const D = JSON.parse(document.getElementById("data").textContent);
+const M = D.meta, S = D.ships, TS = D.ts, EV = D.events;
+const START = Date.parse(M.start);
+const NS = S.id.length;
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const C = { s: [css("--s1"), css("--s2"), css("--s3"), css("--s4"), css("--s5")], ink: css("--text-primary"),
+            ink2: css("--text-secondary"), muted: css("--muted"), grid: css("--grid"), axis: css("--axis"), surface: css("--surface-1") };
+const DARK = matchMedia("(prefers-color-scheme: dark)").matches;
+const ACTIVITY = ["Under way", "Waiting (clearance, anchor, pilot, lock queue)", "At a berth, in port or in a lock"];
+const KINDS = ["Container ship", "Other sea-going ship", "Inland craft"];
+const MON = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const DAY = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+const pad = n => String(n).padStart(2, "0");
+function when(min) { const d = new Date(START + min * 60000); return `${DAY[d.getUTCDay()]} ${d.getUTCDate()} ${MON[d.getUTCMonth()]} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`; }
+function dayLabel(min) { const d = new Date(START + min * 60000); return `${d.getUTCDate()} ${MON[d.getUTCMonth()]}`; }
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmt = (v, d = 1) => v == null || Number.isNaN(v) ? "–" : Number(v).toFixed(d);
+const label = s => String(s || "").replaceAll("_", " ");
+
+// ------------------------------------------------------------------ playback state
+let T = 0, playing = false, colourBy = "activity", selected = -1, follow = false;
+const END = M.end_min;
+const slider = document.getElementById("slider");
+slider.max = Math.round(END); slider.step = 5;
+
+// ------------------------------------------------------------------ map
+const map = L.map("map", { zoomAnimation: false, preferCanvas: true, zoomControl: true }).setView([51.38, 3.9], 10);
+// base maps: Esri's keyless tile services (OpenStreetMap's own servers refuse pages opened from a file)
+const ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services/";
+const ESRI_ATTR = 'Tiles &copy; <a href="https://www.esri.com">Esri</a> &mdash; Esri, HERE, Garmin, &copy; OpenStreetMap contributors, and the GIS user community';
+const bases = {
+  gray: L.layerGroup([
+    L.tileLayer(ESRI + `Canvas/World_${DARK ? "Dark" : "Light"}_Gray_Base/MapServer/tile/{z}/{y}/{x}`, { attribution: ESRI_ATTR, maxZoom: 16 }),
+    L.tileLayer(ESRI + `Canvas/World_${DARK ? "Dark" : "Light"}_Gray_Reference/MapServer/tile/{z}/{y}/{x}`, { maxZoom: 16 })]),
+  satellite: L.tileLayer(ESRI + "World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    { attribution: 'Tiles &copy; <a href="https://www.esri.com">Esri</a> &mdash; Esri, Maxar, Earthstar Geographics, and the GIS user community', maxZoom: 18 }),
+  none: L.layerGroup(),
+};
+let base = bases.gray.addTo(map);
+map.fitBounds([[51.2, 3.05], [51.62, 4.45]]);
+const layers = {};
+const lineCol = C.ink2;
+layers.anchorages = L.layerGroup(D.layers.anchorages.map(a => a.poly
+  ? L.polygon(a.poly, { color: C.muted, weight: 1, fillOpacity: 0.06, dashArray: "4 3" }).bindTooltip(`Anchorage ${esc(a.name)}`)
+  : L.circleMarker(a.pos, { radius: 5, color: C.muted, weight: 1, fillOpacity: 0.1 }).bindTooltip(`Anchor berth ${esc(a.name)}`))).addTo(map);
+layers.locks = L.layerGroup(D.layers.locks.map(l => L.circleMarker(l.pos, { radius: 6, color: lineCol, weight: 2, fillColor: C.surface, fillOpacity: 1 })
+  .bindTooltip(`<b>Lock ${esc(l.name)}</b><br>${l.chambers.map(esc).join("<br>")}`))).addTo(map);
+layers.terminals = L.layerGroup(D.layers.terminals.map(t => L.polyline(t.line, { color: lineCol, weight: 4, opacity: 0.8 })
+  .bindTooltip(`<b>${esc(t.name)}</b>${t.sts ? `<br>${t.sts} STS cranes` : ""}`))).addTo(map);
+layers.places = L.layerGroup(D.layers.places.map(p => L.circleMarker(p.pos, { radius: 3, color: C.muted, weight: 1, fillOpacity: 0.6 })
+  .bindTooltip(`${esc(label(p.name))} (${esc(label(p.kind))})`)));
+let trackLayer = null;
+
+const meshCanvas = document.getElementById("mesh"), shipCanvas = document.getElementById("shipcanvas");
+let showMesh = false;
+function sizeCanvas(cv) { const r = map.getContainer().getBoundingClientRect(), k = devicePixelRatio || 1;
+  cv.width = r.width * k; cv.height = r.height * k; cv.style.width = r.width + "px"; cv.style.height = r.height + "px";
+  const g = cv.getContext("2d"); g.setTransform(k, 0, 0, k, 0, 0); return g; }
+function drawMesh() {
+  const g = sizeCanvas(meshCanvas);
+  if (!showMesh) return;
+  const b = map.getBounds().pad(0.05);
+  g.fillStyle = C.muted; g.globalAlpha = 0.5;
+  for (const reg of ["sea", "river", "canal", "port"]) {
+    const m = D.layers.mesh[reg]; if (!m) continue;
+    for (let i = 0; i < m.lat.length; i++) {
+      const la = m.lat[i] / 1e5, lo = m.lon[i] / 1e5;
+      if (la < b.getSouth() || la > b.getNorth() || lo < b.getWest() || lo > b.getEast()) continue;
+      const p = map.latLngToContainerPoint([la, lo]); g.fillRect(p.x - 0.5, p.y - 0.5, 1, 1);
+    }
+  }
+}
+
+// positions: per ship, records in time order. A ship under way is v metres along a route (a list of
+// mesh nodes) and is drawn along that route, interpolated within the step; a ship lying still is at a node.
+const P = D.pos, RT = D.routes;
+const nLat = Float64Array.from(D.nodes.lat, v => v / 1e5), nLon = Float64Array.from(D.nodes.lon, v => v / 1e5);
+const routeCum = new Map();
+function cumOf(k) {                                  // cumulative metres along route k (local projection)
+  let c = routeCum.get(k); if (c) return c;
+  const a = RT.off[k], b = RT.off[k + 1]; c = new Float64Array(b - a);
+  for (let j = a + 1; j < b; j++) { const n0 = RT.nodes[j - 1], n1 = RT.nodes[j];
+    const dy = (nLat[n1] - nLat[n0]) * 111320, dx = (nLon[n1] - nLon[n0]) * 111320 * Math.cos(nLat[n0] * Math.PI / 180);
+    c[j - a] = c[j - a - 1] + Math.hypot(dx, dy); }
+  routeCum.set(k, c); return c;
+}
+function routeIndex(c, s) { let lo = 0, hi = c.length - 1; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (c[m] <= s) lo = m; else hi = m - 1; } return lo; }
+function along(k, s) {                                // [lat, lon] s metres along route k
+  const c = cumOf(k), a = RT.off[k], n = c.length;
+  if (n === 1 || s <= 0) return [nLat[RT.nodes[a]], nLon[RT.nodes[a]]];
+  if (s >= c[n - 1]) return [nLat[RT.nodes[a + n - 1]], nLon[RT.nodes[a + n - 1]]];
+  const j = routeIndex(c, s), f = (s - c[j]) / Math.max(c[j + 1] - c[j], 1e-9), n0 = RT.nodes[a + j], n1 = RT.nodes[a + j + 1];
+  return [nLat[n0] + (nLat[n1] - nLat[n0]) * f, nLon[n0] + (nLon[n1] - nLon[n0]) * f];
+}
+function hullPoints(k, s0, s1) {                     // the route between s0 and s1, as [lat, lon] points
+  const c = cumOf(k), a = RT.off[k], pts = [along(k, s0)];
+  for (let j = routeIndex(c, Math.max(s0, 0)) + 1; j < c.length && c[j] < s1; j++) pts.push([nLat[RT.nodes[a + j]], nLon[RT.nodes[a + j]]]);
+  pts.push(along(k, s1)); return pts;
+}
+function lastRec(i, t) { let lo = P.off[i], hi = P.off[i + 1] - 1; if (hi < lo || P.t[lo] > t) return -1;
+  while (lo < hi) { const m = (lo + hi + 1) >> 1; if (P.t[m] <= t) lo = m; else hi = m - 1; } return lo; }
+function shipAt(i, t) {                              // {lat, lon, st, route, head} or null when not in the area
+  if (t < S.spawn[i] || (S.end[i] != null && t > S.end[i])) return null;
+  const r = lastRec(i, t); if (r < 0) return null;
+  const q = r + 1 < P.off[i + 1] ? r + 1 : -1;
+  if (P.route[r] >= 0) {
+    let h = P.v[r];
+    if (q >= 0 && P.route[q] === P.route[r] && P.t[q] - P.t[r] <= M.step_min + 0.01) h += (P.v[q] - h) * (t - P.t[r]) / (P.t[q] - P.t[r]);
+    const [la, lo] = along(P.route[r], h); return { lat: la, lon: lo, st: P.st[r], route: P.route[r], head: h };
+  }
+  let la = nLat[P.v[r]], lo = nLon[P.v[r]];
+  if (P.legacy && q >= 0 && P.t[q] - P.t[r] <= 15.01) { const f = (t - P.t[r]) / (P.t[q] - P.t[r]); la += (nLat[P.v[q]] - la) * f; lo += (nLon[P.v[q]] - lo) * f; }
+  return { lat: la, lon: lo, st: P.st[r], route: -1 };
+}
+let drawn = [];           // [shipIndex, x, y, radius, state]
+function shipColour(i, st) { return colourBy === "kind" ? C.s[M.kind_group[S.cls[i]] ?? 1] : C.s[M.state_group[st] ?? 1]; }
+function drawShips() {
+  const g = sizeCanvas(shipCanvas);
+  drawn = [];
+  const size = map.getSize(), b = map.getBounds().pad(0.1);
+  const mpp = 156543.03392 * Math.cos(map.getCenter().lat * Math.PI / 180) / 2 ** map.getZoom();
+  let sel = null;
+  g.lineCap = "round"; g.lineJoin = "round";
+  for (let i = 0; i < NS; i++) {
+    const a = shipAt(i, T); if (!a) continue;
+    if (i === selected) sel = a;
+    if (!b.contains([a.lat, a.lon])) continue;
+    const p = map.latLngToContainerPoint([a.lat, a.lon]);
+    const col = shipColour(i, a.st);
+    const rad = Math.min(Math.max(2 + S.loa[i] / 70, 2.5), 8);
+    if (a.route >= 0 && S.loa[i] / mpp >= 10) {       // zoomed in: the hull along its route, real length and beam
+      const pts = hullPoints(a.route, a.head - S.loa[i], a.head).map(q => map.latLngToContainerPoint(q));
+      g.beginPath(); pts.forEach((q, k) => k ? g.lineTo(q.x, q.y) : g.moveTo(q.x, q.y));
+      g.strokeStyle = C.surface; g.lineWidth = Math.max(S.beam[i] / mpp, 3) + 2; g.stroke();
+      g.strokeStyle = col; g.lineWidth = Math.max(S.beam[i] / mpp, 3); g.stroke();
+      a.p = p; a.rad = Math.max(S.beam[i] / mpp, 3) / 2 + 2;
+    } else {
+      g.beginPath(); g.arc(p.x, p.y, rad, 0, 2 * Math.PI);
+      g.fillStyle = col; g.fill(); g.lineWidth = 1; g.strokeStyle = C.surface; g.stroke();
+      a.p = p; a.rad = rad;
+    }
+    drawn.push([i, p.x, p.y, a.rad, a.st]);
+  }
+  if (sel && sel.p) { g.beginPath(); g.arc(sel.p.x, sel.p.y, sel.rad + 4, 0, 2 * Math.PI); g.lineWidth = 2; g.strokeStyle = C.ink; g.stroke(); }
+  if (sel && follow) map.panTo([sel.lat, sel.lon], { animate: false });
+}
+function nearest(x, y, within) { let best = -1, bd = within * within;
+  for (const d of drawn) { const dd = (d[1] - x) ** 2 + (d[2] - y) ** 2; if (dd <= Math.max(bd, 0)) { bd = dd; best = d; } } return best; }
+const tip = document.getElementById("tip");
+map.on("mousemove", e => { const d = nearest(e.containerPoint.x, e.containerPoint.y, 9);
+  if (d === -1) { map.getContainer().style.cursor = "";
+    const c = depthOn ? nearestCell(e.containerPoint.x, e.containerPoint.y, 8) : -1;
+    if (c === -1) { tip.style.display = "none"; return; }
+    const [dep, lvl] = cellDepth(c, gaugeLevels(T));
+    tip.innerHTML = `<b>${fmt(dep, 1)} m of water</b><br>charted ${fmt(DC.depth[c] / 100, 1)} m below LAT ${DC.ga[c] < 0 ? "+ basin level" : "+ water level"} ${fmt(lvl, 2)} m`;
+    tip.style.display = "block"; tip.style.left = (e.containerPoint.x + 14) + "px"; tip.style.top = (e.containerPoint.y + 10) + "px"; return; }
+  const i = d[0]; map.getContainer().style.cursor = "pointer";
+  tip.innerHTML = `<b>${esc(S.name[i] || S.id[i])}</b> ${S.name[i] ? `<span style="color:${C.ink2}">${esc(S.id[i])}</span>` : ""}<br>${esc(M.class_label[S.cls[i]] || S.cls[i])} · ${fmt(S.loa[i], 0)} × ${fmt(S.beam[i], 0)} m, T ${fmt(S.draught[i], 1)} m<br>${esc(label(M.states[d[4]]))}`;
+  tip.style.display = "block"; tip.style.left = (e.containerPoint.x + 14) + "px"; tip.style.top = (e.containerPoint.y + 10) + "px"; });
+map.on("mouseout", () => { tip.style.display = "none"; });
+map.on("click", e => { const d = nearest(e.containerPoint.x, e.containerPoint.y, 10); if (d !== -1) selectShip(d[0]); });
+map.on("move zoom resize", () => { drawMesh(); depthView = null; drawDepth(true); drawShips(); });
+
+// ------------------------------------------------------------------ live depth
+const DC = D.depth.cells, DL = D.depth.levels, NC = DC.lat.length;
+const cLat = Float64Array.from(DC.lat, v => v / 1e5), cLon = Float64Array.from(DC.lon, v => v / 1e5);
+const RAMP = ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b"];
+const BINS = [2, 5, 8, 11, 14, 17];                 // m: upper edges of the first six classes
+const CRITICAL = "#d03b3b";
+const depthCanvas = document.getElementById("depthcanvas");
+let depthOn = false, draught = 0, depthDrawnAt = -1e9, depthWall = 0, depthCells = [];
+const cCos = Float64Array.from(DC.ang, a => Math.cos(a * Math.PI / 180)), cSin = Float64Array.from(DC.ang, a => Math.sin(a * Math.PI / 180));
+function gaugeLevels(t) {
+  const k = Math.min(Math.max((t - DL.t[0]) / (DL.t[1] - DL.t[0]), 0), DL.t.length - 1);
+  const i0 = Math.floor(k), i1 = Math.min(i0 + 1, DL.t.length - 1), a = k - i0;
+  return DL.cm.map(g => (g[i0] * (1 - a) + g[i1] * a) / 100);
+}
+function cellDepth(i, gl) {
+  const lvl = DC.ga[i] < 0 ? DC.c[i] / 100 : (1 - DC.w[i] / 1000) * gl[DC.ga[i]] + (DC.w[i] / 1000) * gl[DC.gb[i]] + DC.c[i] / 100;
+  return [DC.depth[i] / 100 + lvl, lvl];
+}
+let depthView = null;                               // cells in view with their screen rectangles
+function depthLayout() {
+  const b = map.getBounds().pad(0.05), z = map.getZoom();
+  const mpp = 156543.03392 * Math.cos(map.getCenter().lat * Math.PI / 180) / 2 ** z;
+  const out = [];
+  for (let i = 0; i < NC; i++) {
+    if (cLat[i] < b.getSouth() || cLat[i] > b.getNorth() || cLon[i] < b.getWest() || cLon[i] > b.getEast()) continue;
+    const p = map.latLngToContainerPoint([cLat[i], cLon[i]]);
+    // a rectangle along the cell's channel (screen y points down: the angle flips), at least 1.5 px
+    out.push([i, p.x, p.y, cCos[i], -cSin[i], Math.max(DC.along[i] / mpp, 1.5) / 2 + 0.3, Math.max(DC.across[i] / mpp, 1.5) / 2 + 0.3]);
+  }
+  return out;
+}
+function drawDepth(force) {
+  if (!force && (Math.abs(T - depthDrawnAt) < 5 || performance.now() - depthWall < 250)) return;
+  depthWall = performance.now();
+  const g = sizeCanvas(depthCanvas);
+  if (!depthOn) { depthCells = []; return; }
+  if (!depthView) depthView = depthLayout();
+  depthCells = depthView;
+  depthDrawnAt = T;
+  const gl = gaugeLevels(T);
+  const buckets = RAMP.map(() => []), shallow = [], dry = [];
+  const need = draught * 1.1;                       // draught + 10 % under-keel clearance
+  for (const c of depthView) {
+    const d = cellDepth(c[0], gl)[0];
+    if (d <= 0) dry.push(c);
+    else if (draught && d < need) shallow.push(c);
+    else { let k = 0; while (k < BINS.length && d >= BINS[k]) k++; buckets[k].push(c); }
+  }
+  const k = devicePixelRatio || 1;
+  const paint = (list, col) => { g.fillStyle = col;
+    for (const [, x, y, ux, uy, hl, hw] of list) { g.setTransform(k * ux, k * uy, -k * uy, k * ux, k * x, k * y); g.fillRect(-hl, -hw, 2 * hl, 2 * hw); } };
+  buckets.forEach((l, j) => paint(l, RAMP[j])); paint(dry, C.muted); paint(shallow, CRITICAL);
+  g.setTransform(k, 0, 0, k, 0, 0);
+}
+document.getElementById("depthon").addEventListener("change", e => { depthOn = e.target.checked; legend(); drawDepth(true); });
+document.getElementById("draught").addEventListener("change", e => { draught = +e.target.value;
+  if (draught && !depthOn) { depthOn = true; document.getElementById("depthon").checked = true; }
+  legend(); drawDepth(true); });
+function nearestCell(x, y, within) { let best = -1, bd = within * within;
+  for (const c of depthCells) { const dd = (c[1] - x) ** 2 + (c[2] - y) ** 2; if (dd <= bd) { bd = dd; best = c[0]; } } return best; }
+
+function legend() {
+  const names = colourBy === "kind" ? KINDS : ACTIVITY;
+  document.getElementById("legend").innerHTML = names.map((n, k) => `<div class="row"><span class="sw" style="background:${C.s[k]}"></span>${n}</div>`).join("")
+    + `<div class="note">Dot size grows with ship length</div>`
+    + (depthOn ? `<div style="font-weight:600;margin-top:8px">Water depth now (m)</div>
+      <div class="ramp">${RAMP.map(c => `<span style="background:${c}"></span>`).join("")}</div>
+      <div class="rampl"><span>0</span>${BINS.map(b => `<span>${b}</span>`).join("")}<span></span></div>
+      <div class="row"><span class="sw" style="background:${C.muted};border-radius:2px"></span>Dry now</div>
+      ${draught ? `<div class="row"><span class="sw" style="background:${CRITICAL};border-radius:2px"></span>&#9888; Too shallow for ${draught} m draught (+10 % UKC)</div>` : ""}
+      <div class="note">${esc(DL.source)}</div>` : "");
+}
+document.querySelectorAll("input[name=colour]").forEach(r => r.addEventListener("change", e => { colourBy = e.target.value; legend(); drawShips(); }));
+document.querySelectorAll("input[data-layer]").forEach(cb => cb.addEventListener("change", e => {
+  const k = e.target.dataset.layer;
+  if (k === "mesh") { showMesh = e.target.checked; drawMesh(); return; }
+  if (e.target.checked) layers[k].addTo(map); else map.removeLayer(layers[k]); }));
+document.querySelectorAll("input[name=base]").forEach(r => r.addEventListener("change", e => {
+  map.removeLayer(base); base = bases[e.target.value].addTo(map);
+  if (e.target.value === "none") { const m = document.querySelector('input[data-layer="mesh"]'); m.checked = true; showMesh = true; drawMesh(); } }));
+document.getElementById("follow").addEventListener("change", e => { follow = e.target.checked; drawShips(); });
+
+// ------------------------------------------------------------------ charts
+Chart.defaults.font.family = 'system-ui, -apple-system, "Segoe UI", sans-serif';
+Chart.defaults.font.size = 12;
+Chart.defaults.color = C.ink2;
+Chart.defaults.borderColor = C.grid;
+const cursor = { id: "cursor", afterDatasetsDraw(ch) { if (!ch.options.plugins.cursor) return;
+  const x = ch.scales.x.getPixelForValue(T), a = ch.chartArea; if (x < a.left || x > a.right) return;
+  const g = ch.ctx; g.save(); g.strokeStyle = C.ink; g.lineWidth = 1; g.setLineDash([4, 3]);
+  g.beginPath(); g.moveTo(x, a.top); g.lineTo(x, a.bottom); g.stroke(); g.restore(); } };
+Chart.register(cursor);
+function timeAxis() { return { type: "linear", min: 0, max: END, grid: { color: C.grid }, border: { color: C.axis },
+  ticks: { stepSize: 1440, callback: v => dayLabel(v), maxRotation: 0, autoSkipPadding: 12, color: C.muted } }; }
+function valueAxis(title, extra = {}) { return { beginAtZero: true, grid: { color: C.grid }, border: { display: false },
+  ticks: { color: C.muted, precision: 0, maxTicksLimit: 5 }, title: { display: !!title, text: title, color: C.ink2 }, ...extra }; }
+const pts = arr => TS.t.map((t, k) => ({ x: t, y: arr[k] }));
+function lineSet(lbl, arr, k, extra = {}) { return { label: lbl, data: pts(arr), borderColor: C.s[k], backgroundColor: C.s[k], borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0, ...extra }; }
+function seekFromChart(ch, ev) { const x = ch.scales.x.getValueForPixel(Chart.helpers.getRelativePosition(ev, ch).x); seek(Math.min(Math.max(x, 0), END)); }
+function timeChart(id, datasets, opts = {}) {
+  const ch = new Chart(document.getElementById(id), { type: "line", data: { datasets },
+    options: { animation: false, maintainAspectRatio: false, parsing: false, normalized: true, spanGaps: true,
+      interaction: { mode: "index", intersect: false },
+      scales: { x: timeAxis(), y: valueAxis(opts.y, opts.yExtra) },
+      plugins: { cursor: true,
+        legend: { display: datasets.length > 1, position: "top", align: "start", labels: { boxWidth: 10, boxHeight: 10, usePointStyle: true, pointStyle: "circle", color: C.ink } },
+        tooltip: { callbacks: { title: it => when(it[0].parsed.x) } } },
+      onClick: (ev, _e, chart) => seekFromChart(chart, ev.native ?? ev) } });
+  return ch;
+}
+const live = [];
+live.push(timeChart("c_activity", [
+  lineSet("Under way", TS.under_way, 0, { fill: "origin", borderColor: C.surface, borderWidth: 1.5, backgroundColor: C.s[0], stack: "a" }),
+  lineSet("Waiting", TS.waiting, 1, { fill: "-1", borderColor: C.surface, borderWidth: 1.5, backgroundColor: C.s[1], stack: "a" }),
+  lineSet("At berth, in port or in a lock", TS.berth, 2, { fill: "-1", borderColor: C.surface, borderWidth: 1.5, backgroundColor: C.s[2], stack: "a" }),
+], { yExtra: { stacked: true } }));
+{ const G = D.depth.cells.gauges, pick = [["vlissingen", "Vlissingen"], ["antwerpen.loodsgebouw", "Antwerp"]].filter(([g]) => G.includes(g));
+  document.getElementById("level_sub").textContent = DL.source;
+  live.push(timeChart("c_level", pick.map(([g, n], k) => ({ label: n, data: DL.t.map((t, j) => ({ x: t, y: DL.cm[G.indexOf(g)][j] / 100 })),
+    borderColor: C.s[k], backgroundColor: C.s[k], borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0 })))); }
+live.push(timeChart("c_pilots", [lineSet("Sea", TS.pilots_busy_sea, 0), lineSet("River", TS.pilots_busy_river, 1), lineSet("Docks", TS.pilots_busy_dock, 2)]));
+live.push(timeChart("c_services", [lineSet("Tugs", TS.tugs_busy, 0), lineSet("Pilot boats", TS.pilot_boats_busy, 1), lineSet("Boatmen crews", TS.boatmen_busy, 2)]));
+live.push(timeChart("c_wind", [lineSet("Wind force", TS.wind_bft, 0, { stepped: true })], { yExtra: { suggestedMax: 8 } }));
+live.push(timeChart("c_vis", [lineSet("Visibility", TS.visibility_m.map(v => v == null ? null : v / 1000), 0, { stepped: true })]));
+
+// ------------------------------------------------------------------ KPIs at the playhead
+function tsIndex(t) { let lo = 0, hi = TS.t.length - 1; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (TS.t[m] <= t) lo = m; else hi = m - 1; } return lo; }
+function kpis() { const k = tsIndex(T);
+  const v = [["In the area", TS.under_way[k] + TS.waiting[k] + TS.berth[k]], ["Under way", TS.under_way[k]], ["Waiting", TS.waiting[k]],
+             ["At anchor", TS.anchored[k]], ["At berth / lock", TS.berth[k]], ["VTS requests", TS.vts_requests?.[k] ?? "–"],
+             ["Wind", `${TS.wind_bft?.[k] ?? "–"} Bft`], ["Visibility", TS.visibility_m?.[k] != null ? `${fmt(TS.visibility_m[k] / 1000, 1)} km` : "–"]];
+  document.getElementById("kpis").innerHTML = v.map(([l, x]) => `<div class="kpi"><div class="v">${x}</div><div class="l">${l}</div></div>`).join(""); }
+
+// ------------------------------------------------------------------ the selected ship
+const STATE_SET = new Set(M.states);
+function selectShip(i) {
+  selected = i;
+  if (trackLayer) { map.removeLayer(trackLayer); trackLayer = null; }
+  // its track: the routes it sailed (along the mesh), or its recorded points for old runs
+  const lines = [], seen = new Set(), pts = [];
+  for (let r = P.off[i]; r < P.off[i + 1]; r++) {
+    if (P.route[r] >= 0) { if (!seen.has(P.route[r])) { seen.add(P.route[r]); const k = P.route[r];
+      lines.push(Array.from({ length: RT.off[k + 1] - RT.off[k] }, (_, j) => [nLat[RT.nodes[RT.off[k] + j]], nLon[RT.nodes[RT.off[k] + j]]])); } }
+    else pts.push([nLat[P.v[r]], nLon[P.v[r]]]);
+  }
+  if (P.legacy && pts.length > 1) lines.push(pts);
+  if (lines.length) trackLayer = L.polyline(lines, { color: C.ink, weight: 2, opacity: 0.55, dashArray: "2 4" }).addTo(map);
+  const first = shipAt(i, Math.min(S.spawn[i] + 5, END));
+  const ev = EV.per_ship[i] || [];
+  const start = S.spawn[i], end = S.end[i] ?? END, span = Math.max(end - start, 1);
+  const segs = [];
+  ev.forEach(([t, c]) => { const n = EV.names[c]; if (STATE_SET.has(n)) segs.push([t, n]); });
+  const bar = segs.map(([t, n], k) => { const t2 = k + 1 < segs.length ? segs[k + 1][0] : end;
+    const w = Math.max((t2 - t) / span * 100, 0); if (n === "exited" || w === 0) return "";
+    const g = M.state_group[M.states.indexOf(n)] ?? 1;
+    return `<div title="${esc(label(n))}: ${when(t)} – ${when(t2)}" style="width:${w}%;background:${C.s[g]}"></div>`; }).join("");
+  const attrs = [["Class", M.class_label[S.cls[i]] || S.cls[i]], ["Size", `${fmt(S.loa[i], 0)} × ${fmt(S.beam[i], 1)} m, draught ${fmt(S.draught[i], 2)} m`]];
+  if (S.teu[i]) attrs.push(["TEU", fmt(S.teu[i], 0)]);
+  attrs.push(["From → to", `${label(S.source[i])} → ${label(S.terminal[i] || S.destination[i])}`]);
+  if (S.exit[i]) attrs.push(["Leaves by", label(S.exit[i])]);
+  attrs.push(["In the area", `${when(start)} → ${S.end[i] != null ? when(end) : "still in the area"} (${fmt(S.hours[i], 1)} h)`]);
+  if (S.sched[i] != null) attrs.push(["Berth", `scheduled ${when(S.sched[i])}, moored ${S.moored[i] != null ? when(S.moored[i]) : "–"}${S.delay[i] != null ? ` (${S.delay[i] >= 0 ? "+" : ""}${fmt(S.delay[i], 1)} h)` : ""}`]);
+  attrs.push(["Status", S.status[i]]);
+  document.getElementById("shipcard").innerHTML = `<h2>${esc(S.name[i] || S.id[i])} <span style="font-weight:400;color:${C.ink2}">${S.name[i] ? esc(S.id[i]) : ""}</span></h2>
+    <div class="attrs">${attrs.map(([a, b]) => `<div>${a}</div><div>${esc(b)}</div>`).join("")}</div>
+    <div class="sub" style="margin:8px 0 0">State over its stay (colours as on the map's activity legend)</div>
+    <div class="timeline">${bar}</div><div class="tlaxis"><span>${when(start)}</span><span>${when(end)}</span></div>
+    <div class="evlist">${ev.map(([t, c, d]) => `<div data-t="${t}"><span class="t">${when(t)}</span><b>${esc(label(EV.names[c]))}</b> ${esc(d)}</div>`).join("")}</div>
+    <div style="margin-top:8px"><button class="btn" id="unsel">Clear selection</button> <button class="btn" id="goto">Go to its arrival</button></div>`;
+  document.querySelectorAll("#shipcard .evlist div").forEach(el => el.addEventListener("click", () => seek(+el.dataset.t)));
+  document.getElementById("unsel").onclick = () => { selected = -1; if (trackLayer) map.removeLayer(trackLayer); trackLayer = null;
+    document.getElementById("shipcard").innerHTML = `<h2>Selected ship</h2><p class="empty">Click a ship on the map, or a row in the Analysis table.</p>`; drawShips(); };
+  document.getElementById("goto").onclick = () => { seek(Math.min(start + 5, END)); const a = shipAt(i, T); if (a) map.setView([a.lat, a.lon], Math.max(map.getZoom(), 12)); else if (first) map.setView([first.lat, first.lon], Math.max(map.getZoom(), 12)); };
+  drawShips();
+}
+
+// ------------------------------------------------------------------ time control
+let lastChart = 0;
+function render(chartsToo) {
+  slider.value = T; document.getElementById("clock").textContent = `${when(T)} UTC · day ${fmt(T / 1440, 1)}`;
+  drawDepth(chartsToo); drawShips(); kpis();
+  const now = performance.now();
+  if (chartsToo || now - lastChart > 150) { live.forEach(c => c.draw()); lastChart = now; }
+}
+function seek(t) { T = t; render(true); }
+slider.addEventListener("input", () => seek(+slider.value));
+const playBtn = document.getElementById("play");
+playBtn.onclick = () => { playing = !playing; playBtn.textContent = playing ? "❚❚ Pause" : "▶ Play"; playBtn.setAttribute("aria-label", playing ? "Pause" : "Play"); if (playing) { if (T >= END) T = 0; last = performance.now(); requestAnimationFrame(tick); } };
+let last = 0;
+function tick(now) { if (!playing) return; const dt = (now - last) / 1000; last = now;
+  T = Math.min(T + (+document.getElementById("speed").value) * 60 * dt, END);
+  render(false);
+  if (T >= END) { playing = false; playBtn.textContent = "▶ Play"; return; }
+  requestAnimationFrame(tick); }
+document.addEventListener("keydown", e => { if (e.target.tagName === "INPUT" && e.target.type !== "range") return;
+  if (e.code === "Space") { e.preventDefault(); playBtn.click(); }
+  if (e.code === "ArrowRight") seek(Math.min(T + 60, END)); if (e.code === "ArrowLeft") seek(Math.max(T - 60, 0)); });
+
+// ------------------------------------------------------------------ tabs
+let analysisBuilt = false;
+document.querySelectorAll(".tabs button").forEach(b => b.addEventListener("click", () => showView(b.dataset.view)));
+function showView(v) {
+  document.querySelectorAll(".tabs button").forEach(x => x.setAttribute("aria-selected", x.dataset.view === v));
+  document.getElementById("live").classList.toggle("on", v === "live");
+  document.getElementById("analysis").classList.toggle("on", v === "analysis");
+  if (v === "analysis" && !analysisBuilt) { buildAnalysis(); analysisBuilt = true; }
+  if (v === "live") { map.invalidateSize(); drawMesh(); drawShips(); }
+}
+
+// ------------------------------------------------------------------ analysis
+function barChart(id, labels, values, opts = {}) {
+  return new Chart(document.getElementById(id), { type: "bar",
+    data: { labels, datasets: [{ data: values, backgroundColor: C.s[0], borderRadius: 4, borderSkipped: "start", maxBarThickness: 22 }] },
+    options: { indexAxis: opts.horizontal ? "y" : "x", animation: false, maintainAspectRatio: false,
+      scales: { x: opts.horizontal ? valueAxis(opts.vtitle) : { grid: { display: false }, ticks: { color: C.muted, maxRotation: 0, autoSkipPadding: 8 }, title: { display: !!opts.xtitle, text: opts.xtitle, color: C.ink2 } },
+                y: opts.horizontal ? { grid: { display: false }, ticks: { color: C.ink } } : valueAxis(opts.vtitle) },
+      plugins: { cursor: false, legend: { display: false }, tooltip: { callbacks: opts.tip ? { label: opts.tip } : {} } } } });
+}
+function buildAnalysis() {
+  const sm = M.summary;
+  const ak = [["Days simulated", fmt(sm.days, 1)], ["Ships generated", sm.ships_generated], ["Finished after warm-up", sm.ships_finished_after_warmup],
+              ["Still in the area", sm.still_in_area], ["Removed (voyage impossible)", sm.removed_infeasible], ["Mean ships at anchor", fmt(sm.anchored_mean, 1)]];
+  document.getElementById("akpis").innerHTML = ak.map(([l, v]) => `<div class="kpi"><div class="v">${v}</div><div class="l">${l}</div></div>`).join("");
+
+  // time in the area by phase, per class: ships that entered after the warm-up and finished
+  const classes = Object.keys(M.class_label).filter(c => S.cls.some((x, i) => x === c && S.after_warmup[i] && S.status[i] === "finished"));
+  const sel = c => S.cls.map((x, i) => i).filter(i => S.cls[i] === c && S.after_warmup[i] && S.status[i] === "finished");
+  const mean = a => a.length ? a.reduce((p, q) => p + q, 0) / a.length : 0;
+  const median = a => { if (!a.length) return null; const s = [...a].sort((p, q) => p - q), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+  const groups = classes.map(sel);
+  document.getElementById("phase_sub").textContent = `Mean hours per ship, ships that entered after the ${fmt(M.warmup_min / 1440, 1)}-day warm-up and left within the run`;
+  new Chart(document.getElementById("c_phase"), { type: "bar",
+    data: { labels: classes.map(c => M.class_label[c]), datasets: M.phases.map((p, k) => ({ label: p, data: groups.map(g => mean(g.map(i => S.phase[p][i]))),
+      backgroundColor: C.s[k], borderColor: C.surface, borderWidth: { right: 2 }, borderSkipped: false, maxBarThickness: 26 })) },
+    options: { indexAxis: "y", animation: false, maintainAspectRatio: false,
+      scales: { x: { ...valueAxis("hours"), stacked: true }, y: { stacked: true, grid: { display: false }, ticks: { color: C.ink } } },
+      plugins: { cursor: false, legend: { position: "top", align: "start", labels: { boxWidth: 10, boxHeight: 10, color: C.ink } },
+        tooltip: { callbacks: { label: it => `${it.dataset.label}: ${fmt(it.parsed.x, 1)} h` } } } } });
+  document.getElementById("phase_table").innerHTML = `<thead><tr><th>Class</th><th class="n">Ships</th><th class="n">Mean h in area</th><th class="n">Median h</th>${M.phases.map(p => `<th class="n">${p} (h)</th>`).join("")}</tr></thead><tbody>`
+    + classes.map((c, k) => { const g = groups[k]; return `<tr><td>${M.class_label[c]}</td><td class="n">${g.length}</td><td class="n">${fmt(mean(g.map(i => S.hours[i])), 1)}</td><td class="n">${fmt(median(g.map(i => S.hours[i])), 1)}</td>${M.phases.map(p => `<td class="n">${fmt(mean(g.map(i => S.phase[p][i])), 1)}</td>`).join("")}</tr>`; }).join("") + "</tbody>";
+
+  // container delay against the schedule
+  const del = S.delay.filter((d, i) => d != null && S.cls[i] === "container");
+  if (del.length) {
+    const w = 6, lo = Math.floor(Math.min(...del) / w) * w, hi = Math.ceil(Math.max(...del) / w) * w + w;
+    const bins = []; for (let b = lo; b < hi; b += w) bins.push(b);
+    const counts = bins.map(b => del.filter(d => d >= b && d < b + w).length);
+    document.getElementById("delay_sub").textContent = `${del.length} moored container ships · median ${fmt(median(del), 1)} h after the scheduled berth time`;
+    barChart("c_delay", bins.map(b => `${b > 0 ? "+" : ""}${b}`), counts, { xtitle: "hours late against the schedule (6 h bins)", vtitle: "ships",
+      tip: it => `${it.parsed.y} ships, ${bins[it.dataIndex]} to ${bins[it.dataIndex] + w} h` });
+  } else document.getElementById("delay_sub").textContent = "No container ship moored in this run";
+
+  const A = D.analysis;
+  const hold = Object.entries(A.vts_hold).sort((a, b) => b[1] - a[1]);
+  barChart("c_hold", hold.map(h => label(h[0])), hold.map(h => h[1]), { horizontal: true, vtitle: "holds" });
+  const locks = Object.entries(A.lock_entries).sort((a, b) => b[1] - a[1]);
+  barChart("c_locks", locks.map(l => l[0]), locks.map(l => l[1]), { horizontal: true, vtitle: "ships" });
+  const rules = Object.entries(A.rules).filter(r => r[1] > 0).sort((a, b) => b[1] - a[1]);
+  const RL = { overtake_denied: "Overtaking refused", reroute: "Detour taken", squeeze_past: "Deadlock let through", hold_encounter_rule: "Held by an encounter rule",
+    held_for_ulcv: "Held in a lock for a ULCV", weather_hold: "Held by the weather", fallback_berth: "ULCV fallback berth", draught_capped: "Container draught capped",
+    no_anchorage: "No anchorage with room", anchorage_full: "Anchorage full on arrival", infeasible: "Voyage impossible (removed)" };
+  barChart("c_rules", rules.map(r => RL[r[0]] || label(r[0])), rules.map(r => r[1]), { horizontal: true, vtitle: "events" });
+  const q = Object.entries(TS.free_quay);
+  new Chart(document.getElementById("c_quay"), { type: "line",
+    data: { datasets: q.map(([n, arr], k) => lineSet(n, arr, k)) },
+    options: { animation: false, maintainAspectRatio: false, parsing: false, interaction: { mode: "index", intersect: false },
+      scales: { x: timeAxis(), y: valueAxis("metres") },
+      plugins: { cursor: false, legend: { position: "top", align: "start", labels: { boxWidth: 10, boxHeight: 10, usePointStyle: true, pointStyle: "circle", color: C.ink } },
+        tooltip: { callbacks: { title: it => when(it[0].parsed.x) } } } } });
+
+  // the ship table
+  const fc = document.getElementById("fclass");
+  Object.entries(M.class_label).forEach(([k, v]) => fc.insertAdjacentHTML("beforeend", `<option value="${k}">${v}</option>`));
+  const waitP = M.phases[1];
+  const cols = [["id", "Ship", i => S.name[i] ? `${esc(S.name[i])} <span style="color:${C.ink2}">${esc(S.id[i])}</span>` : esc(S.id[i]), i => S.name[i] || S.id[i]],
+    ["cls", "Class", i => esc(M.class_label[S.cls[i]] || S.cls[i]), i => S.cls[i]],
+    ["loa", "LOA (m)", i => fmt(S.loa[i], 0), i => S.loa[i], 1], ["beam", "Beam (m)", i => fmt(S.beam[i], 1), i => S.beam[i], 1],
+    ["draught", "Draught (m)", i => fmt(S.draught[i], 2), i => S.draught[i], 1],
+    ["from", "From", i => esc(label(S.source[i])), i => S.source[i]], ["to", "To", i => esc(label(S.terminal[i] || S.destination[i])), i => S.terminal[i] || S.destination[i]],
+    ["hours", "Hours in area", i => fmt(S.hours[i], 1), i => S.hours[i], 1], ["wait", "Hours waiting", i => fmt(S.phase[waitP][i], 1), i => S.phase[waitP][i], 1],
+    ["delay", "Berth delay (h)", i => fmt(S.delay[i], 1), i => S.delay[i] ?? -1e9, 1], ["status", "Status", i => esc(S.status[i]), i => S.status[i]]];
+  let sortCol = 7, sortDir = -1;
+  function drawTable() {
+    const q = document.getElementById("q").value.trim().toLowerCase(), c = fc.value, st = document.getElementById("fstatus").value, warm = document.getElementById("fwarm").checked;
+    let rows = [];
+    for (let i = 0; i < NS; i++) {
+      if (c && S.cls[i] !== c) continue; if (st && S.status[i] !== st) continue; if (warm && !S.after_warmup[i]) continue;
+      if (q && !`${S.id[i]} ${S.name[i]} ${S.source[i]} ${S.destination[i]} ${S.terminal[i]}`.toLowerCase().includes(q)) continue;
+      rows.push(i);
+    }
+    const key = cols[sortCol][3];
+    rows.sort((a, b) => { const x = key(a), y = key(b); return (x < y ? -1 : x > y ? 1 : 0) * sortDir; });
+    const shown = rows.slice(0, 600);
+    document.getElementById("tcount").textContent = `${rows.length} ships${rows.length > shown.length ? `, first ${shown.length} shown` : ""}`;
+    document.getElementById("shiptable").innerHTML = `<thead><tr>${cols.map((cl, k) => `<th class="${cl[4] ? "n" : ""}" data-k="${k}">${cl[1]}${k === sortCol ? (sortDir < 0 ? " ↓" : " ↑") : ""}</th>`).join("")}</tr></thead><tbody>`
+      + shown.map(i => `<tr data-i="${i}">${cols.map(cl => `<td class="${cl[4] ? "n" : ""}">${cl[2](i)}</td>`).join("")}</tr>`).join("") + "</tbody>";
+    document.querySelectorAll("#shiptable th").forEach(th => th.onclick = () => { const k = +th.dataset.k; sortDir = k === sortCol ? -sortDir : -1; sortCol = k; drawTable(); });
+    document.querySelectorAll("#shiptable tbody tr").forEach(tr => tr.onclick = () => { const i = +tr.dataset.i; showView("live"); seek(Math.min(S.spawn[i] + 5, END)); selectShip(i);
+      const a = shipAt(i, T); if (a) map.setView([a.lat, a.lon], Math.max(map.getZoom(), 12)); });
+  }
+  ["q", "fclass", "fstatus", "fwarm"].forEach(id => document.getElementById(id).addEventListener("input", drawTable));
+  drawTable();
+}
+
+legend();
+seek(Math.min(M.warmup_min, END));
+</script>
+</body>
+</html>
