@@ -279,7 +279,7 @@ def build_berth_catalogue(graph, berths, berth_nodes, zone_of, use=None):
         quay, kind = hm["quay_type"], hm["berth_type"] or ""
         official_tanker = None if quay is None and not kind else (quay == "Tanker" or "Tank" in kind or "Gas" in kind)
         out[row.LPL_UN] = {
-            "lpl": row.LPL, "number": None if row.number != row.number else int(row.number),
+            "lpl": _value(row.LPL), "number": None if row.number != row.number else int(row.number),
             "type_code": _int(row.TYPE),
             "size_class": "seagoing" if width >= 40 else "inland" if width >= 20 else "small_craft",
             "length_m": round(length, 1), "width_m": round(width, 1), "heading_deg": float(row.HOEK) if _value(row.HOEK) is not None else None,

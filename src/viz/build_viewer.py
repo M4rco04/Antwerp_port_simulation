@@ -68,6 +68,19 @@ KIND_GROUP = {"container": 0, "bulk_general": 1, "tanker": 1, "passenger": 1, "i
 EVENT_SKIP = {"t", "ship", "event"}
 
 
+def json_safe(v):
+    """v with NaN / infinite floats replaced by None, so the page gets plain JSON (JSON.parse rejects NaN)."""
+    if isinstance(v, float):
+        return v if math.isfinite(v) else None
+    if isinstance(v, dict):
+        return {k: json_safe(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [json_safe(x) for x in v]
+    if isinstance(v, (np.floating, np.integer, np.bool_)):
+        return json_safe(v.item())
+    return v
+
+
 def clean(v):
     if v is None:
         return None
@@ -391,7 +404,7 @@ def build(run: Path, out: Path | None = None, warmup_days: float | None = None):
     data["pos"], data["routes"], data["nodes"] = pack_positions(pos, idx, step_min, run)
     cells = depth_cells()
     data["depth"] = {"cells": cells, "levels": gauge_levels(run, cells["gauges"], start, end_min)}
-    blob = json.dumps(data, separators=(",", ":")).replace("</", "<\\/")
+    blob = json.dumps(json_safe(data), separators=(",", ":"), allow_nan=False).replace("</", "<\\/")
     stats_js = STATS_JS.read_text(encoding="utf-8")
     assert "</script" not in stats_js.lower(), "viewer_stats.js must not contain a closing script tag"
     html = TEMPLATE.read_text(encoding="utf-8").replace("__STATS_JS__", stats_js).replace("__RUN__", run.name).replace("__DATA__", blob)

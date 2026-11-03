@@ -25,10 +25,27 @@ from __future__ import annotations
 
 import gzip
 import json
+import math
 
 
 def _r(x, d=1):
     return None if x is None else round(float(x), d)
+
+
+def json_safe(v):
+    """v with NaN / infinite floats replaced by None: plain JSON (browsers reject NaN)."""
+    if isinstance(v, float):
+        return v if math.isfinite(v) else None
+    if isinstance(v, dict):
+        return {k: json_safe(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [json_safe(x) for x in v]
+    if hasattr(v, "item") and not isinstance(v, (str, bytes)):     # numpy scalars
+        try:
+            return json_safe(v.item())
+        except (TypeError, ValueError):
+            return v
+    return v
 
 
 class PortStateLog:
@@ -130,4 +147,4 @@ class PortStateLog:
         out = {"static": self.static(), "locks": self.locks, "held": self.held, "vts": self.vts,
                "quay_queue": self.quay_queue, "berths": self.berths}
         with gzip.open(path, "wt", encoding="utf-8") as f:
-            json.dump(out, f, separators=(",", ":"), default=str)
+            json.dump(json_safe(out), f, separators=(",", ":"), default=str, allow_nan=False)
