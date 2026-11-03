@@ -4,23 +4,28 @@
     py src/viz/build_viewer.py results/test_7day --open     # ... and open it in the browser
 
 The page needs no server (open the file); it loads Leaflet, Chart.js and the base map tiles from
-the internet. It shows:
+the internet. The main window is the map: the ships animated over the run (play / pause / speed /
+time slider); click a ship for its track, state timeline and events. Its "Statistics" button opens
+a second window, synced to the playhead, with:
 
-    Live      the ships on a map, animated over the run (play / pause / speed / time slider), with
-              charts of the port's state synced to the playhead; click a ship for its track,
-              state timeline and events
+    Port now  every lock chamber (state, ships inside, queues on each side), the VTS queue (in the
+              order the VTS treats it, with what each ship waits for), and every berth with the
+              ship that is coming to it, lies at it or is leaving it
+    Charts    ships by activity, water level, pilots, tugs and boats, queues, wind and visibility
     Analysis  time in the area by phase and class, container delays against the schedule, why
               ships waited for the VTS, lock passages, rule events, free quay at the terminals,
               and a searchable table of every ship
 
 Inputs (written by src/sim/engine.py): positions.csv.gz, ships.csv, events.csv, timeseries.csv,
-summary.json. The map layers (locks, anchorages, terminals, places, mesh) come from the
-navigation graph and are cached in cache/viewer_layers.json.
+summary.json, port_state.json.gz (Port now; runs saved before it existed show a note instead). The
+map layers (locks, anchorages, terminals, places, mesh) come from the navigation graph and are cached
+in cache/viewer_layers.json.
 """
 
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import math
 import pickle
@@ -33,6 +38,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE = Path(__file__).with_name("viewer_template.html")
+STATS_JS = Path(__file__).with_name("viewer_stats.js")      # the statistics window's script, inlined
 GRAPH = ROOT / "cache" / "antwerp_scheldt_graph.pkl"
 LAYER_CACHE = ROOT / "cache" / "viewer_layers.json"
 ARRAYS = ROOT / "cache" / "antwerp_scheldt_graph.arrays.npz"
@@ -332,6 +338,33 @@ def pack_timeseries(ts):
     return out
 
 
+def pack_port(run, idx):
+    """The port state over time (src/sim/port_state.py) with ship ids replaced by ship indices
+    (-1: a ship not in ships.csv). None for runs saved before it was recorded."""
+    f = run / "port_state.json.gz"
+    if not f.is_file():
+        return None
+    with gzip.open(f, "rt", encoding="utf-8") as fh:
+        ps = json.load(fh)
+    i = lambda s: -1 if s is None else idx.get(s, -1)
+    ids = lambda xs: [i(s) for s in xs]
+    locks = {k: [[t, st, side, until, task, i(ts) if ts is not None else None, ids(inside), ids(qa), ids(qb),
+                  i(res) if res is not None else None, rfrom]
+                 for t, st, side, until, task, ts, inside, qa, qb, res, rfrom in recs] for k, recs in ps["locks"].items()}
+    held = {k: [[t, ids(xs)] for t, xs in recs] for k, recs in ps["held"].items()}
+    vts = [[t, [[i(s), *rest] for s, *rest in rows]] for t, rows in ps["vts"]]
+    quay = {k: [[t, [[i(s), since] for s, since in rows]] for t, rows in recs] for k, recs in ps["quay_queue"].items()}
+    berths = {}
+    for k, recs in ps["berths"].items():
+        if k.startswith("T:"):
+            berths[k] = [[t, [[i(s), *rest] for s, *rest in rows]] for t, rows in recs]
+        elif k.startswith("P:"):
+            berths[k] = [[t, [[i(s), st] for s, st in rows]] for t, rows in recs]
+        else:
+            berths[k] = [[t, i(s) if s is not None else None, st] for t, s, st in recs]
+    return {"static": ps["static"], "locks": locks, "held": held, "vts": vts, "quay_queue": quay, "berths": berths}
+
+
 def analysis(events, ships_cols):
     hold = events.loc[events.event == "vts_hold", "reason"].value_counts().to_dict()
     lock_entries = events.loc[(events.event == "enter") & events.ship.notna(), "lock"].value_counts().to_dict()
@@ -353,12 +386,15 @@ def build(run: Path, out: Path | None = None, warmup_days: float | None = None):
                  "kind_group": KIND_GROUP, "phases": list(PHASES)},
         "ships": ship_cols, "events": ev,
         "ts": pack_timeseries(ts), "analysis": analysis(events, ship_cols), "layers": map_layers(),
+        "port": pack_port(run, idx),
     }
     data["pos"], data["routes"], data["nodes"] = pack_positions(pos, idx, step_min, run)
     cells = depth_cells()
     data["depth"] = {"cells": cells, "levels": gauge_levels(run, cells["gauges"], start, end_min)}
     blob = json.dumps(data, separators=(",", ":")).replace("</", "<\\/")
-    html = TEMPLATE.read_text(encoding="utf-8").replace("__DATA__", blob).replace("__RUN__", run.name)
+    stats_js = STATS_JS.read_text(encoding="utf-8")
+    assert "</script" not in stats_js.lower(), "viewer_stats.js must not contain a closing script tag"
+    html = TEMPLATE.read_text(encoding="utf-8").replace("__STATS_JS__", stats_js).replace("__RUN__", run.name).replace("__DATA__", blob)
     out = out or run / "viewer.html"
     out.write_text(html, encoding="utf-8")
     return out, len(html)

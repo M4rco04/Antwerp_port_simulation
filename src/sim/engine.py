@@ -19,7 +19,7 @@ exit. Pilots change zone at Vlissingen and at the locks.
 Usage:
     py src/sim/engine.py --days 7 --seed 1 [--progress-hours 2] [--max-minutes 60]
 Run through src/sim/pipeline.py (results/runs/<id>/, with a viewer). Writes: events.csv, ships.csv, timeseries.csv, summary.json, positions.csv.gz (+ routes.json),
-levels.csv.gz
+levels.csv.gz, port_state.json.gz (locks, VTS queue and berths over time, src/sim/port_state.py)
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
-for sub in ("src/environment", "src/agents", "src/data"):
+for sub in ("src/environment", "src/agents", "src/data", "src/sim"):
     if str(ROOT / sub) not in sys.path:
         sys.path.insert(0, str(ROOT / sub))
 
@@ -53,6 +53,7 @@ from generator import Generator                           # noqa: E402
 from locks import ShipRequest                             # noqa: E402
 from movement import Mover                                # noqa: E402
 from services import PILOT_BOAT_MIN, PilotPool, TugPool, boatmen, pilot_boats   # noqa: E402
+from port_state import PortStateLog                       # noqa: E402
 from ship import State                                    # noqa: E402
 from tide import TideModel                                # noqa: E402
 from vts import PLAN_EVERY, SimpleVTS                     # noqa: E402
@@ -174,6 +175,7 @@ class Simulation:
         self.events, self.series, self.positions = [], [], []
         self.routes_rec, self._last_pos = [], {}
         self.terminal_waiting = {}                     # terminal -> {ship id: since when it waits for quay}   # routes sailed (node lists) and last fixed position per ship
+        self.port_log = PortStateLog(self)             # locks, VTS queue and berths over time (the viewer)
         self.t, self.k = 0.0, 0
         self.level_now = self._levels(0)
         log.info("simulation ready in %.0f s: %d steps, pilots %s, %d pilot boats, %d boatmen crews, %d tugs",
@@ -1069,6 +1071,7 @@ class Simulation:
                **{f"pilots_busy_{z}": self.pilots.busy(z, now) for z in self.pilots.sizes},
                **{f"free_quay_{k}": round(T.free_quay_m()) for k, T in self.terminals.items()}}
         self.series.append(row)
+        self.port_log.record(now)
         # positions for the viewer, every step: a ship under way as (route, distance of its bow along it),
         # so it can be drawn along the water it sails; a ship lying still as its node, only when it changes
         for s in self.ships:
@@ -1183,6 +1186,7 @@ class Simulation:
         pd.DataFrame(self.positions, columns=["step", "ship", "state", "route", "value"]).to_csv(
             out / "positions.csv.gz", index=False)
         (out / "routes.json").write_text(json.dumps(self.routes_rec, separators=(",", ":")))
+        self.port_log.save(out / "port_state.json.gz")
         summary = self.summary(ships)
         (out / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
         return summary

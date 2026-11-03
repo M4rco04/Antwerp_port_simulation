@@ -39,18 +39,27 @@ channel (main route, side channels, secondary channels at sea) and the two main-
 `viewer.html` is one self-contained page (open it in a browser or from the setup page; internet for
 the map tiles and chart library). To rebuild one: `py src/viz/build_viewer.py results/runs/<id>`.
 
-- **Live:** the ships on the map, animated (play / pause, speed, time slider; space and the arrow
+- **Map window:** the ships on the map, animated (play / pause, speed, time slider; space and the arrow
   keys work too), coloured by activity or kind of ship, with anchorages, locks, terminals, pilot
-  points and the simulation mesh as layers. The charts beside it (ships by activity, pilots on duty,
-  tugs / pilot boats / boatmen, wind, visibility) follow the playhead; click one to jump there. Click
-  a ship for its track, its state timeline and every event it logged.
+  points and the simulation mesh as layers. Click a ship for its track, its state timeline and every
+  event it logged. The **Statistics ↗** button opens the statistics in a separate window that follows
+  the playhead (click a ship there to show it on the map):
+  - **Port now:** every lock chamber (open to which side / closing / levelling / opening and the time
+    left, the ship going in or out, the ships inside, the queue on each side in turn order, a chamber
+    kept for a ULCV), the VTS queue (in the VTS's order, where each ship waits, the check that holds it
+    back, how long it has waited), each container terminal (the ships given quay, their berth slots,
+    coming / mooring / at the berth / leaving, the queue for quay) and every other berth used in the run
+    with the ship coming to it or lying at it. From `port_state.json.gz` (`src/sim/port_state.py`);
+    runs saved before it existed show a note.
+  - **Charts:** ships by activity, VTS and lock queues, water level, pilots on duty, tugs / pilot boats /
+    boatmen, wind, visibility; click one to jump there.
 - **Live depth:** the water over every cell at the playhead (charted depth below LAT + the water level
   there, or the basin level behind the locks), coloured by depth class; optionally the water too shallow
   for a chosen draught (+10 % under-keel clearance) in red, and the depth of a cell on hover. Runs save
   their gauge levels (`levels.csv.gz`, tide + surge); for older runs the viewer uses the astronomical tide.
-- **Analysis:** time in the area by phase and class, container delays against the schedule, why ships
-  waited for VTS clearance, lock passages, traffic-rule events, free quay at the container terminals,
-  and a searchable, sortable table of all ships (click a row to see that ship on the map).
+  - **Analysis:** time in the area by phase and class, container delays against the schedule, why ships
+    waited for VTS clearance, lock passages, traffic-rule events, free quay at the container terminals,
+    and a searchable, sortable table of all ships (click a row to see that ship on the map).
 
 Runs saved before the summary recorded the warm-up need `--warmup <days>`.
 
