@@ -7,7 +7,7 @@ Terminal object.
     quay_line      the quay as a polyline (projected metres), built from the quay-side edges of the
                    terminal's berth polygons; positions along it are "quay metres" (s)
     berths         the charted berth slots on it: their quay range (s0, s1) and graph nodes
-    find_position  first fit along the quay: a ship needs LOA plus the mooring gap to each neighbour
+    find_position  best fit along the quay (the shortest free stretch that takes it): a ship needs LOA plus the mooring gap to each neighbour
                    (20-25 m, Antwerp); None if it does not fit (the ship waits at anchor)
     moor / unmoor  occupy / free a stretch of quay
     cranes         STS cranes: at most floor(LOA / 45 m) per ship (crane density), MPET at most 9,
@@ -123,7 +123,9 @@ class Terminal:
         if not fits:
             return None
         if near_s is None:
-            return fits[0][0]
+            # best fit: the shortest free stretch that takes the ship, so long (and deep) stretches stay
+            # free for the long ships that need them; first fit let small ships fragment them
+            return min(fits, key=lambda ab: (ab[1] - ab[0], ab[0]))[0]
         return min((min(max(near_s, a), b - loa) for a, b in fits), key=lambda s: abs(s - near_s))
 
     def free_quay_m(self):

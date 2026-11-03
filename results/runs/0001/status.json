@@ -1,0 +1,10 @@
+{
+  "state": "stopped",
+  "created": "2026-11-02 14:17:18",
+  "progress": 0.2307,
+  "id": "0001",
+  "started": "2026-11-02 14:17:20",
+  "error": "stopped from the setup page",
+  "last_line": "day  6.92 | area  374 done  1219 removed   2 | sailing  65 blocked  37 berth 189 anchored  33 vts  29 lockq  2 | pilots s/r/d 3/42/3 tugs 7 | 2158 s wall, 312 s per day",
+  "finished": "2026-11-02 14:54:48"
+}

@@ -1,0 +1,16 @@
+{
+  "label": "shortest (compare)",
+  "start": "2026-10-21 00:00",
+  "days": 3.0,
+  "warmup": 1.0,
+  "seed": 7,
+  "weather": "bootstrap",
+  "containers": "replay",
+  "container_rate": 1.0,
+  "bunching": true,
+  "delays": true,
+  "background": true,
+  "routing": "shortest",
+  "max_minutes": 60.0,
+  "progress_hours": 2.0
+}

@@ -1,0 +1,9 @@
+{
+  "state": "failed",
+  "created": "2026-11-02 15:01:01",
+  "progress": 0.0,
+  "id": "0002",
+  "started": "2026-11-02 15:01:03",
+  "error": "killed from the setup page (not saved)",
+  "finished": "2026-11-02 15:01:06"
+}

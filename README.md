@@ -3,15 +3,41 @@
 The model itself (its mathematics, every mechanic, and what is taken from each dataset) is described,
 independent of the code, in [docs/MODEL.md](docs/MODEL.md).
 
-## Viewing a run
+## Running a simulation
 
-`src/viz/build_viewer.py` turns a run folder into one self-contained page (`<run>/viewer.html`; open it
-in a browser, no server needed, internet for the map tiles and chart library):
+Start the setup page, set the run up and press **Start run**:
 
 ```
-py src/sim/engine.py --days 7 --out results/my_run
-py src/viz/build_viewer.py results/my_run --open
+py src/ui/app.py                    # opens http://127.0.0.1:8800
 ```
+
+Every run gets the next id and its own folder, `results/runs/<id>/` (0001, 0002, ...), with its settings
+(`config.json`), progress (`status.json`), log (`run.log`), the simulation output and its viewer
+(`viewer.html`), which the page links to. `results/runs/index.html` lists all runs. One run goes at a
+time; it can be stopped from the page. From the command line the same pipeline runs:
+
+```
+py src/sim/pipeline.py --days 7 --label baseline --open      # or: py src/sim/engine.py --days 7
+```
+
+### Fairway lanes
+
+By default (`routing: lanes`, a choice on the setup page, `--routing` on the command line) ships on the
+river hold the starboard side of the buoyed fairway and follow it, instead of the shortest path
+(`src/environment/lanes.py`): sea-going ships the middle of their starboard half, ULCVs and
+tide-dependent ships a little more towards the middle, inland craft at or beyond the starboard edge
+(out of the main fairway). Inland craft and small sea-going ships (80 m or less, no compulsory pilot)
+also use the buoyed side channels of the Western Scheldt (Schaar van de Spijkerplaat, Everingen, Zuid
+Everingen, Middelgat, Vaarwater langs Hoofdplaat / de Paulinapolder) where they are deep enough,
+keeping to the starboard side there; larger ships keep out of them. `routing: shortest` keeps the
+shortest path with only a keep-right preference. The viewer draws the lateral buoys, every buoyed
+channel (main route, side channels, secondary channels at sea) and the two main-fairway lanes
+("Buoyed fairway and lanes" layer).
+
+### The viewer
+
+`viewer.html` is one self-contained page (open it in a browser or from the setup page; internet for
+the map tiles and chart library). To rebuild one: `py src/viz/build_viewer.py results/runs/<id>`.
 
 - **Live:** the ships on the map, animated (play / pause, speed, time slider; space and the arrow
   keys work too), coloured by activity or kind of ship, with anchorages, locks, terminals, pilot
@@ -378,7 +404,7 @@ ok = tidal_window(G, path, model, departures, 12, 15.5, 1.55, currents=CurrentMo
 
 ## Simulation and agents
 
-`py src/sim/engine.py --days 14 --warmup 2 --seed 1` runs the time-stepped simulation (Δt = 5 min).
+`py src/sim/pipeline.py --days 14 --warmup 2 --seed 1` (or the setup page, `py src/ui/app.py`) runs the time-stepped simulation (Δt = 5 min) into `results/runs/<id>/` with its viewer.
 `py src/sim/engine.py --start "2027-01-04 00:00" --days 14 --containers nhpp --container-rate 1.2` runs with fitted container arrivals (+20 %).
 
 - **Progress:** it logs a status line every `--progress-hours` simulated hours (default 2): ships in the area, finished,

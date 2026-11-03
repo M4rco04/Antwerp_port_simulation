@@ -10,7 +10,8 @@ ship when all of these hold:
     tide         the whole route stays deep enough when it leaves now AND 60 min later, sailing at
                  its planning speed (regs §8: the window at the start must be at least 60 min)
     weather      the gates of regs §9 (agents/weather_gates.py): visibility, wind, storm
-    pilot        a pilot (two for the largest ships) is free for its first zone, and a pilot boat
+    pilot        a pilot (two for the largest ships) is free for its first zone, pilots can be booked
+                 for every later zone of the voyage for when it gets there, and a pilot boat
                  for a boarding at sea / at Vlissingen
     destination  its terminal has quay room, or its berth is free
 
@@ -99,7 +100,7 @@ class SimpleVTS:
                 pass
             elif not self.tide_ok(ship, route, now):
                 reason = "tide"
-            elif not sim.pilot_available(ship, route[0], now):
+            elif not sim.pilot_available(ship, route[0], now, route=route):
                 reason = "pilot"
             elif not ship.departing and not self.destination_ok(ship):
                 reason = "destination"

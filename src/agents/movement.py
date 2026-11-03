@@ -35,7 +35,9 @@ on the other ship's starboard side (regs §5.4: overtake on its port side); deto
 off its starboard side. In restricted visibility ships slow down (weather_gates.VIS_SPEED_CAP_KN).
 A ship blocked for REROUTE_AFTER steps looks for a way round the other hulls (overtaking, getting
 out of a head-on blockage); routes keep to starboard. A head-on or crossing deadlock with no way
-round lets the two ships pass after DEADLOCK_AFTER steps (logged as squeeze_past).
+round lets the two ships pass after DEADLOCK_AFTER steps (logged as squeeze_past); so does a knot of
+several stuck ships (a ship blocked that long by a ship that is itself stuck under way passes it and
+the other stuck ships on its way ahead). A ship stuck LANE_FREE_AFTER steps detours without the lanes.
 """
 
 from __future__ import annotations
@@ -58,6 +60,8 @@ HULL_SAMPLE_M = 25.0                    # spacing of the points that find the ce
 ENCOUNTER_STALE = 3                     # a ship blocked this many steps does not count as passing through
 ENCOUNTER_OVERRIDE = 12                 # held this many steps by a rule: the VTS lets it proceed (logged)
 DEADLOCK_AFTER = 12                     # head-on / crossing deadlock with no way round: pass after 1 h
+LANE_FREE_AFTER = 36                    # stuck this long (3 h): detours may ignore the lanes
+LOCK_WAIT_M = 800.0                     # ships bound into a lock join its queue this far before the gate
 LEG = {"sea": "sea", "river": "river", "dock": "river", "canal": "river"}
 WAITING = ("lock_queue", "mooring", "wait_pilot", "pilot_change", "at_berth", "unmooring")
 UNDER_WAY = ("sailing", "to_station", "to_anchorage")
@@ -372,21 +376,42 @@ class Mover:
             return False
         return ship.cells[-1] in set(self.ahead_cells(other))
 
+    def _stuck(self, other):
+        """Under way but not moving: part of a knot, not a ship waiting at a lock or berth."""
+        return other.state.value in UNDER_WAY and other.blocked_steps >= 1
+
     def _deadlocks(self, sailing):
-        """Head-on or crossing deadlocks with no way round (blocked DEADLOCK_AFTER steps): the two
-        ships pass each other this step."""
+        """Deadlocks with no way round, after a ship has been blocked DEADLOCK_AFTER steps: it may pass
+        its blocker, and every other stuck ship on its way ahead, this step. A pair pointing at each
+        other is one case; a knot (ships stopped across each other's way, several abreast, queues
+        behind them) is the general one: whenever the blocker is itself stuck under way. Ships
+        waiting at a lock or a berth are a queue, not a knot, and are not passed."""
         self.allow = {}
+        if not hasattr(self, "squeezed"):
+            self.squeezed = set()
         for ship in sailing:
             if ship.blocked_steps < DEADLOCK_AFTER:
                 continue
             b = self.blocker(ship)
-            if b is None or not (self.head_on(ship, b) or self.blocker(b) is ship):
+            if b is None:
                 continue
-            k, kb = self._key(ship), self._key(b)
-            self.allow.setdefault(k, set()).add(kb)
-            self.allow.setdefault(kb, set()).add(k)
-            if ship.blocked_steps == DEADLOCK_AFTER:
-                ship.note(self.sim.t, "squeeze_past", other=b.id)
+            pair = self.head_on(ship, b) or self.blocker(b) is ship
+            if not (pair or self._stuck(b)):
+                continue
+            k = self._key(ship)
+            others = {self._key(b)}
+            for c in self.ahead_cells(ship):
+                for ko in self.occ.get(c, set()) - {k}:
+                    o = self.ships.get(ko)
+                    if o is not None and self._stuck(o):
+                        others.add(ko)
+            for ko in others:
+                self.allow.setdefault(k, set()).add(ko)
+                self.allow.setdefault(ko, set()).add(k)
+                o = self.ships.get(ko)
+                if o is not None and (ship.id, o.id) not in self.squeezed:
+                    self.squeezed.add((ship.id, o.id))
+                    ship.note(self.sim.t, "squeeze_past", other=o.id, knot=not pair)
 
     def _queueing(self, ship):
         """Waiting behind a ship that is itself waiting (lock, berth, pilot): a queue, not something
@@ -471,7 +496,11 @@ class Mover:
         arrived = []
         reroutes = 0
         for ship in sailing:
-            if ship.head >= ship.s[-1] - 1e-6:
+            # a ship bound into a lock joins its queue LOCK_WAIT_M before the gate: it waits at the
+            # lock's waiting berths in the outer harbour, not in the approach channel, so ships coming
+            # out of the lock find the approach free
+            end = ship.s[-1] - (LOCK_WAIT_M if ship.lock_index >= 0 else 0.0)
+            if ship.head >= end - 1e-6:
                 arrived.append(ship)
                 ship.blocked_steps = 0
             elif ship.id in moved:
@@ -488,6 +517,14 @@ class Mover:
                         reroutes += 1
                         ship.reroutes += 1
                         self.sim.reroute_around(ship, avoid=self.ahead_cells(b))
+                    continue
+                if ship.blocked_steps >= LANE_FREE_AFTER and ship.blocked_steps % REROUTE_AFTER == 0 \
+                        and not self._queueing(ship):
+                    # stuck for hours: a way round that may leave the lanes (the cost of the lanes off)
+                    reroutes += 1
+                    ship.reroutes += 1
+                    avoid = (self.ahead_cells(b) + self.starboard_cells(b)) if b is not None else ()
+                    self.sim.reroute_around(ship, avoid=avoid, lanes=False)
                     continue
                 due = REROUTE_AFTER * 2 ** min(ship.reroutes, 5)
                 if ship.blocked_steps >= due and not self._queueing(ship):

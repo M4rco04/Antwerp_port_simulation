@@ -79,7 +79,9 @@ def clean(v):
 
 def map_layers():
     if LAYER_CACHE.is_file() and GRAPH.is_file() and LAYER_CACHE.stat().st_mtime > GRAPH.stat().st_mtime:
-        return json.loads(LAYER_CACHE.read_text())
+        cached = json.loads(LAYER_CACHE.read_text())
+        if "channels" in cached:
+            return cached
     sys.path.insert(0, str(ROOT / "src" / "environment"))
     from pyproj import Transformer
     import shapely
@@ -122,7 +124,19 @@ def map_layers():
         sel = [n for n, d in nd(data=True) if d.get("region") == region and "latitude" in d]
         mesh[region] = {"lat": [int(round(nd[n]["latitude"] * COORD)) for n in sel],
                         "lon": [int(round(nd[n]["longitude"] * COORD)) for n in sel]}
-    out = {"locks": locks, "anchorages": anchorages, "terminals": terminals, "places": places, "mesh": mesh}
+    # the buoyed fairway: lateral buoys (IALA A: red to port, green to starboard going upstream) and the
+    # traffic lanes ships hold in it (lanes.py)
+    import geopandas as gpd
+    from fast_graph import FastGraph
+    from lanes import Lanes
+    b = gpd.read_file(ROOT / "data" / "charts" / "scheldt_navigation.gpkg", layer="buoys_nl").to_crs("EPSG:4326")
+    b = b[b.category.str.startswith("lateral")]
+    buoys = [{"pos": [round(g.y, 5), round(g.x, 5)], "c": "g" if c == "green" else "r", "name": str(n), "fairway": str(f).title()}
+             for g, c, n, f in zip(b.geometry, b.colour, b.name, b.fairway)]
+    fg = FastGraph.load(ARRAYS)
+    lay = Lanes.for_graph(fg).layers(fg, G.graph["estuary_axis"], to_lonlat)
+    out = {"locks": locks, "anchorages": anchorages, "terminals": terminals, "places": places, "mesh": mesh,
+           "buoys": buoys, "lanes": lay["lanes"], "channels": lay["channels"]}
     LAYER_CACHE.write_text(json.dumps(out))
     return out
 

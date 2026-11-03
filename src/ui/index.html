@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Simulation setup</title>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink2: #52514e; --muted: #898781;
+  --line: #e1e0d9; --ring: rgba(11,11,11,0.10); --accent: #2a78d6; --wash: rgba(42,120,214,0.10);
+  --good: #0ca30c; --critical: #d03b3b; --warning: #fab219;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink2: #c3c2b7; --muted: #898781;
+    --line: #2c2c2a; --ring: rgba(255,255,255,0.10); --accent: #3987e5; --wash: rgba(57,135,229,0.16);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink2: #c3c2b7; --muted: #898781;
+  --line: #2c2c2a; --ring: rgba(255,255,255,0.10); --accent: #3987e5; --wash: rgba(57,135,229,0.16);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { padding: 14px 24px; border-bottom: 1px solid var(--ring); background: var(--surface); }
+header h1 { margin: 0; font-size: 18px; }
+header p { margin: 2px 0 0; color: var(--ink2); }
+main { display: grid; grid-template-columns: minmax(320px, 420px) 1fr; gap: 16px; padding: 16px 24px; max-width: 1500px; }
+.card { background: var(--surface); border: 1px solid var(--ring); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+.card h2 { margin: 0 0 12px; font-size: 15px; }
+fieldset { border: 0; padding: 0; margin: 0 0 14px; }
+legend { font-weight: 600; margin-bottom: 6px; padding: 0; }
+.field { display: grid; grid-template-columns: 150px 1fr; gap: 4px 10px; align-items: center; margin-bottom: 8px; }
+.field label { color: var(--ink2); }
+.hint { grid-column: 2; font-size: 12px; color: var(--muted); margin-top: -2px; }
+input[type=text], input[type=number], input[type=datetime-local], select {
+  font: inherit; color: var(--ink); background: var(--page); border: 1px solid var(--ring); border-radius: 8px; padding: 6px 8px; width: 100%; }
+input[type=checkbox] { accent-color: var(--accent); width: 16px; height: 16px; }
+.check { display: flex; align-items: center; gap: 8px; }
+button { font: inherit; border-radius: 8px; padding: 8px 16px; cursor: pointer; border: 1px solid var(--ring); background: var(--surface); color: var(--ink); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+.msg { margin-top: 10px; font-size: 13px; min-height: 1.4em; }
+.msg.err { color: var(--critical); }
+.bar { height: 10px; background: var(--line); border-radius: 5px; overflow: hidden; margin: 8px 0; }
+.bar div { height: 100%; background: var(--accent); width: 0; transition: width 0.4s; }
+pre { background: var(--page); border: 1px solid var(--line); border-radius: 8px; padding: 8px; font-size: 12px; max-height: 260px; overflow: auto; white-space: pre-wrap; margin: 8px 0 0; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--ink2); font-weight: 600; }
+td.n { text-align: right; font-variant-numeric: tabular-nums; }
+.state { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.state.done .dot { background: var(--good); }
+.state.failed .dot, .state.interrupted .dot { background: var(--critical); }
+.state.stopped .dot { background: var(--warning); }
+.state.active .dot { background: var(--accent); }
+a { color: var(--accent); }
+.small { font-size: 12px; color: var(--ink2); }
+.empty { color: var(--ink2); }
+@media (max-width: 900px) { main { grid-template-columns: 1fr; padding: 16px; } .field { grid-template-columns: 1fr; } .hint { grid-column: 1; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Antwerp port simulation</h1>
+  <p>Set up a run, start it, and open its viewer when it is done. Every run gets an id and its own folder in <code>results/runs/</code>.</p>
+</header>
+<main>
+<section>
+  <form class="card" id="form">
+    <h2>New run</h2>
+    <fieldset>
+      <legend>Run</legend>
+      <div class="field"><label for="label">Label</label><input type="text" id="label" maxlength="80" placeholder="e.g. baseline, +20 % containers"></div>
+      <div class="field"><label for="start">Start (UTC)</label><input type="datetime-local" id="start">
+        <div class="hint" id="starthint">The container schedule covers 20 Oct to 22 Nov 2026</div></div>
+      <div class="field"><label for="days">Days simulated</label><input type="number" id="days" min="0.05" max="60" step="any"></div>
+      <div class="field"><label for="warmup">Warm-up (days)</label><input type="number" id="warmup" min="0" step="any">
+        <div class="hint">Ships entering in the warm-up are left out of the statistics</div></div>
+      <div class="field"><label for="seed">Random seed</label><input type="number" id="seed" step="1"></div>
+    </fieldset>
+    <fieldset>
+      <legend>Traffic</legend>
+      <div class="field"><label for="containers">Container ships</label>
+        <select id="containers"><option value="replay">Replay the schedule</option><option value="nhpp">Poisson process fitted to the schedule</option></select></div>
+      <div class="field" id="row_delays"><label for="delays">Schedule delays</label><span class="check"><input type="checkbox" id="delays"> draw the AIS delay against the schedule</span></div>
+      <div class="field nhpp"><label for="container_rate">Container rate ×</label><input type="number" id="container_rate" min="0.1" max="5" step="any">
+        <div class="hint">1.2 = 20 % more container calls</div></div>
+      <div class="field nhpp"><label for="bunching">Bunching</label><span class="check"><input type="checkbox" id="bunching"> liner calls bunch by day</span></div>
+      <div class="field"><label for="background">Other traffic</label><span class="check"><input type="checkbox" id="background"> bulk, tankers, inland craft, passenger ships</span></div>
+    </fieldset>
+    <fieldset>
+      <legend>Navigation</legend>
+      <div class="field"><label for="routing">Routes</label>
+        <select id="routing"><option value="lanes">Hold the starboard side of the buoyed fairway</option><option value="shortest">Shortest path (keep right only as a preference)</option></select></div>
+    </fieldset>
+    <fieldset>
+      <legend>Weather</legend>
+      <div class="field"><label for="weather">Weather</label>
+        <select id="weather"><option value="bootstrap">Real days of the same season, drawn at random</option><option value="replay">The observed weather of the simulated dates</option></select></div>
+    </fieldset>
+    <fieldset>
+      <legend>Limits</legend>
+      <div class="field"><label for="max_minutes">Stop after (min)</label><input type="number" id="max_minutes" min="1" step="1">
+        <div class="hint">Wall-clock limit; the run is saved where it got to. About 1–2 min per simulated day</div></div>
+    </fieldset>
+    <button class="primary" type="submit" id="go">Start run</button>
+    <button type="button" id="reset">Defaults</button>
+    <div class="msg" id="msg" role="status"></div>
+  </form>
+</section>
+<section>
+  <div class="card" id="current"><h2>Current run</h2><p class="empty">No run is going.</p></div>
+  <div class="card"><h2>Runs</h2><div id="runs"><p class="empty">No runs yet.</p></div>
+    <p class="small">Also listed in <code>results/runs/index.html</code>.</p></div>
+</section>
+</main>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const FIELDS = ["label", "start", "days", "warmup", "seed", "containers", "container_rate", "bunching", "delays", "background", "routing", "weather", "max_minutes"];
+let DEF = {};
+function fill(cfg) {
+  for (const k of FIELDS) { const el = $(k); if (!el || cfg[k] === undefined) continue;
+    if (el.type === "checkbox") el.checked = !!cfg[k];
+    else if (k === "start") el.value = String(cfg[k]).replace(" ", "T").slice(0, 16);
+    else el.value = cfg[k]; }
+  toggle();
+}
+function read() { const c = {}; for (const k of FIELDS) { const el = $(k); c[k] = el.type === "checkbox" ? el.checked : (el.type === "number" ? +el.value : el.value); }
+  c.start = c.start.replace("T", " "); return c; }
+function toggle() {
+  const nhpp = $("containers").value === "nhpp";
+  document.querySelectorAll(".nhpp").forEach(e => e.style.display = nhpp ? "" : "none");
+  $("row_delays").style.display = nhpp ? "none" : "";
+  const d = new Date($("start").value + "Z"), end = new Date(d.getTime() + (+$("days").value || 0) * 864e5);
+  const inside = d >= new Date("2026-10-20T00:00Z") && end <= new Date("2026-11-23T00:00Z");
+  $("starthint").textContent = !nhpp && !inside
+    ? "⚠ Outside 20 Oct – 22 Nov 2026 the schedule has no container calls: use the Poisson process"
+    : "The container schedule covers 20 Oct to 22 Nov 2026";
+}
+["containers", "start", "days"].forEach(k => $(k).addEventListener("input", toggle));
+$("reset").onclick = () => fill(DEF);
+$("form").onsubmit = async e => {
+  e.preventDefault();
+  const c = read();
+  if (c.warmup >= c.days) { $("msg").className = "msg err"; $("msg").textContent = "The warm-up must be shorter than the run."; return; }
+  $("go").disabled = true; $("msg").className = "msg"; $("msg").textContent = "Starting…";
+  const r = await fetch("/api/runs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(c) });
+  const j = await r.json();
+  if (!r.ok) { $("msg").className = "msg err"; $("msg").textContent = j.error || "Could not start the run."; $("go").disabled = false; return; }
+  $("msg").textContent = `Run ${j.id} started.`;
+  poll();
+};
+
+const ACTIVE = ["queued", "loading", "running", "saving", "building viewer", "stopping"];
+function stateCell(s) { const st = s || "unknown"; const cls = st === "done" ? "done" : ACTIVE.includes(st) ? "active" : ["failed", "interrupted"].includes(st) ? "failed" : st === "stopped" ? "stopped" : "";
+  return `<span class="state ${cls}"><span class="dot"></span>${esc(st)}</span>`; }
+function settings(c) {
+  const parts = [`${c.days} d from ${esc(c.start)}`, `seed ${c.seed}`,
+    c.containers === "nhpp" ? `containers: Poisson ×${c.container_rate}${c.bunching ? "" : ", no bunching"}` : `containers: schedule${c.delays ? " + delays" : ""}`,
+    c.background ? "" : "no other traffic", c.routing === "shortest" ? "shortest routes" : "fairway lanes", `weather: ${c.weather}`];
+  return parts.filter(Boolean).join(" · ");
+}
+let logFor = null;
+async function poll() {
+  let data;
+  try { data = await (await fetch("/api/runs")).json(); } catch { return; }
+  const runs = data.runs;
+  $("runs").innerHTML = runs.length ? `<table><thead><tr><th>Id</th><th>Label</th><th>State</th><th>Settings</th><th class="n">Ships</th><th>Created</th><th></th></tr></thead><tbody>${
+    runs.map(r => { const s = r.status, sm = s.summary || {};
+      return `<tr><td>${r.id}</td><td>${esc(r.config.label)}</td><td>${stateCell(s.state)}${s.error ? `<div class="small">${esc(s.error)}</div>` : ""}</td>
+        <td class="small">${settings(r.config)}${s.note ? `<div>${esc(s.note)}</div>` : ""}</td><td class="n">${sm.ships_generated ?? ""}</td><td class="small">${esc(s.created || "")}</td>
+        <td>${r.viewer ? `<a href="/runs/${r.id}/viewer.html" target="_blank" rel="noopener">Open viewer</a>` : ""}</td></tr>`; }).join("")}</tbody></table>` : `<p class="empty">No runs yet.</p>`;
+  const cur = runs.find(r => data.running.includes(r.id));
+  $("go").disabled = !!cur;
+  if (cur) {
+    const s = cur.status, pct = Math.round((s.progress || 0) * 100);
+    if (logFor !== cur.id) logFor = cur.id;
+    let lines = [];
+    try { lines = (await (await fetch(`/api/runs/${cur.id}/log`)).json()).lines; } catch {}
+    $("current").innerHTML = `<h2>Current run: ${cur.id}${cur.config.label ? ` · ${esc(cur.config.label)}` : ""}</h2>
+      <div>${stateCell(s.state)} <span class="small">${pct} % of ${cur.config.days} simulated days</span></div>
+      <div class="bar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><div style="width:${pct}%"></div></div>
+      <div class="small">${esc(s.last_line || "")}</div>
+      <pre>${esc(lines.slice(-14).map(l => l.replace(/^\S+ \S+ /, "")).join("\n"))}</pre>
+      ${s.state === "stopping" ? `<p class="small">Stopping: finishing the current step, then saving the output, the log and the viewer as for a finished run.</p>
+        <p><button type="button" id="kill">Force stop now (nothing more is saved)</button></p>`
+      : ["saving", "building viewer"].includes(s.state) ? `<p class="small">Saving; the viewer follows.</p>`
+      : `<p><button type="button" id="stop">Stop and save this run</button></p>`}`;
+    const post = body => fetch(`/api/runs/${cur.id}/stop`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if ($("stop")) $("stop").onclick = async () => { $("stop").disabled = true; await post({}); poll(); };
+    if ($("kill")) $("kill").onclick = async () => { $("kill").disabled = true; await post({ force: true }); poll(); };
+  } else {
+    const last = runs[0];
+    $("current").innerHTML = `<h2>Current run</h2>` + (last && logFor === last.id
+      ? `<p>Run ${last.id} ${stateCell(last.status.state)}${last.viewer ? ` · <a href="/runs/${last.id}/viewer.html" target="_blank" rel="noopener">Open its viewer</a>` : ""}</p>`
+      : `<p class="empty">No run is going.</p>`);
+  }
+}
+(async () => { DEF = await (await fetch("/api/defaults")).json(); fill(DEF); poll(); setInterval(poll, 2000); })();
+</script>
+</body>
+</html>

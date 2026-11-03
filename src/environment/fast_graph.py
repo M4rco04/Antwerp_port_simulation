@@ -236,11 +236,13 @@ class FastGraph:
         return out
 
     def route(self, source, target, draught_m, ukc_m=0.0, loa_m=0.0, beam_m=0.0, level=None, nodes_mask=None,
-              lock_penalty_m=LOCK_PENALTY_M, keep_right=False, min_clearance=None):
+              lock_penalty_m=LOCK_PENALTY_M, keep_right=False, min_clearance=None, lane_factor=None):
         """Shortest allowed path between two graph node ids (list of node ids); raises
         networkx.NetworkXNoPath like find_route. keep_right: prefer the starboard half of the
         river (regs §5.1), see keep_right_factor. min_clearance: only cells with at least this
-        much water to either side (self.clearance, see clearance.py), for wide ships."""
+        much water to either side (self.clearance, see clearance.py), for wide ships. lane_factor: a
+        cost multiplier per CSR entry (lanes.Lanes.factor: hold the starboard side of the buoyed
+        fairway); where it is nan the keep-right factor applies."""
         import networkx as nx
 
         s, t = self.index[int(source)], self.index[int(target)]
@@ -258,7 +260,10 @@ class FastGraph:
         ok = self.passable_entries(level, draught_m + ukc_m, loa_m, beam_m, ends=(s, t), entries=entries)
         e = entries[ok]
         w = st["weight"][e] + np.where(st["lock_entry"][e], lock_penalty_m / 2, 0.0)
-        if keep_right:
+        if lane_factor is not None:
+            lf = lane_factor[e]
+            w = w * np.where(np.isfinite(lf), lf, self.keep_right_factor()[e] if keep_right else 1.0)
+        elif keep_right:
             w = w * self.keep_right_factor()[e]
         M = sparse.csr_matrix((w, (self.entry_rows[e], self.indices[e])), shape=(self.n, self.n))
         dist, pred = dijkstra(M, directed=True, indices=s, return_predecessors=True)

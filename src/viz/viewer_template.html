@@ -151,6 +151,7 @@ tbody tr:hover { background: var(--accent-wash); }
       <label><input type="radio" name="base" value="satellite"> Satellite</label>
       <label><input type="radio" name="base" value="none"> None (offline: shows the mesh)</label>
       <div class="h">Layers</div>
+      <label><input type="checkbox" data-layer="fairway" checked> Buoyed fairway and lanes</label>
       <label><input type="checkbox" data-layer="anchorages" checked> Anchorages</label>
       <label><input type="checkbox" data-layer="locks" checked> Locks</label>
       <label><input type="checkbox" data-layer="terminals" checked> Container terminals</label>
@@ -255,6 +256,22 @@ layers.terminals = L.layerGroup(D.layers.terminals.map(t => L.polyline(t.line, {
   .bindTooltip(`<b>${esc(t.name)}</b>${t.sts ? `<br>${t.sts} STS cranes` : ""}`))).addTo(map);
 layers.places = L.layerGroup(D.layers.places.map(p => L.circleMarker(p.pos, { radius: 3, color: C.muted, weight: 1, fillOpacity: 0.6 })
   .bindTooltip(`${esc(label(p.name))} (${esc(label(p.kind))})`)));
+const BUOY = { r: "#d03b3b", g: "#0ca30c" };       // the buoys' own colours (IALA A)
+{ const lanesL = D.layers.lanes || {}, items = [];
+  const CH = { main: { color: C.ink2, weight: 1.2, opacity: 0.6, fillOpacity: 0.04, dashArray: null },
+               side: { color: C.s[2], weight: 1.5, opacity: 0.9, fillColor: C.s[2], fillOpacity: 0.10, dashArray: "5 4" },
+               sea: { color: C.muted, weight: 1, opacity: 0.7, fillOpacity: 0.03, dashArray: "2 4" } };
+  const CHTXT = { main: "Main route: all ships",
+                  side: "Side channel: inland craft and small sea-going ships (80 m or less) may use it where deep enough; they keep to its starboard side",
+                  sea: "Secondary channel at sea (drawn only; routing at sea is not laned)" };
+  (D.layers.channels || []).forEach(c => items.push(L.polygon(c.rings, { ...CH[c.kind], fillColor: CH[c.kind].fillColor || CH[c.kind].color })
+    .bindTooltip(`<b>${esc(c.name)}</b><br>${CHTXT[c.kind]}`, { sticky: true })));
+  const lane = (k, txt) => lanesL[k] && items.push(L.polyline(lanesL[k], { color: C.ink2, weight: 1.5, opacity: 0.7, dashArray: "6 6" }).bindTooltip(txt, { sticky: true }));
+  lane("inbound", "Inbound lane: ships going upstream hold the green (starboard) side");
+  lane("outbound", "Outbound lane: ships going to sea hold the red side (their starboard)");
+  (D.layers.buoys || []).forEach(b => items.push(L.circleMarker(b.pos, { radius: 3, color: C.surface, weight: 1, fillColor: BUOY[b.c], fillOpacity: 1 })
+    .bindTooltip(`Buoy ${esc(b.name)}, ${b.c === "g" ? "green, starboard hand" : "red, port hand"} going upstream<br>${esc(b.fairway)}`)));
+  layers.fairway = L.layerGroup(items).addTo(map); }
 let trackLayer = null;
 
 const meshCanvas = document.getElementById("mesh"), shipCanvas = document.getElementById("shipcanvas");
@@ -432,6 +449,11 @@ function legend() {
   const names = colourBy === "kind" ? KINDS : ACTIVITY;
   document.getElementById("legend").innerHTML = names.map((n, k) => `<div class="row"><span class="sw" style="background:${C.s[k]}"></span>${n}</div>`).join("")
     + `<div class="note">Dot size grows with ship length</div>`
+    + (map.hasLayer(layers.fairway) ? `<div class="row" style="margin-top:6px"><span class="sw" style="background:${BUOY.g}"></span>Green buoy (starboard going upstream)</div>
+      <div class="row"><span class="sw" style="background:${BUOY.r}"></span>Red buoy (port going upstream)</div>
+      <div class="row"><span style="width:18px;border-top:2px dashed ${C.ink2}"></span>Lanes in the main fairway, one per direction</div>
+      <div class="row"><span style="width:18px;height:10px;border:1.5px dashed ${C.s[2]};background:${C.s[2]}22"></span>Side channel (inland and small ships)</div>
+      <div class="row"><span style="width:18px;height:10px;border:1px solid ${C.ink2}"></span>Main route</div>` : "")
     + (depthOn ? `<div style="font-weight:600;margin-top:8px">Water depth now (m)</div>
       <div class="ramp">${RAMP.map(c => `<span style="background:${c}"></span>`).join("")}</div>
       <div class="rampl"><span>0</span>${BINS.map(b => `<span>${b}</span>`).join("")}<span></span></div>
@@ -443,7 +465,7 @@ document.querySelectorAll("input[name=colour]").forEach(r => r.addEventListener(
 document.querySelectorAll("input[data-layer]").forEach(cb => cb.addEventListener("change", e => {
   const k = e.target.dataset.layer;
   if (k === "mesh") { showMesh = e.target.checked; drawMesh(); return; }
-  if (e.target.checked) layers[k].addTo(map); else map.removeLayer(layers[k]); }));
+  if (e.target.checked) layers[k].addTo(map); else map.removeLayer(layers[k]); legend(); }));
 document.querySelectorAll("input[name=base]").forEach(r => r.addEventListener("change", e => {
   map.removeLayer(base); base = bases[e.target.value].addTo(map);
   if (e.target.value === "none") { const m = document.querySelector('input[data-layer="mesh"]'); m.checked = true; showMesh = true; drawMesh(); } }));

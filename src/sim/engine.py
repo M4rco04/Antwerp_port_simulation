@@ -18,7 +18,7 @@ exit. Pilots change zone at Vlissingen and at the locks.
 
 Usage:
     py src/sim/engine.py --days 7 --seed 1 [--progress-hours 2] [--max-minutes 60]
-Writes results/<run>/: events.csv, ships.csv, timeseries.csv, summary.json, positions.csv.gz (+ routes.json),
+Run through src/sim/pipeline.py (results/runs/<id>/, with a viewer). Writes: events.csv, ships.csv, timeseries.csv, summary.json, positions.csv.gz (+ routes.json),
 levels.csv.gz
 """
 
@@ -48,6 +48,7 @@ from anchorages import FCFS, TIDE_DEPENDENT, choose_anchorage   # noqa: E402
 from currents import CurrentModel                         # noqa: E402
 from clearance import node_clearance                      # noqa: E402
 from fast_graph import FastGraph                          # noqa: E402
+from lanes import Lanes                                   # noqa: E402
 from generator import Generator                           # noqa: E402
 from locks import ShipRequest                             # noqa: E402
 from movement import Mover                                # noqa: E402
@@ -65,6 +66,11 @@ DT_MIN = 5.0
 LOOKAHEAD_H = 30                       # tide and current computed this far beyond the end (VTS checks)
 BOARDING_MIN = 20.0
 PILOT_CHANGE_MIN = 10.0
+PILOT_BOOK_MARGIN_MIN = 30.0           # pilots for a later stretch are booked from this long before the ETA there
+LOCK_TRANSIT_MIN = 60.0                # a lock passage on the way, for those ETAs
+OFF_FAIRWAY_ANCHORAGE_M = 5000.0       # a ship that must wait for a pilot waits at an anchorage this close
+TERMINAL_FAIR_AFTER_MIN = 24 * 60.0    # once the longest-waiting ship for a terminal has waited this long, later
+                                       # ships get no quay there before it (no starving of long / deep ships)
 TUG_ORDER_M = 15_000.0
 DETOUR_M = 3000.0
 MIN_CELL_CLEARANCE_M = 25.0            # every cell has at least this much water to each side (clearance.py)                      # how far ahead a blocked ship looks for a way round                 # order tugs this far before the berth (buoy 35 for arrivals from sea)
@@ -84,7 +90,8 @@ PILOT_ZONE = {"sea": "sea", "river": "river", "dock": "dock", "canal": "dock"}
 
 class Simulation:
     def __init__(self, start="2026-10-21 00:00", days=7.0, seed=1, delays=True, warmup_days=2.0, background=True,
-                 weather_mode="bootstrap", container_mode="replay", container_rate=1.0, bunching=True):
+                 weather_mode="bootstrap", container_mode="replay", container_rate=1.0, bunching=True,
+                 routing="lanes"):
         t0 = time.time()
         self.start = pd.Timestamp(start, tz="UTC")
         self.n_steps = int(days * 24 * 60 / DT_MIN)
@@ -94,6 +101,10 @@ class Simulation:
         self.fg = FastGraph.load(GRAPH.with_suffix(".arrays.npz"), self.graph)
         fg = self.fg
         fg.clearance = node_clearance(fg)
+        # routing: "lanes" = hold the starboard side of the buoyed fairway (lanes.py); "shortest" = the
+        # shortest allowed path with the plain keep-right preference
+        self.routing = routing
+        self.lanes = Lanes.for_graph(fg) if routing == "lanes" else None
         # environment: tide at the gauges and current along the estuary, for the whole run + lookahead
         times = pd.date_range(self.start, periods=self.n_steps + int(LOOKAHEAD_H * 60 / DT_MIN) + 1, freq=f"{DT_MIN:g}min")
         self.times = times
@@ -161,7 +172,8 @@ class Simulation:
         river = np.flatnonzero(fg.region == fg.code("region", "river")) if "region" in fg.labels else np.arange(fg.n)
         self.reach_from = int(river[np.argmax(fg.depth_m[river])])      # the deepest cell of the main channel
         self.events, self.series, self.positions = [], [], []
-        self.routes_rec, self._last_pos = [], {}   # routes sailed (node lists) and last fixed position per ship
+        self.routes_rec, self._last_pos = [], {}
+        self.terminal_waiting = {}                     # terminal -> {ship id: since when it waits for quay}   # routes sailed (node lists) and last fixed position per ship
         self.t, self.k = 0.0, 0
         self.level_now = self._levels(0)
         log.info("simulation ready in %.0f s: %d steps, pilots %s, %d pilot boats, %d boatmen crews, %d tugs",
@@ -190,9 +202,10 @@ class Simulation:
         return PILOT_ZONE.get(self.mover.zone_label[node], "river")
 
     # ------------------------------------------------------------------ routes
-    def route(self, start, target, ship, level=None, mask=None):
+    def route(self, start, target, ship, level=None, mask=None, lanes=True):
         fg = self.fg
-        key = (start, target, round(ship.need_m * 2) / 2, math.ceil(ship.loa / 25), math.ceil(ship.beam / 5))
+        profile = self.lane_profile(ship) if lanes else None
+        key = (start, target, round(ship.need_m * 2) / 2, math.ceil(ship.loa / 25), math.ceil(ship.beam / 5), profile)
         if level is None and mask is None and key in self.route_cache:
             return self.route_cache[key]
         if level is not None and mask is None and self.failed.get(key, -1) == self.k // 12:
@@ -203,7 +216,8 @@ class Simulation:
         for clearance in ((wide, None) if wide else (None,)):
             try:
                 r = fg.route(start, target, ship.draught, ship.ukc_m, ship.loa, ship.beam, level=level, nodes_mask=mask,
-                             keep_right=True, min_clearance=clearance)
+                             keep_right=True, min_clearance=clearance,
+                             lane_factor=self.lanes.factor(fg, profile) if self.lanes is not None and profile else None)
                 if wide and clearance is None:
                     ship.note(self.t, "narrow_route", beam=ship.beam)    # no route with room for its beam
                 break
@@ -214,6 +228,21 @@ class Simulation:
         elif r is None and mask is None:
             self.failed[key] = self.k // 12
         return r
+
+    def lane_profile(self, ship):
+        """Which lane a ship holds (lanes.py): inland craft at or beyond the main fairway's starboard
+        edge or in the side channels, small sea-going ships (no compulsory pilot) near the starboard
+        edge or in the side channels, ULCVs and tide-dependent ships more towards the middle, other
+        ships in the middle of the starboard half. None when routing is "shortest"."""
+        if self.lanes is None:
+            return None
+        if not ship.sea_going:
+            return "inland"
+        if ship.ulcv or ship.tide_dependent:
+            return "wide"
+        if not ship.needs_pilot:                       # small sea-going ships may take the side channels
+            return "small"
+        return "sea"
 
     def now_ts(self, minutes=None):
         return self.start + pd.Timedelta(minutes=self.t if minutes is None else minutes)
@@ -339,8 +368,17 @@ class Simulation:
             if not fits:
                 ship.infeasible = f"no stretch of quay at {T.name} allows {ship.draught} m over {ship.loa:.0f} m"
                 return None
+            queue = self.terminal_waiting.setdefault(T.name, {})
             if s0 is None:
-                return None                            # quay full: wait
+                queue.setdefault(ship.id, self.t)      # quay full: wait, in this terminal's queue
+                return None
+            first = min(queue, key=queue.get) if queue else None
+            waited = self.t - queue[first] if first is not None else 0.0
+            if (first is not None and first != ship.id and waited >= TERMINAL_FAIR_AFTER_MIN and first in self.by_id
+                    and self.by_id[first].state != State.EXITED):
+                queue.setdefault(ship.id, self.t)      # an earlier ship has waited a day: it goes first
+                return None
+            queue.pop(ship.id, None)
             # the cell to sail to: on a suitable slot under the ship, reachable, nearest its middle
             ok = {b for b, r in T.berths.items() if (r.get("max_draught") is None or r["max_draught"] >= ship.draught)
                   and (not ship.sea_going or r.get("category") in (None, "zeevaart"))}
@@ -411,12 +449,71 @@ class Simulation:
         ship.berth = c
 
     # ------------------------------------------------------------------ pilots
-    def pilot_available(self, ship, start_node, now):
+    def pilot_plan(self, ship, route, now):
+        """The later pilot stretches of a voyage: [(zone, ETA)] at each change of pilot zone along the
+        route, sailing at its planning speed plus LOCK_TRANSIT_MIN per lock before the change."""
+        fg = self.fg
+        r = np.asarray(route, dtype=np.int64)
+        if len(r) < 2:
+            return []
+        if getattr(self, "_pz_code", None) is None:              # pilot zone per node, once
+            names = ("sea", "river", "dock")
+            self._pz_names = names
+            self._pz_code = np.array([names.index(self.pilot_zone(n)) for n in range(fg.n)], dtype=np.int8)
+            self._is_lock = np.zeros(fg.n, dtype=bool)
+            self._is_lock[list(self.lock_of_node)] = True
+        d = np.r_[0.0, np.cumsum(np.hypot(np.diff(fg.x[r]), np.diff(fg.y[r])))]
+        locks = np.cumsum(self._is_lock[r])
+        keep = ~self.mover.special[r] & ~self._is_lock[r]
+        idx = np.flatnonzero(keep)
+        if len(idx) < 2:
+            return []
+        z = self._pz_code[r[idx]]
+        ch = np.flatnonzero(z[1:] != z[:-1]) + 1
+        v = ship.stw_kn("river", NR.planning_speed_kn) * 1852.0 / 60.0
+        return [(self._pz_names[z[k]], now + d[idx[k]] / v + locks[idx[k]] * LOCK_TRANSIT_MIN) for k in ch]
+
+    def pilot_available(self, ship, start_node, now, route=None):
+        """A pilot for the first stretch now (and a pilot boat for a boarding at sea / Vlissingen), and,
+        with the route, pilots that can be booked for every later stretch when the ship gets there."""
         if not ship.needs_pilot:
             return True
         zone = self.pilot_zone(start_node)
         boat = ship.state in (State.WAIT_CLEARANCE, State.ANCHORED) and not ship.departing and zone in ("sea", "river")
-        return self.pilots.available(zone, ship.pilots_needed(zone), now) and (not boat or self.pilot_boats.available(now) > 0)
+        if not (self.pilots.available(zone, ship.pilots_needed(zone), now, ship.id)
+                and (not boat or self.pilot_boats.available(now) > 0)):
+            return False
+        if route is not None:
+            for z, eta in self.pilot_plan(ship, route, now):
+                if not self.pilots.can_book(z, ship.pilots_needed(z), eta - PILOT_BOOK_MARGIN_MIN, now):
+                    return False
+        return True
+
+    def book_pilots(self, ship, route, now):
+        """Book the pilots for the later stretches; False (and nothing booked) if one cannot be."""
+        for z, eta in self.pilot_plan(ship, route, now):
+            if not self.pilots.book(z, ship.pilots_needed(z), ship.id, eta - PILOT_BOOK_MARGIN_MIN, now):
+                self.pilots.cancel(ship.id)
+                return False
+            ship.note(now, "pilot_booked", zone=z, eta_min=round(eta - now))
+        return True
+
+    def wait_for_pilot(self, ship, zone, now):
+        """No pilot for the next stretch: the ship gets out of the fairway and waits, at an anchorage
+        within OFF_FAIRWAY_ANCHORAGE_M (Vlissingen roads, Schaar van Ouden Doel, ...) on the river or at
+        sea, or off the mesh where it is in the docks; it carries on when a pilot is free."""
+        head = ship.cells[-1] if ship.cells else ship.at
+        self.mover.release(ship)
+        node = head
+        if zone in ("sea", "river") and head is not None:
+            near = [(math.hypot(self.fg.x[a] - self.fg.x[head], self.fg.y[a] - self.fg.y[head]), a)
+                    for a in self.anchorage_node.values()]
+            near = [x for x in near if x[0] <= OFF_FAIRWAY_ANCHORAGE_M]
+            if near:
+                node = min(near)[1]
+        ship.at, ship.off_fairway, ship.wait_zone = node, True, zone
+        ship.set_state(State.WAIT_PILOT, now, zone=zone)
+        ship.note(now, "wait_pilot_off_fairway", zone=zone, at=int(node) if node is not None else None)
 
     def take_pilots(self, ship, zone, now, boat=False):
         if boat and not self.pilot_boats.take(now, PILOT_BOAT_MIN):
@@ -469,6 +566,13 @@ class Simulation:
             ship.request_t = now
             self.anchor(ship, name, now)
             if ship.state != State.ANCHORED:
+                self.go(ship, now)
+            elif ship.needs_pilot:
+                self.vts.request(ship, now)            # it waits at anchor for its clearance like any arrival
+            else:                                      # no pilot needed: it weighs anchor and sails
+                self.anchorages[ship.anchorage].leave(ship.id, now)
+                ship.anchorage = None
+                ship.set_state(State.WAIT_CLEARANCE, now)
                 self.go(ship, now)
             return
         ship.at = node
@@ -542,7 +646,11 @@ class Simulation:
             ship.anchorage = None
             route = self.route(ship.at, ship.target, ship) or self.route(ship.at, ship.target, ship, level=self.level_now) or route
         boat = not ship.departing and zone in ("sea", "river")
+        if ship.needs_pilot and not self.book_pilots(ship, route, now):
+            self.vts.request(ship, now)                # a later pilot went to another ship this round
+            return
         if ship.needs_pilot and not self.take_pilots(ship, zone, now, boat=boat):
+            self.pilots.cancel(ship.id)
             self.vts.request(ship, now)                # lost the pilot to another ship this round
             return
         ship.pending_route = route
@@ -579,7 +687,7 @@ class Simulation:
         ship.head = 0.0
         ship.lock_index = end + 1 if end + 1 < len(r) and r[end + 1] in self.lock_of_node else -1
 
-    def reroute_around(self, ship, avoid=()):
+    def reroute_around(self, ship, avoid=(), lanes=True):
         """Blocked for several steps: a detour round the cells other ships hold, within DETOUR_M,
         back onto its own route beyond the blockage (or to the end of this part of the route)."""
         fg, mover = self.fg, self.mover
@@ -597,7 +705,7 @@ class Simulation:
         mask = near & free
         if len(avoid):
             mask[np.asarray(list(avoid))] = False
-        r = self.route(here, rejoin, ship, level=self.level_now, mask=mask)
+        r = self.route(here, rejoin, ship, level=self.level_now, mask=mask, lanes=lanes)
         if r is None or len(r) < 2:
             return
         mover.release(ship)
@@ -607,8 +715,9 @@ class Simulation:
         self._segment(ship)
         if not mover.place(ship):
             ship.waiting_space = True
-        ship.blocked_steps = 0
-        ship.note(self.t, "reroute")
+        # blocked_steps is not reset here: only moving resets it, so a ship that keeps finding detours
+        # without getting anywhere still reaches the deadlock release
+        ship.note(self.t, "reroute" if lanes else "reroute_without_lanes")
 
     def send_to_anchorage(self, ship, now):
         pool = choose_anchorage(self.anchorages, ship.loa, ship.draught, dangerous_signals=ship.dg == "A",
@@ -646,6 +755,9 @@ class Simulation:
             ship.anchorage = None
         self.mover.release(ship)
         self.drop_pilots(ship, now)
+        self.pilots.cancel(ship.id)
+        for q in self.terminal_waiting.values():
+            q.pop(ship.id, None)
         self.vts.withdraw(ship)
         ship.set_state(State.EXITED, now, how=how)
         self.ships.remove(ship)
@@ -747,9 +859,17 @@ class Simulation:
             elif st == State.PILOT_CHANGE:
                 ship.timer -= DT_MIN
                 if ship.timer <= 0:
-                    ship.set_state(State.SAILING, now)
+                    if getattr(ship, "off_fairway", False):   # back from waiting off the fairway
+                        route = self.plan_route(ship, now)
+                        if route is None:
+                            ship.timer = DT_MIN                # no water yet: try again next step
+                            continue
+                        ship.off_fairway = False
+                        self.sail(ship, route, State.SAILING, now)
+                    else:
+                        ship.set_state(State.SAILING, now)
             elif st == State.WAIT_PILOT:
-                zone = self.pilot_zone(ship.cells[-1] if ship.cells else ship.route[-1])
+                zone = getattr(ship, "wait_zone", None) or self.pilot_zone(ship.cells[-1] if ship.cells else ship.route[-1])
                 if self.take_pilots(ship, zone, now, boat=ship.pilot_change_boat):
                     ship.set_state(State.PILOT_CHANGE, now, zone=zone)
                     ship.timer = PILOT_CHANGE_MIN
@@ -903,7 +1023,7 @@ class Simulation:
                     ship.set_state(State.PILOT_CHANGE, now, zone=zone)
                     ship.timer = PILOT_CHANGE_MIN
                 else:
-                    ship.set_state(State.WAIT_PILOT, now, zone=zone)
+                    self.wait_for_pilot(ship, zone, now)
         if (not ship.departing and ship.berth and ship.berth.get("kind") in ("terminal", "berth") and not ship.tugs
                 and ship.tugs_needed() and ship.lock_index < 0 and ship.remaining_m < TUG_ORDER_M):
             x, y = float(self.fg.x[ship.berth["node"]]), float(self.fg.y[ship.berth["node"]])
@@ -987,19 +1107,24 @@ class Simulation:
                  self.pilots.busy("sea", self.t), self.pilots.busy("river", self.t), self.pilots.busy("dock", self.t),
                  self.tugs.busy(self.t), wall_s, wall_s / max(days, 1e-9))
 
-    def run(self, progress_hours=2.0, max_minutes=None):
+    def run(self, progress_hours=2.0, max_minutes=None, should_stop=None):
         """Run all steps, a status line every progress_hours of simulated time; stop early (and
-        say so) after max_minutes of wall-clock time."""
+        say so) after max_minutes of wall-clock time, or when should_stop() says so (a stop asked
+        for from the setup page). Either way the caller saves what was simulated."""
         t0 = time.time()
         every = max(1, int(progress_hours * 60 / DT_MIN))
-        self.stopped_early = False
+        self.stopped_early, self.stop_reason = False, None
         for _ in range(self.n_steps):
+            if should_stop is not None and should_stop():
+                self.stopped_early, self.stop_reason = True, "stopped manually"
+                log.warning("stop requested at day %.2f: stopping and saving", self.t / 1440)
+                break
             self.step()
             wall = time.time() - t0
             if self.k % every == 0:
                 self.progress(wall)
             if max_minutes is not None and wall > max_minutes * 60:
-                self.stopped_early = True
+                self.stopped_early, self.stop_reason = True, "wall-clock limit"
                 log.warning("wall-clock limit of %.0f min reached at day %.2f: stopping and saving", max_minutes, self.t / 1440)
                 break
         self.progress(time.time() - t0)
@@ -1025,6 +1150,7 @@ class Simulation:
         done = ships[ships.finished & (ships.spawn_min >= self.warmup_min)]
         how = pd.Series([s.log[-1].get("how") for s in self.done if s.log])
         out = {"steps": self.k, "days": round(self.t / 1440, 2), "stopped_early": getattr(self, "stopped_early", False),
+               "stop_reason": getattr(self, "stop_reason", None),
                "start": str(self.start), "warmup_min": self.warmup_min, "step_min": DT_MIN,
                "ships_generated": len(ships),
                "removed_infeasible": int((how == "infeasible").sum()),
@@ -1063,34 +1189,9 @@ class Simulation:
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--start", default="2026-10-21 00:00")
-    parser.add_argument("--days", type=float, default=7.0)
-    parser.add_argument("--warmup", type=float, default=2.0)
-    parser.add_argument("--seed", type=int, default=1)
-    parser.add_argument("--no-delays", action="store_true", help="containers berth at their scheduled time")
-    parser.add_argument("--no-background", action="store_true")
-    parser.add_argument("--weather", choices=("bootstrap", "replay"), default="bootstrap",
-                        help="weather: real days of the same season drawn at random, or the observed dates")
-    parser.add_argument("--containers", choices=("replay", "nhpp"), default="replay",
-                        help="container ships: replay the schedule, or a Poisson process fitted to it")
-    parser.add_argument("--container-rate", type=float, default=1.0,
-                        help="nhpp: multiply the fitted container arrival rate (scenarios)")
-    parser.add_argument("--no-bunching", action="store_true",
-                        help="nhpp: plain Poisson, without the daily gamma factor")
-    parser.add_argument("--out", type=Path, default=None)
-    parser.add_argument("--progress-hours", type=float, default=2.0, help="simulated hours between status lines")
-    parser.add_argument("--max-minutes", type=float, default=60.0, help="stop (and save) after this much wall-clock time")
-    args = parser.parse_args()
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    sim = Simulation(args.start, args.days, args.seed, not args.no_delays, args.warmup, not args.no_background,
-                     weather_mode=args.weather, container_mode=args.containers, container_rate=args.container_rate,
-                     bunching=not args.no_bunching)
-    sim.run(args.progress_hours, args.max_minutes)
-    out = args.out or ROOT / "results" / f"run_{pd.Timestamp.now():%Y%m%d_%H%M%S}"
-    summary = sim.save(out)
-    log.info("saved %s", out)
-    print(json.dumps(summary, indent=2, default=str))
+    """Every run goes through the pipeline: a numbered folder in results/runs/ with its viewer."""
+    import pipeline
+    pipeline.main()
 
 
 if __name__ == "__main__":

@@ -1,0 +1,10 @@
+{
+  "state": "failed",
+  "created": "2026-11-02 18:09:21",
+  "progress": 0.6833,
+  "id": "0008",
+  "started": "2026-11-02 18:09:21",
+  "error": "killed at day 20.5: the computer ran low on memory (nothing saved)",
+  "last_line": "day 20.50 | area  474 done  4366 removed   4 | sailing  48 blocked   4 berth 213 anchored  63 vts  55 lockq 10 | pilots s/r/d 16/27/8 tugs 1 | 3768 s wall, 184 s per day",
+  "finished": "2026-11-02 19:13:46"
+}
