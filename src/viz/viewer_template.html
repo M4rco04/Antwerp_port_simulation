@@ -6,7 +6,6 @@
 <title>Simulation viewer · __RUN__</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
 :root {
   color-scheme: light;
@@ -90,8 +89,6 @@ aside { width: 440px; flex: none; overflow-y: auto; border-left: 1px solid var(-
 .evlist b { font-weight: 600; }
 .evlist .t { color: var(--text-secondary); font-variant-numeric: tabular-nums; margin-right: 6px; }
 .empty { color: var(--text-secondary); font-size: 13px; }
-#analysis { overflow-y: auto; display: none; padding: 16px; }
-#analysis.on { display: block; }
 .agrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 12px; max-width: 1500px; }
 .agrid .wide { grid-column: 1 / -1; }
 .akpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-bottom: 12px; max-width: 1500px; }
@@ -106,6 +103,24 @@ tbody tr:hover { background: var(--accent-wash); }
 .filters input[type=search] { font: inherit; padding: 5px 8px; border: 1px solid var(--ring); border-radius: 8px; background: var(--surface-1); color: var(--text-primary); min-width: 200px; }
 .leaflet-container { font: inherit; }
 .leaflet-tooltip { font-size: 12px; }
+#live aside[hidden] { display: none; }
+/* the statistics window */
+body.statswin { height: auto; min-height: 100%; }
+.statswin header { position: sticky; top: 0; z-index: 10; }
+.spage { display: none; padding: 16px; }
+.spage.on { display: block; }
+.kpis.k8 { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); max-width: 1500px; }
+.ptable td { white-space: normal; vertical-align: top; }
+.ptable td div + div { margin-top: 2px; }
+.ptable tbody tr { cursor: default; }
+.ptable tr.lockfirst td { border-top: 2px solid var(--axis); }
+a.ship { color: var(--s1); text-decoration: none; font-weight: 600; cursor: pointer; }
+a.ship:hover { text-decoration: underline; }
+.mut { color: var(--text-secondary); font-size: 12px; }
+.st { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.card h3 { font-size: 13px; margin: 12px 0 4px; font-weight: 600; }
+.card h3:first-of-type { margin-top: 4px; }
+.note { background: var(--accent-wash); border-radius: 8px; padding: 10px 12px; max-width: 1500px; margin-bottom: 12px; }
 @media (max-width: 900px) {
   main { height: auto; }
   .view.on { display: block; }
@@ -120,10 +135,7 @@ tbody tr:hover { background: var(--accent-wash); }
 <body>
 <header>
   <h1>Simulation viewer <small>· __RUN__</small></h1>
-  <div class="tabs" role="tablist">
-    <button role="tab" aria-selected="true" data-view="live">Live</button>
-    <button role="tab" aria-selected="false" data-view="analysis">Analysis</button>
-  </div>
+  <button class="btn" id="statsbtn" title="Open the locks, VTS queue, berths, charts and analysis in a separate window">Statistics ↗</button>
   <div class="player">
     <button class="btn" id="play" aria-label="Play">▶ Play</button>
     <select id="speed" aria-label="Playback speed">
@@ -168,18 +180,55 @@ tbody tr:hover { background: var(--accent-wash); }
     </div>
     <div class="legend" id="legend"></div>
   </div>
-  <aside>
-    <div class="kpis" id="kpis"></div>
-    <div class="card" id="shipcard"><h2>Selected ship</h2><p class="empty">Click a ship on the map, or a row in the Analysis table.</p></div>
+  <aside id="side" hidden>
+    <div class="card" id="shipcard"></div>
+  </aside>
+</section>
+</main>
+<!-- the statistics window: written into a window of its own by openStats() -->
+<template id="stats_body">
+<header>
+  <h1>Statistics <small>· __RUN__</small></h1>
+  <div class="tabs" role="tablist">
+    <button role="tab" aria-selected="true" data-view="now">Port now</button>
+    <button role="tab" aria-selected="false" data-view="charts">Charts</button>
+    <button role="tab" aria-selected="false" data-view="analysis">Analysis</button>
+  </div>
+  <div class="player">
+    <button class="btn" id="play" aria-label="Play">▶ Play</button>
+    <input type="range" id="slider" min="0" max="1" step="5" value="0" aria-label="Simulation time">
+    <span class="clock" id="clock"></span>
+  </div>
+</header>
+<div class="note" id="gone" hidden style="margin:16px">The map window was closed or reloaded: open the statistics again from it.</div>
+<section class="spage on" id="now">
+  <div class="kpis k8" id="kpis"></div>
+  <div class="note" id="noport" hidden>This run was saved before the simulation recorded the locks, the VTS queue and the berths over time. Run it again to see them here; the charts and the analysis work as before.</div>
+  <div class="agrid" id="portgrid">
+    <div class="card wide"><h2>VTS queue</h2><p class="sub" id="vts_sub"></p><div class="tablewrap"><table class="ptable" id="vts"></table></div></div>
+    <div class="card wide"><h2>Locks</h2><p class="sub" id="locks_sub">Each chamber: what it does now, the ships in it and the ships waiting on each side, in the order they go in. Click a ship to show it on the map.</p><div class="tablewrap" style="max-height:none"><table class="ptable" id="locks"></table></div></div>
+    <div class="card wide"><h2>Container terminals</h2><p class="sub" id="terms_sub">The quay each ship is given (kept from the moment it is cleared), the berth slots it covers and where the ship is now</p><div id="terms"></div></div>
+    <div class="card wide"><h2>Berths</h2><p class="sub" id="berths_sub"></p>
+      <div class="filters">
+        <input type="search" id="bq" placeholder="Search berth, zone, ship…" aria-label="Search berths">
+        <select id="bstatus" aria-label="Status"><option value="">Any ship</option><option value="coming">Ship coming</option><option value="here">Ship at the berth</option><option value="free">Free now</option></select>
+      </div>
+      <div class="tablewrap"><table class="ptable" id="berths"></table></div></div>
+    <div class="card wide"><h2>Other ports</h2><p class="sub">Ports without a berth model (the ship stays a while, then leaves)</p><div id="ports"></div></div>
+  </div>
+</section>
+<section class="spage" id="charts">
+  <div class="agrid">
     <div class="card"><h2>Ships in the area by activity</h2><p class="sub">Click a chart to jump to that time</p><div class="chartbox"><canvas id="c_activity"></canvas></div></div>
+    <div class="card"><h2>Queues</h2><p class="sub">Ships waiting for VTS clearance and ships waiting at a lock</p><div class="chartbox"><canvas id="c_queues"></canvas></div></div>
     <div class="card"><h2>Water level (m above LAT)</h2><p class="sub" id="level_sub"></p><div class="chartbox"><canvas id="c_level"></canvas></div></div>
     <div class="card"><h2>Pilots on duty</h2><div class="chartbox"><canvas id="c_pilots"></canvas></div></div>
     <div class="card"><h2>Tugs, pilot boats and boatmen in use</h2><div class="chartbox"><canvas id="c_services"></canvas></div></div>
     <div class="card"><h2>Wind force (Beaufort)</h2><div class="chartbox"><canvas id="c_wind"></canvas></div></div>
     <div class="card"><h2>Visibility (km)</h2><div class="chartbox"><canvas id="c_vis"></canvas></div></div>
-  </aside>
+  </div>
 </section>
-<section class="view" id="analysis">
+<section class="spage" id="analysis">
   <div class="akpis" id="akpis"></div>
   <div class="agrid">
     <div class="card wide"><h2>Mean time in the area by phase</h2><p class="sub" id="phase_sub"></p><div class="chartbox tall"><canvas id="c_phase"></canvas></div>
@@ -201,7 +250,10 @@ tbody tr:hover { background: var(--accent-wash); }
     </div>
   </div>
 </section>
-</main>
+</template>
+<script type="text/plain" id="stats_js">
+__STATS_JS__
+</script>
 <script type="application/json" id="data">__DATA__</script>
 <script>
 "use strict";
@@ -471,61 +523,13 @@ document.querySelectorAll("input[name=base]").forEach(r => r.addEventListener("c
   if (e.target.value === "none") { const m = document.querySelector('input[data-layer="mesh"]'); m.checked = true; showMesh = true; drawMesh(); } }));
 document.getElementById("follow").addEventListener("change", e => { follow = e.target.checked; drawShips(); });
 
-// ------------------------------------------------------------------ charts
-Chart.defaults.font.family = 'system-ui, -apple-system, "Segoe UI", sans-serif';
-Chart.defaults.font.size = 12;
-Chart.defaults.color = C.ink2;
-Chart.defaults.borderColor = C.grid;
-const cursor = { id: "cursor", afterDatasetsDraw(ch) { if (!ch.options.plugins.cursor) return;
-  const x = ch.scales.x.getPixelForValue(T), a = ch.chartArea; if (x < a.left || x > a.right) return;
-  const g = ch.ctx; g.save(); g.strokeStyle = C.ink; g.lineWidth = 1; g.setLineDash([4, 3]);
-  g.beginPath(); g.moveTo(x, a.top); g.lineTo(x, a.bottom); g.stroke(); g.restore(); } };
-Chart.register(cursor);
-function timeAxis() { return { type: "linear", min: 0, max: END, grid: { color: C.grid }, border: { color: C.axis },
-  ticks: { stepSize: 1440, callback: v => dayLabel(v), maxRotation: 0, autoSkipPadding: 12, color: C.muted } }; }
-function valueAxis(title, extra = {}) { return { beginAtZero: true, grid: { color: C.grid }, border: { display: false },
-  ticks: { color: C.muted, precision: 0, maxTicksLimit: 5 }, title: { display: !!title, text: title, color: C.ink2 }, ...extra }; }
-const pts = arr => TS.t.map((t, k) => ({ x: t, y: arr[k] }));
-function lineSet(lbl, arr, k, extra = {}) { return { label: lbl, data: pts(arr), borderColor: C.s[k], backgroundColor: C.s[k], borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0, ...extra }; }
-function seekFromChart(ch, ev) { const x = ch.scales.x.getValueForPixel(Chart.helpers.getRelativePosition(ev, ch).x); seek(Math.min(Math.max(x, 0), END)); }
-function timeChart(id, datasets, opts = {}) {
-  const ch = new Chart(document.getElementById(id), { type: "line", data: { datasets },
-    options: { animation: false, maintainAspectRatio: false, parsing: false, normalized: true, spanGaps: true,
-      interaction: { mode: "index", intersect: false },
-      scales: { x: timeAxis(), y: valueAxis(opts.y, opts.yExtra) },
-      plugins: { cursor: true,
-        legend: { display: datasets.length > 1, position: "top", align: "start", labels: { boxWidth: 10, boxHeight: 10, usePointStyle: true, pointStyle: "circle", color: C.ink } },
-        tooltip: { callbacks: { title: it => when(it[0].parsed.x) } } },
-      onClick: (ev, _e, chart) => seekFromChart(chart, ev.native ?? ev) } });
-  return ch;
-}
-const live = [];
-live.push(timeChart("c_activity", [
-  lineSet("Under way", TS.under_way, 0, { fill: "origin", borderColor: C.surface, borderWidth: 1.5, backgroundColor: C.s[0], stack: "a" }),
-  lineSet("Waiting", TS.waiting, 1, { fill: "-1", borderColor: C.surface, borderWidth: 1.5, backgroundColor: C.s[1], stack: "a" }),
-  lineSet("At berth, in port or in a lock", TS.berth, 2, { fill: "-1", borderColor: C.surface, borderWidth: 1.5, backgroundColor: C.s[2], stack: "a" }),
-], { yExtra: { stacked: true } }));
-{ const G = D.depth.cells.gauges, pick = [["vlissingen", "Vlissingen"], ["antwerpen.loodsgebouw", "Antwerp"]].filter(([g]) => G.includes(g));
-  document.getElementById("level_sub").textContent = DL.source;
-  live.push(timeChart("c_level", pick.map(([g, n], k) => ({ label: n, data: DL.t.map((t, j) => ({ x: t, y: DL.cm[G.indexOf(g)][j] / 100 })),
-    borderColor: C.s[k], backgroundColor: C.s[k], borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0 })))); }
-live.push(timeChart("c_pilots", [lineSet("Sea", TS.pilots_busy_sea, 0), lineSet("River", TS.pilots_busy_river, 1), lineSet("Docks", TS.pilots_busy_dock, 2)]));
-live.push(timeChart("c_services", [lineSet("Tugs", TS.tugs_busy, 0), lineSet("Pilot boats", TS.pilot_boats_busy, 1), lineSet("Boatmen crews", TS.boatmen_busy, 2)]));
-live.push(timeChart("c_wind", [lineSet("Wind force", TS.wind_bft, 0, { stepped: true })], { yExtra: { suggestedMax: 8 } }));
-live.push(timeChart("c_vis", [lineSet("Visibility", TS.visibility_m.map(v => v == null ? null : v / 1000), 0, { stepped: true })]));
-
-// ------------------------------------------------------------------ KPIs at the playhead
-function tsIndex(t) { let lo = 0, hi = TS.t.length - 1; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (TS.t[m] <= t) lo = m; else hi = m - 1; } return lo; }
-function kpis() { const k = tsIndex(T);
-  const v = [["In the area", TS.under_way[k] + TS.waiting[k] + TS.berth[k]], ["Under way", TS.under_way[k]], ["Waiting", TS.waiting[k]],
-             ["At anchor", TS.anchored[k]], ["At berth / lock", TS.berth[k]], ["VTS requests", TS.vts_requests?.[k] ?? "–"],
-             ["Wind", `${TS.wind_bft?.[k] ?? "–"} Bft`], ["Visibility", TS.visibility_m?.[k] != null ? `${fmt(TS.visibility_m[k] / 1000, 1)} km` : "–"]];
-  document.getElementById("kpis").innerHTML = v.map(([l, x]) => `<div class="kpi"><div class="v">${x}</div><div class="l">${l}</div></div>`).join(""); }
-
 // ------------------------------------------------------------------ the selected ship
 const STATE_SET = new Set(M.states);
+const side = document.getElementById("side");
+function showSide(on) { if (side.hidden === !on) return; side.hidden = !on; map.invalidateSize(); drawMesh(); depthView = null; drawDepth(true); }
 function selectShip(i) {
   selected = i;
+  showSide(true);
   if (trackLayer) { map.removeLayer(trackLayer); trackLayer = null; }
   // its track: the routes it sailed (along the mesh), or its recorded points for old runs
   const lines = [], seen = new Set(), pts = [];
@@ -560,138 +564,55 @@ function selectShip(i) {
     <div style="margin-top:8px"><button class="btn" id="unsel">Clear selection</button> <button class="btn" id="goto">Go to its arrival</button></div>`;
   document.querySelectorAll("#shipcard .evlist div").forEach(el => el.addEventListener("click", () => seek(+el.dataset.t)));
   document.getElementById("unsel").onclick = () => { selected = -1; if (trackLayer) map.removeLayer(trackLayer); trackLayer = null;
-    document.getElementById("shipcard").innerHTML = `<h2>Selected ship</h2><p class="empty">Click a ship on the map, or a row in the Analysis table.</p>`; drawShips(); };
+    showSide(false); drawShips(); };
   document.getElementById("goto").onclick = () => { seek(Math.min(start + 5, END)); const a = shipAt(i, T); if (a) map.setView([a.lat, a.lon], Math.max(map.getZoom(), 12)); else if (first) map.setView([first.lat, first.lon], Math.max(map.getZoom(), 12)); };
   drawShips();
 }
 
 // ------------------------------------------------------------------ time control
-let lastChart = 0;
-function render(chartsToo) {
+function render(force) {
   slider.value = T; document.getElementById("clock").textContent = `${when(T)} UTC · day ${fmt(T / 1440, 1)}`;
-  drawDepth(chartsToo); drawShips(); kpis();
-  const now = performance.now();
-  if (chartsToo || now - lastChart > 150) { live.forEach(c => c.draw()); lastChart = now; }
+  drawDepth(force); drawShips(); notifyStats(!!force);
 }
 function seek(t) { T = t; render(true); }
 slider.addEventListener("input", () => seek(+slider.value));
 const playBtn = document.getElementById("play");
-playBtn.onclick = () => { playing = !playing; playBtn.textContent = playing ? "❚❚ Pause" : "▶ Play"; playBtn.setAttribute("aria-label", playing ? "Pause" : "Play"); if (playing) { if (T >= END) T = 0; last = performance.now(); requestAnimationFrame(tick); } };
+playBtn.onclick = () => { playing = !playing; playBtn.textContent = playing ? "❚❚ Pause" : "▶ Play"; playBtn.setAttribute("aria-label", playing ? "Pause" : "Play"); if (playing) { if (T >= END) T = 0; last = performance.now(); requestAnimationFrame(tick); } else notifyStats(true); };
 let last = 0;
 function tick(now) { if (!playing) return; const dt = (now - last) / 1000; last = now;
   T = Math.min(T + (+document.getElementById("speed").value) * 60 * dt, END);
   render(false);
-  if (T >= END) { playing = false; playBtn.textContent = "▶ Play"; return; }
+  if (T >= END) { playing = false; playBtn.textContent = "▶ Play"; notifyStats(true); return; }
   requestAnimationFrame(tick); }
 document.addEventListener("keydown", e => { if (e.target.tagName === "INPUT" && e.target.type !== "range") return;
   if (e.code === "Space") { e.preventDefault(); playBtn.click(); }
   if (e.code === "ArrowRight") seek(Math.min(T + 60, END)); if (e.code === "ArrowLeft") seek(Math.max(T - 60, 0)); });
 
-// ------------------------------------------------------------------ tabs
-let analysisBuilt = false;
-document.querySelectorAll(".tabs button").forEach(b => b.addEventListener("click", () => showView(b.dataset.view)));
-function showView(v) {
-  document.querySelectorAll(".tabs button").forEach(x => x.setAttribute("aria-selected", x.dataset.view === v));
-  document.getElementById("live").classList.toggle("on", v === "live");
-  document.getElementById("analysis").classList.toggle("on", v === "analysis");
-  if (v === "analysis" && !analysisBuilt) { buildAnalysis(); analysisBuilt = true; }
-  if (v === "live") { map.invalidateSize(); drawMesh(); drawShips(); }
+// ------------------------------------------------------------------ the statistics window
+// A second window (written from the template above, with its own Chart.js) shows the locks, the VTS
+// queue, the berths, the charts and the analysis. It reads the data and the playhead through VIEWER.
+window.VIEWER = {
+  D, getT: () => T, isPlaying: () => playing, seek: t => seek(Math.min(Math.max(t, 0), END)),
+  togglePlay: () => playBtn.click(),
+  select(i) { selectShip(i); const a = shipAt(i, T); if (a) map.setView([a.lat, a.lon], Math.max(map.getZoom(), 12)); },
+  showShip(i) { seek(Math.min(S.spawn[i] + 5, END)); this.select(i); },
+};
+let SW = null;
+function openStats() {
+  if (SW && !SW.closed && SW.statsTick) { SW.focus(); return; }
+  SW = window.open("", `stats_${M.run}`, "width=1280,height=900");
+  if (!SW) { alert("The browser blocked the statistics window: allow pop-ups for this page and try again."); return; }
+  const d = SW.document;
+  d.open();
+  d.write(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Statistics · ${esc(M.run)}</title>${document.querySelector("style").outerHTML}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"><\/script></head>
+<body class="statswin">${document.getElementById("stats_body").innerHTML}<script>${document.getElementById("stats_js").textContent}<\/script></body></html>`);
+  d.close();
 }
-
-// ------------------------------------------------------------------ analysis
-function barChart(id, labels, values, opts = {}) {
-  return new Chart(document.getElementById(id), { type: "bar",
-    data: { labels, datasets: [{ data: values, backgroundColor: C.s[0], borderRadius: 4, borderSkipped: "start", maxBarThickness: 22 }] },
-    options: { indexAxis: opts.horizontal ? "y" : "x", animation: false, maintainAspectRatio: false,
-      scales: { x: opts.horizontal ? valueAxis(opts.vtitle) : { grid: { display: false }, ticks: { color: C.muted, maxRotation: 0, autoSkipPadding: 8 }, title: { display: !!opts.xtitle, text: opts.xtitle, color: C.ink2 } },
-                y: opts.horizontal ? { grid: { display: false }, ticks: { color: C.ink } } : valueAxis(opts.vtitle) },
-      plugins: { cursor: false, legend: { display: false }, tooltip: { callbacks: opts.tip ? { label: opts.tip } : {} } } } });
-}
-function buildAnalysis() {
-  const sm = M.summary;
-  const ak = [["Days simulated", fmt(sm.days, 1)], ["Ships generated", sm.ships_generated], ["Finished after warm-up", sm.ships_finished_after_warmup],
-              ["Still in the area", sm.still_in_area], ["Removed (voyage impossible)", sm.removed_infeasible], ["Mean ships at anchor", fmt(sm.anchored_mean, 1)]];
-  document.getElementById("akpis").innerHTML = ak.map(([l, v]) => `<div class="kpi"><div class="v">${v}</div><div class="l">${l}</div></div>`).join("");
-
-  // time in the area by phase, per class: ships that entered after the warm-up and finished
-  const classes = Object.keys(M.class_label).filter(c => S.cls.some((x, i) => x === c && S.after_warmup[i] && S.status[i] === "finished"));
-  const sel = c => S.cls.map((x, i) => i).filter(i => S.cls[i] === c && S.after_warmup[i] && S.status[i] === "finished");
-  const mean = a => a.length ? a.reduce((p, q) => p + q, 0) / a.length : 0;
-  const median = a => { if (!a.length) return null; const s = [...a].sort((p, q) => p - q), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
-  const groups = classes.map(sel);
-  document.getElementById("phase_sub").textContent = `Mean hours per ship, ships that entered after the ${fmt(M.warmup_min / 1440, 1)}-day warm-up and left within the run`;
-  new Chart(document.getElementById("c_phase"), { type: "bar",
-    data: { labels: classes.map(c => M.class_label[c]), datasets: M.phases.map((p, k) => ({ label: p, data: groups.map(g => mean(g.map(i => S.phase[p][i]))),
-      backgroundColor: C.s[k], borderColor: C.surface, borderWidth: { right: 2 }, borderSkipped: false, maxBarThickness: 26 })) },
-    options: { indexAxis: "y", animation: false, maintainAspectRatio: false,
-      scales: { x: { ...valueAxis("hours"), stacked: true }, y: { stacked: true, grid: { display: false }, ticks: { color: C.ink } } },
-      plugins: { cursor: false, legend: { position: "top", align: "start", labels: { boxWidth: 10, boxHeight: 10, color: C.ink } },
-        tooltip: { callbacks: { label: it => `${it.dataset.label}: ${fmt(it.parsed.x, 1)} h` } } } } });
-  document.getElementById("phase_table").innerHTML = `<thead><tr><th>Class</th><th class="n">Ships</th><th class="n">Mean h in area</th><th class="n">Median h</th>${M.phases.map(p => `<th class="n">${p} (h)</th>`).join("")}</tr></thead><tbody>`
-    + classes.map((c, k) => { const g = groups[k]; return `<tr><td>${M.class_label[c]}</td><td class="n">${g.length}</td><td class="n">${fmt(mean(g.map(i => S.hours[i])), 1)}</td><td class="n">${fmt(median(g.map(i => S.hours[i])), 1)}</td>${M.phases.map(p => `<td class="n">${fmt(mean(g.map(i => S.phase[p][i])), 1)}</td>`).join("")}</tr>`; }).join("") + "</tbody>";
-
-  // container delay against the schedule
-  const del = S.delay.filter((d, i) => d != null && S.cls[i] === "container");
-  if (del.length) {
-    const w = 6, lo = Math.floor(Math.min(...del) / w) * w, hi = Math.ceil(Math.max(...del) / w) * w + w;
-    const bins = []; for (let b = lo; b < hi; b += w) bins.push(b);
-    const counts = bins.map(b => del.filter(d => d >= b && d < b + w).length);
-    document.getElementById("delay_sub").textContent = `${del.length} moored container ships · median ${fmt(median(del), 1)} h after the scheduled berth time`;
-    barChart("c_delay", bins.map(b => `${b > 0 ? "+" : ""}${b}`), counts, { xtitle: "hours late against the schedule (6 h bins)", vtitle: "ships",
-      tip: it => `${it.parsed.y} ships, ${bins[it.dataIndex]} to ${bins[it.dataIndex] + w} h` });
-  } else document.getElementById("delay_sub").textContent = "No container ship moored in this run";
-
-  const A = D.analysis;
-  const hold = Object.entries(A.vts_hold).sort((a, b) => b[1] - a[1]);
-  barChart("c_hold", hold.map(h => label(h[0])), hold.map(h => h[1]), { horizontal: true, vtitle: "holds" });
-  const locks = Object.entries(A.lock_entries).sort((a, b) => b[1] - a[1]);
-  barChart("c_locks", locks.map(l => l[0]), locks.map(l => l[1]), { horizontal: true, vtitle: "ships" });
-  const rules = Object.entries(A.rules).filter(r => r[1] > 0).sort((a, b) => b[1] - a[1]);
-  const RL = { overtake_denied: "Overtaking refused", reroute: "Detour taken", squeeze_past: "Deadlock let through", hold_encounter_rule: "Held by an encounter rule",
-    held_for_ulcv: "Held in a lock for a ULCV", weather_hold: "Held by the weather", fallback_berth: "ULCV fallback berth", draught_capped: "Container draught capped",
-    no_anchorage: "No anchorage with room", anchorage_full: "Anchorage full on arrival", infeasible: "Voyage impossible (removed)" };
-  barChart("c_rules", rules.map(r => RL[r[0]] || label(r[0])), rules.map(r => r[1]), { horizontal: true, vtitle: "events" });
-  const q = Object.entries(TS.free_quay);
-  new Chart(document.getElementById("c_quay"), { type: "line",
-    data: { datasets: q.map(([n, arr], k) => lineSet(n, arr, k)) },
-    options: { animation: false, maintainAspectRatio: false, parsing: false, interaction: { mode: "index", intersect: false },
-      scales: { x: timeAxis(), y: valueAxis("metres") },
-      plugins: { cursor: false, legend: { position: "top", align: "start", labels: { boxWidth: 10, boxHeight: 10, usePointStyle: true, pointStyle: "circle", color: C.ink } },
-        tooltip: { callbacks: { title: it => when(it[0].parsed.x) } } } } });
-
-  // the ship table
-  const fc = document.getElementById("fclass");
-  Object.entries(M.class_label).forEach(([k, v]) => fc.insertAdjacentHTML("beforeend", `<option value="${k}">${v}</option>`));
-  const waitP = M.phases[1];
-  const cols = [["id", "Ship", i => S.name[i] ? `${esc(S.name[i])} <span style="color:${C.ink2}">${esc(S.id[i])}</span>` : esc(S.id[i]), i => S.name[i] || S.id[i]],
-    ["cls", "Class", i => esc(M.class_label[S.cls[i]] || S.cls[i]), i => S.cls[i]],
-    ["loa", "LOA (m)", i => fmt(S.loa[i], 0), i => S.loa[i], 1], ["beam", "Beam (m)", i => fmt(S.beam[i], 1), i => S.beam[i], 1],
-    ["draught", "Draught (m)", i => fmt(S.draught[i], 2), i => S.draught[i], 1],
-    ["from", "From", i => esc(label(S.source[i])), i => S.source[i]], ["to", "To", i => esc(label(S.terminal[i] || S.destination[i])), i => S.terminal[i] || S.destination[i]],
-    ["hours", "Hours in area", i => fmt(S.hours[i], 1), i => S.hours[i], 1], ["wait", "Hours waiting", i => fmt(S.phase[waitP][i], 1), i => S.phase[waitP][i], 1],
-    ["delay", "Berth delay (h)", i => fmt(S.delay[i], 1), i => S.delay[i] ?? -1e9, 1], ["status", "Status", i => esc(S.status[i]), i => S.status[i]]];
-  let sortCol = 7, sortDir = -1;
-  function drawTable() {
-    const q = document.getElementById("q").value.trim().toLowerCase(), c = fc.value, st = document.getElementById("fstatus").value, warm = document.getElementById("fwarm").checked;
-    let rows = [];
-    for (let i = 0; i < NS; i++) {
-      if (c && S.cls[i] !== c) continue; if (st && S.status[i] !== st) continue; if (warm && !S.after_warmup[i]) continue;
-      if (q && !`${S.id[i]} ${S.name[i]} ${S.source[i]} ${S.destination[i]} ${S.terminal[i]}`.toLowerCase().includes(q)) continue;
-      rows.push(i);
-    }
-    const key = cols[sortCol][3];
-    rows.sort((a, b) => { const x = key(a), y = key(b); return (x < y ? -1 : x > y ? 1 : 0) * sortDir; });
-    const shown = rows.slice(0, 600);
-    document.getElementById("tcount").textContent = `${rows.length} ships${rows.length > shown.length ? `, first ${shown.length} shown` : ""}`;
-    document.getElementById("shiptable").innerHTML = `<thead><tr>${cols.map((cl, k) => `<th class="${cl[4] ? "n" : ""}" data-k="${k}">${cl[1]}${k === sortCol ? (sortDir < 0 ? " ↓" : " ↑") : ""}</th>`).join("")}</tr></thead><tbody>`
-      + shown.map(i => `<tr data-i="${i}">${cols.map(cl => `<td class="${cl[4] ? "n" : ""}">${cl[2](i)}</td>`).join("")}</tr>`).join("") + "</tbody>";
-    document.querySelectorAll("#shiptable th").forEach(th => th.onclick = () => { const k = +th.dataset.k; sortDir = k === sortCol ? -sortDir : -1; sortCol = k; drawTable(); });
-    document.querySelectorAll("#shiptable tbody tr").forEach(tr => tr.onclick = () => { const i = +tr.dataset.i; showView("live"); seek(Math.min(S.spawn[i] + 5, END)); selectShip(i);
-      const a = shipAt(i, T); if (a) map.setView([a.lat, a.lon], Math.max(map.getZoom(), 12)); });
-  }
-  ["q", "fclass", "fstatus", "fwarm"].forEach(id => document.getElementById(id).addEventListener("input", drawTable));
-  drawTable();
-}
+document.getElementById("statsbtn").addEventListener("click", openStats);
+function notifyStats(force) { if (SW && !SW.closed && SW.statsTick) { try { SW.statsTick(T, force); } catch (e) { console.warn(e); } } }
+addEventListener("pagehide", () => { if (SW && !SW.closed) SW.close(); });
 
 legend();
 seek(Math.min(M.warmup_min, END));
