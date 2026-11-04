@@ -1,0 +1,10 @@
+{
+  "state": "failed",
+  "created": "2026-11-04 18:00:35",
+  "progress": 0.0,
+  "id": "0018",
+  "started": "2026-11-04 18:00:35",
+  "error": "the KNMI record does not cover the simulated period: use mode='bootstrap'",
+  "finished": "2026-11-04 18:00:37",
+  "wall_s": 2
+}
