@@ -197,7 +197,7 @@ function renderBerths(t) {
     const [html, txt, kind] = berthStatus(i == null ? null : st);
     if (kind === "coming") coming++; else if (kind === "here") here++;
     if (want && kind !== want) continue;
-    if (q && !`${b} ${info.lpl} ${info.zone} ${info.type} ${i != null && i >= 0 ? `${S.id[i]} ${S.name[i]}` : ""} ${txt}`.toLowerCase().includes(q)) continue;
+    if (q && !`${b} ${info.lpl ?? ""} ${info.zone ?? ""} ${info.type ?? ""} ${i != null && i >= 0 ? `${S.id[i]} ${S.name[i]}` : ""} ${txt}`.toLowerCase().includes(q)) continue;
     rows.push([b, info, i, html, kind]);
   }
   rows.sort((a, b) => (a[4] === "free") - (b[4] === "free") || String(a[1].zone).localeCompare(String(b[1].zone)) || a[0].localeCompare(b[0], undefined, { numeric: true }));
