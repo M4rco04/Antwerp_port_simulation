@@ -122,7 +122,15 @@ def write_status(path: Path, **fields):
     st.update(fields, id=path.name)
     tmp = path / "status.json.tmp"
     tmp.write_text(json.dumps(st, indent=2, default=str))
-    tmp.replace(path / "status.json")
+    # on Windows the replace fails while another program (the setup page, an editor, a virus scanner) has
+    # status.json open: try again briefly, then skip this update rather than kill the run (the next
+    # progress line writes it again)
+    for attempt in range(5):
+        try:
+            tmp.replace(path / "status.json")
+            return
+        except PermissionError:
+            time.sleep(0.2 * (attempt + 1))
 
 
 class ProgressHandler(logging.Handler):

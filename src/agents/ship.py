@@ -90,6 +90,8 @@ class Ship:
     hull: list = field(default_factory=list)       # every cell its hull (beam + clearance) covers
     blocked_steps: int = 0
     reroutes: int = 0
+    side: int = 1                                  # side of its lane it keeps: +1 starboard, -1 port (overtaking)
+    lateral_m: float = 0.0                         # how far it stands off the route's centre line (+ starboard)
     lock_voyage: bool = False                      # the voyage it is cleared for passes a lock
     infeasible: str | None = None                  # why its voyage cannot be made (it is removed)
     encounter_hold: int = 0

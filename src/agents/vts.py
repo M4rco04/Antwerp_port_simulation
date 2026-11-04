@@ -6,18 +6,24 @@ from a berth or from a port. Every PLAN_EVERY steps (15 min) the VTS walks the r
 (distress, then tide-dependent ships, then first come first served by request time) and clears a
 ship when all of these hold:
 
-    route        a route exists for its draught (+ UKC), size and the locks it needs
-    tide         the whole route stays deep enough when it leaves now AND 60 min later, sailing at
-                 its planning speed (regs §8: the window at the start must be at least 60 min)
+    route        a route exists for its draught (+ UKC), size and the locks it needs (engine.voyage_route:
+                 valid at the run's lowest water if possible, else at the lowest water of the next 7 h,
+                 else at the level now; to a sea exit only as far as the pilot station, then open sea)
+    tide         the whole route (up to the pilot station on the way out) stays deep enough when it
+                 leaves now AND 60 min later, sailing at its planning speed (regs §8: the window at
+                 the start must be at least 60 min)
     weather      the gates of regs §9 (agents/weather_gates.py): visibility, wind, storm
-    pilot        a pilot (two for the largest ships) is free for its first zone, pilots can be booked
-                 for every later zone of the voyage for when it gets there, and a pilot boat
-                 for a boarding at sea / at Vlissingen
-    destination  its terminal has quay room, or its berth is free
+    pilot        a pilot (two for the largest ships) is free for its first pilot stretch, pilots can
+                 be booked for every later stretch of the voyage for when it gets there (never for a
+                 time before now), and a pilot boat for a boarding at sea / at Vlissingen
+    destination  its terminal has quay room, or its berth is free (the one the route goes to: the
+                 destination is chosen once per round)
 
 An arrival at the pilot station that is not cleared at once goes to an anchorage
-(anchorages.choose_anchorage, regs §11) and waits there. Ships that need no pilot (inland craft,
-small ships) do not ask: they sail when their route exists.
+(anchorages.choose_anchorage, regs §11) and waits there; if none has room or can be reached it
+waits at the station and is sent at a later round. A ship under way to its anchorage is skipped
+until it is there. Ships that need no pilot (inland craft, small ships) do not ask: they sail when
+their route exists.
 """
 
 from __future__ import annotations
@@ -38,8 +44,12 @@ class SimpleVTS:
         self.cleared = 0
 
     def request(self, ship, now):
-        if ship.request_t is None:
+        # the time of this voyage's request: a departure is queued from when it is ready to leave, not
+        # from when it asked to come in (that put every departure ahead of every waiting arrival); a ship
+        # put back after losing its pilot keeps its place
+        if ship.request_t is None or getattr(ship, "request_leg", None) != ship.departing:
             ship.request_t = now
+            ship.request_leg = ship.departing
         if ship not in self.requests:
             self.requests.append(ship)
             ship.note(now, "vts_request", departing=ship.departing)
@@ -55,6 +65,9 @@ class SimpleVTS:
         sim = self.sim
         fg = sim.fg
         r = np.asarray(route, dtype=np.int64)
+        free_from = getattr(route, "free_from", None)
+        if free_from is not None:              # the open-sea leg after the pilot station is not draught-limited
+            r = r[:free_from]
         if r.size < 2:                         # already there
             return True
         d = np.r_[0.0, np.cumsum(np.hypot(np.diff(fg.x[r]), np.diff(fg.y[r])))]
@@ -76,13 +89,15 @@ class SimpleVTS:
     def plan(self, now):
         sim = self.sim
         for ship in sorted(self.requests, key=lambda s: s.vts_priority()):
+            if ship.state.value == "to_anchorage":
+                continue                       # under way to its anchorage (no place to start from): asked once there
             ship.infeasible = None
-            route = sim.plan_route(ship, now)
+            route = sim.plan_route(ship, now)  # chooses the destination once (ship.target) and routes to it
+            target = ship.target
             reason = None
             if route is None:
-                target = sim.choose_target(ship)
                 reason = "destination" if target is None else "no_route"
-                if target is not None and ship.at is not None and not sim.reachable_between(ship.at, target, ship):
+                if target is not None and ship.at is not None and not sim.voyage_reachable(ship, ship.at, target):
                     ship.infeasible = "no route at high water"
             if ship.infeasible:
                 ship.note(now, "infeasible", why=ship.infeasible)
@@ -109,8 +124,9 @@ class SimpleVTS:
                     ship.note(now, "vts_hold", reason=reason, at=ship.at, target=ship.target, state=ship.state.value)
                     ship.times["vts_wait_reason"] = reason
                 if not ship.departing and ship.state.value == "wait_clearance" and getattr(ship, "at_station", False):
-                    ship.at_station = False
-                    sim.send_to_anchorage(ship, now)
+                    # to an anchorage; none with room or reachable now: it stays and is sent at a later round
+                    # (it used to be left at the station for good, holding its place in the queue)
+                    ship.at_station = not sim.send_to_anchorage(ship, now)
                 continue
             self.requests.remove(ship)
             self.cleared += 1

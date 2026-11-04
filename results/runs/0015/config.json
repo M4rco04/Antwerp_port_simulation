@@ -1,0 +1,16 @@
+{
+  "label": "VTS queue + overlap fixes, final (cf. 0012)",
+  "start": "2026-10-21 00:00",
+  "days": 7.0,
+  "warmup": 2.0,
+  "seed": 1,
+  "weather": "bootstrap",
+  "containers": "replay",
+  "container_rate": 1.0,
+  "bunching": true,
+  "delays": true,
+  "background": true,
+  "routing": "lanes",
+  "max_minutes": 90.0,
+  "progress_hours": 2.0
+}

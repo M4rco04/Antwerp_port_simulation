@@ -374,18 +374,26 @@ function hullPoints(k, s0, s1) {                     // the route between s0 and
 }
 function lastRec(i, t) { let lo = P.off[i], hi = P.off[i + 1] - 1; if (hi < lo || P.t[lo] > t) return -1;
   while (lo < hi) { const m = (lo + hi + 1) >> 1; if (P.t[m] <= t) lo = m; else hi = m - 1; } return lo; }
-function shipAt(i, t) {                              // {lat, lon, st, route, head} or null when not in the area
+function sideways(k, h, m) {                         // [dLat, dLon] for m metres to starboard of route k at h
+  const s0 = Math.max(h - 40, 0), [a0, b0] = along(k, s0), [a1, b1] = along(k, s0 + 40);
+  const cos = Math.cos(a1 * Math.PI / 180), dy = (a1 - a0) * 111320, dx = (b1 - b0) * 111320 * cos, n = Math.hypot(dx, dy);
+  if (n < 1e-6) return [0, 0];
+  return [-dx / n * m / 111320, dy / n * m / (111320 * cos)];      // starboard of (east dx, north dy) is (dy, -dx)
+}
+function shipAt(i, t) {                              // {lat, lon, st, route, head, dLat, dLon} or null when not in the area
   if (t < S.spawn[i] || (S.end[i] != null && t > S.end[i])) return null;
   const r = lastRec(i, t); if (r < 0) return null;
   const q = r + 1 < P.off[i + 1] ? r + 1 : -1;
   if (P.route[r] >= 0) {
     let h = P.v[r];
     if (q >= 0 && P.route[q] === P.route[r] && P.t[q] - P.t[r] <= M.step_min + 0.01) h += (P.v[q] - h) * (t - P.t[r]) / (P.t[q] - P.t[r]);
-    const [la, lo] = along(P.route[r], h); return { lat: la, lon: lo, st: P.st[r], route: P.route[r], head: h };
+    // standing off the centre line while passing in one lane (the engine's ship.lateral_m)
+    const [dLat, dLon] = P.lat && P.lat[r] ? sideways(P.route[r], h, P.lat[r]) : [0, 0];
+    const [la, lo] = along(P.route[r], h); return { lat: la + dLat, lon: lo + dLon, st: P.st[r], route: P.route[r], head: h, dLat, dLon };
   }
   let la = nLat[P.v[r]], lo = nLon[P.v[r]];
   if (P.legacy && q >= 0 && P.t[q] - P.t[r] <= 15.01) { const f = (t - P.t[r]) / (P.t[q] - P.t[r]); la += (nLat[P.v[q]] - la) * f; lo += (nLon[P.v[q]] - lo) * f; }
-  return { lat: la, lon: lo, st: P.st[r], route: -1 };
+  return { lat: la, lon: lo, st: P.st[r], route: -1, node: P.legacy ? -1 : P.v[r] };
 }
 let drawn = [];           // [shipIndex, x, y, radius, state]
 function shipColour(i, st) { return colourBy === "kind" ? C.s[M.kind_group[S.cls[i]] ?? 1] : C.s[M.state_group[st] ?? 1]; }
@@ -396,15 +404,28 @@ function drawShips() {
   const mpp = 156543.03392 * Math.cos(map.getCenter().lat * Math.PI / 180) / 2 ** map.getZoom();
   let sel = null;
   g.lineCap = "round"; g.lineJoin = "round";
+  // ships lying still at one node (a pilot station, a port, a lock's waiting berths, the same berth zone)
+  // are held there by a resource, not placed in the water: fan them out so each one shows
+  const here = [], atNode = new Map();
   for (let i = 0; i < NS; i++) {
     const a = shipAt(i, T); if (!a) continue;
+    here.push([i, a]);
+    if (a.route < 0 && a.node >= 0) atNode.set(a.node, (atNode.get(a.node) || 0) + 1);
+  }
+  const fanned = new Map();
+  for (const [i, a] of here) {
     if (i === selected) sel = a;
     if (!b.contains([a.lat, a.lon])) continue;
     const p = map.latLngToContainerPoint([a.lat, a.lon]);
     const col = shipColour(i, a.st);
     const rad = Math.min(Math.max(2 + S.loa[i] / 70, 2.5), 8);
+    if (a.route < 0 && atNode.get(a.node) > 1) {       // the k-th ship at a shared node: a sunflower spiral
+      const k = fanned.get(a.node) || 0; fanned.set(a.node, k + 1);
+      const rr = 2.2 * rad * Math.sqrt(k), ang = k * 2.39996;
+      p.x += rr * Math.cos(ang); p.y += rr * Math.sin(ang);
+    }
     if (a.route >= 0 && S.loa[i] / mpp >= 10) {       // zoomed in: the hull along its route, real length and beam
-      const pts = hullPoints(a.route, a.head - S.loa[i], a.head).map(q => map.latLngToContainerPoint(q));
+      const pts = hullPoints(a.route, a.head - S.loa[i], a.head).map(q => map.latLngToContainerPoint([q[0] + a.dLat, q[1] + a.dLon]));
       g.beginPath(); pts.forEach((q, k) => k ? g.lineTo(q.x, q.y) : g.moveTo(q.x, q.y));
       g.strokeStyle = C.surface; g.lineWidth = Math.max(S.beam[i] / mpp, 3) + 2; g.stroke();
       g.strokeStyle = col; g.lineWidth = Math.max(S.beam[i] / mpp, 3); g.stroke();

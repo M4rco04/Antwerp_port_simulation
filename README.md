@@ -41,7 +41,9 @@ the map tiles and chart library). To rebuild one: `py src/viz/build_viewer.py re
 
 - **Map window:** the ships on the map, animated (play / pause, speed, time slider; space and the arrow
   keys work too), coloured by activity or kind of ship, with anchorages, locks, terminals, pilot
-  points and the simulation mesh as layers. Click a ship for its track, its state timeline and every
+  points and the simulation mesh as layers. Ships passing in one lane are drawn side by side (their recorded
+  sideways offset); ships held at the same node by a resource (pilot station, port, lock waiting place,
+  berth zone) are fanned out round it so each can be seen and clicked. Click a ship for its track, its state timeline and every
   event it logged. The **Statistics ↗** button opens the statistics in a separate window that follows
   the playhead (click a ship there to show it on the map):
   - **Port now:** every lock chamber (open to which side / closing / levelling / opening and the time
@@ -426,7 +428,9 @@ It writes `results/<run>/`:
 - `events.csv`: every state change and rule event;
 - `ships.csv`: one row per ship, with the minutes spent in each state;
 - `timeseries.csv`: queues and the use of pilots, tugs, boatmen and quays;
-- `positions.csv.gz`: ship positions every 15 min;
+- `positions.csv.gz`: ship positions every step: under way as (route, distance of the bow along it, sideways
+  offset from the centre line, + = starboard), lying still as a node (an anchored ship at its own spot in the
+  anchorage, a ship in a lock queue at its waiting place, in a lock at the lock);
 - `summary.json`.
 
 `--no-delays` berths containers at their scheduled time; `--no-background` runs containers only.
@@ -437,8 +441,8 @@ It writes `results/<run>/`:
 |---|---|
 | `ship.py` | One `Ship` class for both levels. Derived flags from regs §2 (pilot, ULCV, marginal, tide-dependent, oversized by zone, IMO2 gas, boatmen, tugs needed). A state machine (sail → pilot station → VTS → anchorage / boarding → sailing → lock → mooring → berth → departure → exit) with timers. Minutes per state are kept for the KPIs. |
 | `generator.py` | Containers replayed from the schedule (`--containers replay`, default): TEU gives dimensions, call size and cranes; the AIS schedule delay is optional; ships enter 8 h before berthing at a sea source. Or (`--containers nhpp`) a Poisson process fitted to the schedule: 9.8 calls/day × weekday factor × hour-of-day factor (Brussels time) × a daily gamma factor (shape 23.6) for the bunching of liner calls, each arrival one schedule line drawn at random (TEU, terminal, time at berth); `--container-rate` scales it, `--no-bunching` drops the daily factor; runs can lie outside the schedule's dates. A container's TEU-drawn draught is capped at what its terminal's quay allows. Background traffic is a non-homogeneous Poisson process per class and source, from `entry_probabilities`, with bootstrapped AIS ships and destinations.  Ships entering from or leaving to a canal behind a lock (Schelde-Rijn, Zuid-Beveland, Albert) are redrawn until they fit its largest chamber. |
-| `movement.py` | Ships as hulls: a centre line along the route over the ship's length, with its real beam, so ships can be longer and wider than the cells. Two hulls must stay (B1 + B2) / 2 + 20 % of the wider beam apart, less what each can shift sideways inside its own lane ((lane − B) / 2). Two-phase moves are resolved by priority, checking the swept hull. Speed is the JA22 planning speed plus current, capped by the cell's limit. The encounter rules of regs §6 and the 3 nm spacing are applied. Blocked ships detour round the other hulls (head-on: the lower-ranked ship gives way); a deadlock with no detour is let through after an hour. |
-| `vts.py` | The simple VTS: first come first served, tide-dependent ships first. A ship is cleared when its route exists, the tide holds along it leaving now and 60 min later, a pilot (two for the largest ships) and a pilot boat are free, and its berth or quay has room. Otherwise it is sent to an anchorage (regs §11). No reservations or optimisation yet. |
+| `movement.py` | Ships as hulls: a centre line along the route over the ship's length, with its real beam, so ships can be longer and wider than the cells. Two hulls must stay (B1 + B2) / 2 + 20 % of the wider beam apart, less what they can shift sideways inside their lanes ((lane − B) / 2 each): in full when they keep opposite sides of the lane (meeting, or overtaking on the other's port side), only the difference when they keep the same side (one behind the other), so a ship cannot sail into the one ahead and at most two fit abreast. A ship standing off its centre line to pass is drawn there (`lateral_m`). Two-phase moves are resolved by priority, checking the swept hull. Speed is the JA22 planning speed plus current, capped by the cell's limit. The encounter rules of regs §6 and the 3 nm spacing are applied. Blocked ships detour round the other hulls (head-on: the lower-ranked ship gives way); a deadlock with no detour is let through after an hour. |
+| `vts.py` | The simple VTS: first come first served, tide-dependent ships first. A ship is cleared when its route exists (planned for the run's lowest water, else the lowest water of the next 7 h, else the level now; to a sea exit draught-checked only up to the pilot station), the tide holds along it leaving now and 60 min later, a pilot (two for the largest ships) for its first pilot stretch and a pilot boat are free, pilots can be booked for its later stretches (never for a time before now), and its berth or quay has room (the destination is chosen once per round). Otherwise it is sent to an anchorage (regs §11), again at later rounds if none could be reached. No reservations or optimisation yet. See docs/MODEL.md §9 for why the queue used to jam. |
 | `services.py` | Pools with fleet sizes from the repo: 42 tugs (`tugs.csv`) at the AIS tug bases, plus the tugs AIS saw at Vlissingen, Terneuzen and Zeebrugge; 8 pilot boats (`pilots_mdk.csv`); 42 boatmen crews (`pilots_brabo.csv`, the Brabo boats). The repo has no pilot count, so pilots per zone = 1.25 × the AIS peak demand (`PILOT_DEMAND`) × (1 + return time / time on board):
 16 sea, 42 river, 21 dock. |
 
