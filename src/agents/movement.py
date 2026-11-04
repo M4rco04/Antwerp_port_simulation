@@ -11,10 +11,16 @@ than the cells it covers:
 Two ships conflict when their centre lines come closer than
         (B1 + B2) / 2 + GAP_FRACTION x max(B1, B2)        (hull to hull: 20 % of the wider beam)
 less what they can still move apart sideways inside their own cell: a ship narrower than its lane
-can shift (lane width - B) / 2 off the cell centre. So two barges pass in one 50 m lane, two 32 m
-bulk carriers need neighbouring lanes, two 61 m ULCVs need two lanes between them, and at sea (250 m
-cells) ships pass freely. Lock, anchorage and approach nodes hold no hull (the resources hold the
-ships there). Routes of wide ships keep to cells with room for their beam (clearance.py).
+can shift s = (lane width - B) / 2 off the cell centre, to the side of the lane it keeps (ship.side:
+starboard, or port while it overtakes). Ships on opposite sides of the lane (meeting, each on its own
+starboard side; or one overtaking the other on its port side) gain s1 + s2; ships on the same side
+(following each other) only |s1 - s2|, so a ship cannot sail into or sit on top of the one ahead of
+it in its lane, and only two fit abreast. So two barges pass in one 50 m lane, two 32 m bulk carriers
+need neighbouring lanes, two 61 m ULCVs need two lanes between them, and at sea (250 m cells) ships
+pass freely. Ships crossing each other keep s1 + s2 (sides do not apply). Lock, anchorage and
+approach nodes hold no hull (the resources hold the ships there). Routes of wide ships keep to cells
+with room for their beam (clearance.py). ship.lateral_m records how far a ship had to stand off the
+centre line to keep that distance (for the viewer: ships passing in one lane are drawn side by side).
 
 Each step:
   1. proposal: every ship wants to advance v_sog x dt along its route, with v_sog its speed
@@ -22,7 +28,9 @@ Each step:
      current seen in AIS: 1 in the Western Scheldt, ~0.4 in the Zeeschelde), capped by the speed limit
   2. resolution: in priority order (distress, an oversized ship in a regulated stretch, VTS rank,
      a seeded tie-break) each ship takes the farthest position up to its proposal whose swept hull
-     (from its old bow to its new one) and new hull conflict with no other ship. Before entering a
+     (from its old bow to its new one) and new hull conflict with no other ship, keeping to the
+     starboard side of its lane, or, when that is blocked by a ship sailing the same way, passing it
+     on the port side of the lane if the lane is wide enough. Before entering a
      regulated stretch it checks the encounter rules (navigation_rules.encounter_conflicts) against
      ships coming the other way inside it, and the 3 nm spacing rule against ships ahead. Ships that
      were stopped by a ship processed later try again (up to PASSES passes).
@@ -152,9 +160,25 @@ class Mover:
     def _line(xy):
         return shapely.LineString(xy if len(xy) > 1 else np.vstack([xy, xy + 1e-3]))
 
-    def conflict(self, ship, line, cells):
-        """The first other ship whose hull is too close to this centre line, or None."""
+    def allowance(self, ship, line, side, other, other_line):
+        """How much two ships can move apart sideways inside their lanes: s1 + s2 on opposite sides of the
+        lane (meeting on their own starboard sides, or one overtaking on the other's port side) and when
+        crossing; |s1 - s2| on the same side (one behind the other: shifting does not separate them)."""
+        s1, s2 = self.shift(ship), self.shift(other)
+        u1, u2 = self._heading(line), self._heading(other_line)
+        if u1 is None or u2 is None:
+            return s1 + s2
+        c = float(np.dot(u1, u2))
+        if abs(c) < OVERTAKE_SAME_DIRECTION:
+            return s1 + s2
+        apart = (side != other.side) if c > 0 else (side == other.side)
+        return s1 + s2 if apart else abs(s1 - s2)
+
+    def conflict(self, ship, line, cells, side=None):
+        """The first other ship whose hull is too close to this centre line, or None. side: the side of
+        its lane the ship would keep (default: the one it keeps now)."""
         k = self._key(ship)
+        side = ship.side if side is None else side
         others = set()
         for c in cells:
             others |= self.occ.get(c, set())
@@ -162,15 +186,57 @@ class Mover:
         if not others:
             return None
         mine = self._line(line)
-        my_shift = self.shift(ship)
         for o in sorted(others):
             if o in self.allow.get(k, ()):
                 continue
             other = self.ships[o]
             d = mine.distance(self._line(self.lines[o]))
-            if d + my_shift + self.shift(other) < required_gap(ship.beam, other.beam):
+            gap = required_gap(ship.beam, other.beam)
+            if d >= gap:
+                continue
+            if d + self.allowance(ship, line, side, other, self.lines[o]) < gap:
                 return other
         return None
+
+    def free_side(self, ship, line, cells):
+        """The side of its lane on which the ship's hull at `line` conflicts with no one: starboard (+1)
+        first, else port (-1) when the ship in the way sails the same way (overtaking on its port side,
+        regs §5.4; the rules of the stretch are checked by overtaking_violation). Returns (side, None)
+        or (None, the ship in the way)."""
+        other = self.conflict(ship, line, cells, side=1)
+        if other is None:
+            return 1, None
+        ko = self._key(other)
+        u1, u2 = self._heading(line), self._heading(self.lines[ko]) if ko in self.lines else None
+        if u1 is not None and u2 is not None and float(np.dot(u1, u2)) >= OVERTAKE_SAME_DIRECTION \
+                and self.conflict(ship, line, cells, side=-1) is None:
+            return -1, None
+        return None, other
+
+    def _lateral(self):
+        """ship.lateral_m of every ship under way: how far it stands off its centre line, to its side of
+        the lane, to keep the required distance from the ships it is passing (0 when none is that close)."""
+        for k, ship in self.ships.items():
+            f = 0.0
+            if ship.state.value in UNDER_WAY and ship.hull:
+                others = set()
+                for c in ship.hull:
+                    others |= self.occ.get(c, set())
+                others.discard(k)
+                if others:
+                    mine = self._line(self.lines[k])
+                    for o in others:
+                        if o in self.allow.get(k, ()):
+                            continue
+                        other = self.ships[o]
+                        d = mine.distance(self._line(self.lines[o]))
+                        gap = required_gap(ship.beam, other.beam)
+                        if d >= gap:
+                            continue
+                        a = self.allowance(ship, self.lines[k], ship.side, other, self.lines[o])
+                        if a > 0:
+                            f = max(f, min(1.0, (gap - d) / a))
+            ship.lateral_m = ship.side * f * self.shift(ship)
 
     # ------------------------------------------------------------------ occupancy
     def occupy(self, ship, head, line=None):
@@ -197,14 +263,17 @@ class Mover:
         k = self._key(ship)
         self._clear(k, ship)
         ship.cells, ship.hull = [], []
+        ship.side, ship.lateral_m = 1, 0.0
         self.ships.pop(k, None)
         self.lines.pop(k, None)
 
     def place(self, ship, cells=None):
         """Put a ship on the mesh at its route position; False if another hull is too close."""
         line = self.hull_line(ship, ship.head - ship.loa, ship.head)
-        if self.conflict(ship, line, self.hull_cells(ship, line)) is not None:
+        side, _ = self.free_side(ship, line, self.hull_cells(ship, line))
+        if side is None:
             return False
+        ship.side = side
         self.occupy(ship, ship.head, line)
         return True
 
@@ -472,7 +541,7 @@ class Mover:
                     if h <= ship.head + 1e-6:
                         break
                     swept = self.hull_line(ship, min(ship.head, h - ship.loa), h)
-                    other = self.conflict(ship, swept, self.hull_cells(ship, swept))
+                    side, other = self.free_side(ship, swept, self.hull_cells(ship, swept))
                     if other is None:
                         bad = self.overtaking_violation(ship, h)
                         if bad is not None:
@@ -481,6 +550,7 @@ class Mover:
                                 self.denied.add((ship.id, other.id))
                                 ship.note(self.sim.t, "overtake_denied", other=other.id, why=why)
                     if other is None:
+                        ship.side = side
                         self.occupy(ship, h)
                         moved[ship.id] = True
                         break
@@ -532,4 +602,5 @@ class Mover:
                     ship.reroutes += 1
                     avoid = (self.ahead_cells(b) + self.starboard_cells(b)) if b is not None else ()
                     self.sim.reroute_around(ship, avoid=avoid)        # overtaking: round its port side
+        self._lateral()
         return arrived

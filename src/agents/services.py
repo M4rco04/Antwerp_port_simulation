@@ -15,7 +15,9 @@ Fleet sizes come from the repo:
 A pilot works in one zone (sea: pilot station - Vlissingen; river: Vlissingen - Antwerp; dock:
 behind the locks) and after a job is away for its zone's return time (PILOT_RETURN_MIN). The VTS books
 the pilots for the later stretches of a voyage when it clears the ship (book): a booked pilot still
-takes other jobs that end (time on board + return) before its booking.
+takes other jobs that end (time on board + return) before its booking. A booking is never for a time
+before now (a change of zone close ahead needs a pilot free now), and taking the pilots of a zone uses
+up all of the ship's bookings in that zone.
 A tug sails from its base to the ship (TUG_SPEED_KN, straight line x DETOUR), assists, and sails back.
 """
 
@@ -101,7 +103,9 @@ class PilotPool:
             return None
         for p in free[:n]:
             p.ship, p.since = ship_id, now
-            p.bookings.pop(ship_id, None)
+        for p in self.pilots:                       # its other bookings in this zone are used up: a booked
+            if p.zone == zone:                      # pilot it did not take would else stay blocked for hours
+                p.bookings.pop(ship_id, None)
         return free[:n]
 
     def release(self, pilots, now):
@@ -120,9 +124,9 @@ class PilotPool:
         return sorted((p for p in self.pilots if p.zone == zone and self.expected_free(p, now) <= at
                        and not self._clash(p, at, at + job, ship_id)), key=lambda p: self.expected_free(p, now))
 
-    def can_book(self, zone, n, at, now):
+    def can_book(self, zone, n, at, now, ship_id=None):
         self._expire(now)
-        return len(self._bookable(zone, at, now)) >= n
+        return len(self._bookable(zone, at, now, ship_id)) >= n
 
     def book(self, zone, n, ship_id, at, now):
         """Book n pilots of the zone for ship_id from time `at`; False (nothing booked) if not enough."""

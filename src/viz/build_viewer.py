@@ -296,8 +296,9 @@ def node_coords():
 
 def pack_positions(pos, idx, step_min, run):
     """Per ship, its position records in time order (offsets per ship index):
-        route >= 0   the ship is v metres along routes[route] (a list of nodes): drawn along that water
-        route = -1   the ship lies at node v
+        route >= 0   the ship is v metres along routes[route] (a list of nodes): drawn along that water,
+                     lat metres to starboard of it (passing or overtaking in one lane)
+        route = -1   the ship lies at node v (ships at one node are fanned out by the page)
     Runs saved before routes were recorded (15-min points) become node records at extra nodes, flagged
     legacy, which the page joins with straight lines as before."""
     lat, lon = node_coords()
@@ -327,8 +328,12 @@ def pack_positions(pos, idx, step_min, run):
         pos["route"] = pos.route.map(lambda r: remap.get(int(r), -1)).astype(int)
     pos = pos.sort_values(["i", "step"])
     counts = pos.groupby("i").size().reindex(range(len(idx)), fill_value=0).to_numpy()
+    # sideways offset (m, + = starboard) of a ship passing or overtaking in one lane; runs saved before it
+    # was recorded have none (null: drawn on the centre line)
+    lateral = np.round(pos.offset.fillna(0).to_numpy()).astype(int).tolist() if "offset" in pos.columns else None
     return {"off": np.r_[0, np.cumsum(counts)].tolist(), "t": (pos.step * step_min).round(1).tolist(),
             "route": pos.route.astype(int).tolist(), "v": np.round(pos.value.to_numpy()).astype(int).tolist(),
+            "lat": lateral,
             "st": pos.state.map(lambda x: st_code.get(x, 0)).astype(int).tolist(), "legacy": legacy}, \
         {"nodes": route_nodes, "off": route_off}, {"lat": lat, "lon": lon}
 
