@@ -1,0 +1,16 @@
+{
+  "label": "Obi-wan Kenobi",
+  "start": "2026-02-21 06:00",
+  "days": 60.0,
+  "warmup": 0.0,
+  "seed": 2006,
+  "weather": "bootstrap",
+  "containers": "nhpp",
+  "container_rate": 1.0,
+  "bunching": true,
+  "delays": true,
+  "background": true,
+  "routing": "lanes",
+  "max_minutes": 90.0,
+  "progress_hours": 2.0
+}
