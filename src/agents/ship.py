@@ -29,6 +29,8 @@ CLASS_SPEED_KN = {"inland_cargo": 8.0, "inland_tanker": 8.0, "passenger": 12.0}
 DOCK_SPEED_KN = 5.0                 # manoeuvring in docks / approaching a berth when no limit applies
 UKC_FRACTION = 0.10                 # under-keel clearance: 10 % of the draught for sea-going ships ...
 UKC_INLAND_M = 0.3                  # ... and this for inland craft
+RIVER_CRUISE_MAX_DRAUGHT_M = 4.5
+UKC_DOCK_M = 0.6                    # in the docks (fixed level, sounded berths) the berth register's minimum
 
 # tugs for berthing / unberthing (regs §2 tanker rules, §8.11 ULCV; the rest an assumed size table,
 # the master decides there, HPV 8.6.2 §9): (min LOA, tugs arriving, tugs leaving)
@@ -76,6 +78,7 @@ class Ship:
     dwell_h: float = 0.0                    # level 2: time at the berth
     exit: str | None = None                 # where it leaves after the berth
     distress: bool = False
+    arrival_draught: float | None = None    # the draught it came in at (draught changes at the berth)
 
     state: State = State.SPAWNED
     timer: float = 0.0
@@ -118,7 +121,8 @@ class Ship:
     # ------------------------------------------------------------------ flags (regs §2)
     @property
     def sea_going(self):
-        return self.cls in SEA_GOING
+        """River cruise ships (class passenger, this shallow) are inland vessels: no compulsory pilot (regs §2)."""
+        return self.cls in SEA_GOING and not (self.cls == "passenger" and self.draught < RIVER_CRUISE_MAX_DRAUGHT_M)
 
     @property
     def needs_pilot(self):
@@ -155,11 +159,17 @@ class Ship:
 
     @property
     def ukc_m(self):
-        return UKC_INLAND_M if self.cls in INLAND else UKC_FRACTION * self.draught
+        return UKC_INLAND_M if not self.sea_going else UKC_FRACTION * self.draught
 
     @property
     def need_m(self):
         return self.draught + self.ukc_m
+
+    @property
+    def need_dock_m(self):
+        """Water needed behind the locks: 10 % of the draught there made ships the register allows
+        (15.5 m at a berth of 16.1 m of water) unable ever to sail."""
+        return self.draught + min(self.ukc_m, UKC_DOCK_M)
 
     def oversized(self, zone="river"):
         """Oversized for a zone (regs §2): sea / Western Scheldt / below Doel-Lillo LOA >= 210 m or

@@ -45,6 +45,12 @@ FOLLOW_UP_H = 4
 # a ship missing this long (while the collector ran) and seen again elsewhere is a new visit
 NEW_VISIT_GAP_H = 6
 NEW_VISIT_MIN_MOVE_KM = 3
+# an inland craft under way, silent this long and heard again in the zones at the edge of the area has been out
+# of the area and come back (up a canal and back to the same lock): a new visit, however little it moved. Most
+# inland silences are this; a craft lying still at a dock with its AIS off is not
+INLAND_LEFT_AREA_H = 6
+AREA_EDGE_ZONES = ("schelde_rijn_canal", "zuid_beveland_canal", "ghent_terneuzen_canal", "albert_canal", "upper_sea_scheldt",
+                   "oosterschelde", "zeebrugge")
 # "lying still" at an anchorage, and how long (in 5-min fixes) counts as having anchored
 STATIONARY_KN = 1.0
 ANCHORED_MIN_FIXES = 6
@@ -54,8 +60,11 @@ STOP_MIN_H = 0.5
 STOP_RADIUS_KM = 1.0
 # the start/end of a stop is only known if the ship is seen this close before/after it
 STOP_CONTINUITY_MIN = 30
-# allowed range of the lognormal sigma when fitting durations
-LOGNORMAL_SIGMA = (0.05, 3.0)
+# allowed range of the lognormal sigma when fitting durations: with mostly censored stays the likelihood
+# keeps rising with sigma, and sigma 3 gave stays of months from a record of days
+LOGNORMAL_SIGMA = (0.05, 1.6)
+# an AIS draught outside this range is a typing error of the crew (the deepest ship allowed in is 16 m)
+DRAUGHT_RANGE_M = (0.5, 17.5)
 # zones with locks: a shorter stop there is a lock passage/wait, not a berth call
 LOCK_STOP_MAX_H = 3.0
 # a stop in the Antwerp port zone within this distance of a charted berth is at that berth
@@ -222,6 +231,8 @@ def load_snapshots(ais_dir):
     df = pd.DataFrame(rows, columns=cols)
     df["sog"] = df.sog.astype(float)
     df["cog"] = df.cog.astype(float)
+    df["draught"] = pd.to_numeric(df.draught, errors="coerce")
+    df.loc[~df.draught.between(*DRAUGHT_RANGE_M), "draught"] = np.nan
     log.info("Loaded %d positions of %d ships from %d snapshots", len(df), df.mmsi.nunique(), len(times))
     return df, pd.Series(times), area
 
@@ -247,7 +258,7 @@ def static_per_ship(df):
 
     return df.groupby("mmsi").agg(
         name=("name", mode), ship_type=("ship_type", mode), imo=("imo", mode), length=("length", mode),
-        width=("width", mode), draught=("draught", "max"),
+        width=("width", mode), draught=("draught", "max"), draught_median=("draught", "median"),
     )
 
 
@@ -369,9 +380,10 @@ def destination_zones():
 # visits
 
 
-def split_visits(df, restarts):
+def split_visits(df, restarts, inland=()):
     """Number the visits: a new one starts at a ship's first fix, or when it is back somewhere
-    else after NEW_VISIT_GAP_H. A gap that spans a collector restart is never a new visit."""
+    else after NEW_VISIT_GAP_H, or (inland: the MMSIs of inland craft) when it has been out of the area
+    (INLAND_LEFT_AREA_H). A gap that spans a collector restart is never a new visit."""
     df = df.sort_values(["mmsi", "t"]).reset_index(drop=True)
     same = df.mmsi.eq(df.mmsi.shift())
     gap_h = df.t.diff().dt.total_seconds().div(3600)
@@ -381,6 +393,11 @@ def split_visits(df, restarts):
     px, py = to_km(df.lon.to_numpy(), df.lat.to_numpy())
     moved = np.hypot(np.diff(px, prepend=np.nan), np.diff(py, prepend=np.nan))
     new = ~same | ((gap_h > NEW_VISIT_GAP_H) & (moved > NEW_VISIT_MIN_MOVE_KM) & ~across_restart)
+    edge = np.isin(port_zone(df.lon.to_numpy(), df.lat.to_numpy()), AREA_EDGE_ZONES)
+    under_way = df.sog.to_numpy() >= STATIONARY_KN
+    left = (df.mmsi.isin(inland).to_numpy() & same.to_numpy() & (gap_h.to_numpy() >= INLAND_LEFT_AREA_H) & ~across_restart
+            & edge & np.r_[False, edge[:-1]] & (under_way | np.r_[False, under_way[:-1]]))
+    new = new | left
     df["visit"] = np.cumsum(new.to_numpy())
     return df
 
@@ -423,6 +440,12 @@ def summarise_visits(df, times):
     ongoing = (visits.end >= times.iloc[-1] - pd.Timedelta(minutes=MAX_SNAPSHOT_GAP_MIN)).to_numpy()
     # still heading/waiting for the Scheldt when the data ends counts as Scheldt traffic
     visits["scheldt_bound"] = visits.reaches_scheldt | (ongoing & visits.scheldt_destination)
+    # a craft only ever seen inside one canal or edge zone is traffic on that canal, not on the Scheldt: in the
+    # simulation it appeared at the zone's node and left at once
+    named = df.port_zone.replace("", np.nan)
+    one_zone = (named.groupby(df.visit).nunique() == 1) & (df.port_zone.eq("").groupby(df.visit).sum() == 0)
+    in_edge = df.groupby("visit").port_zone.first().isin(AREA_EDGE_ZONES)
+    visits.loc[(one_zone & in_edge).reindex(visits.index, fill_value=False).to_numpy(), "scheldt_bound"] = False
     return visits
 
 
@@ -455,12 +478,15 @@ def find_entries(df, windows, zones):
     return pd.DataFrame(rows)
 
 
-def find_stops(df):
+def find_stops(df, max_gap_h=None):
     """Every period a ship lies still for STOP_MIN_H within STOP_RADIUS_KM.
 
     kind is 'berth' (in a port zone; zone = berth zone), 'anchorage' (zone = anchorage) or
     'other'. start_observed / end_observed say whether the ship was seen under way just
     before / after; a stop that runs into the first or last fix of its visit is censored.
+    max_gap_h: a ship not heard for this long is taken to have left: the stop ends at its last fix
+    (a barge that goes out of the area up a canal and comes back to the same place days later is not
+    one long stay).
     """
     t = df.t.dt.tz_convert(None).to_numpy().astype("datetime64[s]").astype(np.int64)
     x, y = to_km(df.lon.to_numpy(), df.lat.to_numpy())
@@ -468,6 +494,7 @@ def find_stops(df):
     visit = df.visit.to_numpy()
     bounds = np.flatnonzero(np.r_[True, visit[1:] != visit[:-1], True])
     cont = STOP_CONTINUITY_MIN * 60
+    gap_s = np.inf if max_gap_h is None else max_gap_h * 3600
     spans = []
     for i0, i1 in zip(bounds[:-1], bounds[1:]):
         j = i0
@@ -476,11 +503,13 @@ def find_stops(df):
                 j += 1
                 continue
             k = j
-            while k + 1 < i1 and still[k + 1] and math.hypot(x[k + 1] - x[j], y[k + 1] - y[j]) <= STOP_RADIUS_KM:
+            while (k + 1 < i1 and still[k + 1] and math.hypot(x[k + 1] - x[j], y[k + 1] - y[j]) <= STOP_RADIUS_KM
+                   and t[k + 1] - t[k] <= gap_s):
                 k += 1
             if t[k] - t[j] >= STOP_MIN_H * 3600:
-                spans.append((j, k, j > i0 and t[j] - t[j - 1] <= cont, k + 1 < i1 and t[k + 1] - t[k] <= cont,
-                              j == i0))
+                left = k + 1 < i1 and t[k + 1] - t[k] > gap_s
+                spans.append((j, k, j > i0 and t[j] - t[j - 1] <= cont or j > i0 and t[j] - t[j - 1] > gap_s,
+                              k + 1 < i1 and t[k + 1] - t[k] <= cont or left, j == i0))
             j = k + 1
 
     lat, lon, mmsi = df.lat.to_numpy(), df.lon.to_numpy(), df.mmsi.to_numpy()
@@ -546,7 +575,8 @@ def prepare(ais_dir=AIS_DIR, schedule=SCHEDULE, charts=CHARTS, berths=BERTHS):
     log.info("Ships per class: %s", ships["class"].value_counts().to_dict())
 
     zones = EntryZones(area, charts)
-    df = annotate(split_visits(df, restarts), zones, Berths(berths))
+    inland = ships.index[ships["class"].isin(("inland_cargo", "inland_tanker"))]
+    df = annotate(split_visits(df, restarts, inland), zones, Berths(berths))
     visits = summarise_visits(df, times)
     visits["class"] = visits.mmsi.map(ships["class"])
     entries = find_entries(df, windows, zones)

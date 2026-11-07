@@ -7,11 +7,12 @@ from a berth or from a port. Every PLAN_EVERY steps (15 min) the VTS walks the r
 ship when all of these hold:
 
     route        a route exists for its draught (+ UKC), size and the locks it needs (engine.voyage_route:
-                 valid at the run's lowest water if possible, else at the lowest water of the next 7 h,
-                 else at the level now; to a sea exit only as far as the pilot station, then open sea)
-    tide         the whole route (up to the pilot station on the way out) stays deep enough when it
-                 leaves now AND 60 min later, sailing at its planning speed (regs §8: the window at
-                 the start must be at least 60 min)
+                 valid at the run's lowest water if possible, else the deep channel, which needs the tide;
+                 to a sea exit only as far as the pilot station, then open sea)
+    tide         the arrival windows of bulk carriers and tankers at CP (regs §8.6), and the whole route (up to
+                 the pilot station on the way out) stays deep enough when it
+                 leaves now AND 60 min later, sailing at its planning speed, the speed limits in the docks
+                 and the time of a lock passage (regs §8: the window at the start must be at least 60 min)
     weather      the gates of regs §9 (agents/weather_gates.py): visibility, wind, storm
     pilot        a pilot (two for the largest ships) is free for its first pilot stretch, pilots can
                  be booked for every later stretch of the voyage for when it gets there (never for a
@@ -34,6 +35,7 @@ import navigation_rules as NR
 
 PLAN_EVERY = 3
 WINDOW_MIN = 60.0
+LOCK_TRANSIT_MIN = 60.0
 KNOT_M_MIN = 1852.0 / 60.0
 
 
@@ -59,6 +61,40 @@ class SimpleVTS:
             self.requests.remove(ship)
 
     # ------------------------------------------------------------------ checks
+    def window_ok(self, ship, route, now):
+        """The arrival windows of bulk carriers and tankers at CP (regs §8.6): T 13.5-14.5 m at CP no later
+        than HW + 1 h; T > 14.5 m to the right-bank locks at CP within HW +- 15 min, to Kieldrecht at the
+        Deurganckdok mouth from HW to HW + 40 min. The Deurganckdok mouth is taken as the lock's approach."""
+        if ship.departing or ship.cls not in ("bulk_general", "tanker") or ship.draught < 13.5:
+            return True
+        sim, fg = self.sim, self.sim.fg
+        r = np.asarray(route, dtype=np.int64)
+        t_rel = self._times(ship, r)
+        cp = sim.places["cp"]["node"]
+        near = np.hypot(fg.x[r] - fg.x[cp], fg.y[r] - fg.y[cp])
+        at_cp = int(np.argmin(near))
+        if near[at_cp] > 1500.0:
+            return True                        # not by way of CP
+        hw = sim.high_waters
+        since = lambda eta: eta - hw[np.argmin(np.abs(hw - eta))]
+        if ship.draught <= 14.5:
+            return since(now + t_rel[at_cp]) <= 60.0
+        names = {sim.lock_of_node[n].name: i for i, n in enumerate(r) if n in sim.lock_of_node}
+        if "Kieldrecht" in names:
+            return 0.0 <= since(now + t_rel[names["Kieldrecht"]]) <= 40.0
+        if "Zandvliet" in names or "Berendrecht" in names:
+            return abs(since(now + t_rel[at_cp])) <= 15.0
+        return True
+
+    def _times(self, ship, r):
+        """Minutes from the start of a route to each of its cells: planning speed, speed limits, locks."""
+        sim, fg = self.sim, self.sim.fg
+        d = np.r_[0.0, np.cumsum(np.hypot(np.diff(fg.x[r]), np.diff(fg.y[r])))]
+        leg = np.where(np.isin(fg.speed_zone[r], [fg.code("speed_zone", "sea")]), "sea", "river")
+        v = np.array([ship.stw_kn(l, NR.planning_speed_kn) for l in ("sea", "river")])
+        speed = np.fmin(np.where(leg == "sea", v[0], v[1]), fg.speed_limit_kn[r]) * KNOT_M_MIN
+        return np.r_[0.0, np.cumsum(np.diff(d) / speed[1:])] + np.cumsum(np.isin(r, list(sim.lock_of_node))) * LOCK_TRANSIT_MIN
+
     def tide_ok(self, ship, route, now):
         """Every cell of the route deep enough at the time the ship gets there, leaving now and
         WINDOW_MIN later."""
@@ -70,15 +106,12 @@ class SimpleVTS:
             r = r[:free_from]
         if r.size < 2:                         # already there
             return True
-        d = np.r_[0.0, np.cumsum(np.hypot(np.diff(fg.x[r]), np.diff(fg.y[r])))]
-        leg = np.where(np.isin(fg.speed_zone[r], [fg.code("speed_zone", "sea")]), "sea", "river")
-        v = np.array([ship.stw_kn(l, NR.planning_speed_kn) for l in ("sea", "river")])
-        speed = np.where(leg == "sea", v[0], v[1]) * KNOT_M_MIN
-        t_rel = np.r_[0.0, np.cumsum(np.diff(d) / speed[1:])]
+        t_rel = self._times(ship, r)
         water = ~sim.mover.special[r]
+        need = np.where(sim.nontidal[r[water]], ship.need_dock_m, ship.need_m)
         for start in (now, now + WINDOW_MIN):
             level = sim.level_along(r[water], start + t_rel[water])
-            if np.any(fg.depth_m[r[water]] + level < ship.need_m):
+            if np.any(fg.depth_m[r[water]] + level < need):
                 return False
         return True
 
@@ -91,6 +124,8 @@ class SimpleVTS:
         for ship in sorted(self.requests, key=lambda s: s.vts_priority()):
             if ship.state.value == "to_anchorage":
                 continue                       # under way to its anchorage (no place to start from): asked once there
+            if getattr(ship, "anchor_until", 0.0) > now:
+                continue                       # entered the area at anchor: it lies there for its stay first
             ship.infeasible = None
             route = sim.plan_route(ship, now)  # chooses the destination once (ship.target) and routes to it
             target = ship.target
@@ -113,7 +148,7 @@ class SimpleVTS:
                         ship.times["weather_gate"] = gate
             if reason:
                 pass
-            elif not self.tide_ok(ship, route, now):
+            elif not self.tide_ok(ship, route, now) or not self.window_ok(ship, route, now):
                 reason = "tide"
             elif not sim.pilot_available(ship, route[0], now, route=route):
                 reason = "pilot"

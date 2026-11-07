@@ -8,13 +8,18 @@ mooring and unmooring times.
     PILOT_BASES      the same for pilot boats (Brabo, LRD tenders, "PILOT" in the name)
     MOORING_MIN      approach and departure manoeuvre time of sea-going ships at a berth,
                      t = base + k * LOA (+ lognormal noise), per berth area (tidal / behind a lock)
-    PILOT_DEMAND     ships needing a pilot (sea-going, LOA > 80 m, under way) at the same moment, per
-                     pilotage zone (sea: west of Vlissingen; river: Vlissingen to Antwerp; dock: in the
-                     basins behind the locks), over the AIS snapshots: median, 95th, 99th percentile, max.
+    PILOT_DEMAND     ships needing a pilot (sea-going, LOA > 80 m, under way, on a visit that enters the
+                     Scheldt) at the same moment, per pilotage zone (sea: from the Wandelaar pilot station to
+                     Vlissingen; river: Vlissingen to Antwerp; dock: in the basins behind the locks), over
+                     the AIS snapshots: median, 95th, 99th percentile, max.
                      The pilot pools of the simulation are sized from it (data/equipment has no pilot count).
-    DOCK_SPEED_KN    speed over ground of sea-going ships under way (>= 1 kn) per dock basin and
-                     within LOCK_APPROACH_M of a lock: median, 95th percentile, fixes. No published
-                     dock speed limit was found, so the graph takes the 95th percentile as the limit.
+    DOCK_SPEED_KN    speed over ground of sea-going ships under way (>= 1 kn) per dock basin, in the canals
+                     and within LOCK_APPROACH_M of a lock: median, 95th percentile, fixes. No published
+                     dock speed limit was found, so the graph takes the median as the speed there (ships
+                     sail at the limit: a high percentile made them twice as fast as the AIS).
+    INLAND_DOCK_SPEED_KN  the same for inland craft: docks, canals and lock approaches, all basins together.
+    LOCK_PASSAGES    passages per day of each lock in the AIS, sea-going and inland (a passage: a ship seen in
+                     the chamber's segment, once per 3 h), which of two locks side by side ships take.
                      Needs the navigation graph (cache/antwerp_scheldt_graph.pkl) for the basins.
 
 The manoeuvre is measured from the last AIS fix 1 km or more from the berth to the first fix
@@ -61,6 +66,8 @@ GRAPH = REPO_ROOT / "cache" / "antwerp_scheldt_graph.pkl"
 UNDER_WAY_KN = 1.0
 LOCK_APPROACH_M = 600.0
 SNAP_MAX_M = 100.0
+WANDELAAR_LON = 2.715               # sea pilots board here: further west a ship has no pilot on board
+INLAND = ("inland_cargo", "inland_tanker")
 
 
 def load_berths():
@@ -193,8 +200,10 @@ def fit_manoeuvres(m):
     return out
 
 
-def pilot_demand(df, ships):
-    """Simultaneous ships needing a pilot, per zone, over the snapshots."""
+def pilot_demand(df, ships, visits):
+    """Simultaneous ships needing a pilot, per zone, over the snapshots. Selected by the visit, not by where
+    the fix lies: the sea zone lies outside the Scheldt (a filter on the fix left a sea peak of 7), while
+    ships that only pass through at sea need no Scheldt pilot."""
     import pickle
     import sys
 
@@ -206,7 +215,8 @@ def pilot_demand(df, ships):
     nodes = [d for _, d in graph.nodes(data=True) if d["type"] not in ("lock", "anchorage", "approach")]
     tree = cKDTree([(d["x"], d["y"]) for d in nodes])
     loa = df.mmsi.map(ships.length)
-    f = df[(df.sog >= UNDER_WAY_KN) & df.mmsi.map(ships["class"]).isin(SEA_GOING) & (loa > 80) & df.in_scheldt].copy()
+    f = df[(df.sog >= UNDER_WAY_KN) & df.mmsi.map(ships["class"]).isin(SEA_GOING) & (loa > 80)
+           & df.visit.map(visits.scheldt_bound).fillna(False).astype(bool) & (df.lon >= WANDELAAR_LON)].copy()
     x, y = Transformer.from_crs("EPSG:4326", graph.graph["crs"], always_xy=True).transform(f.lon.to_numpy(), f.lat.to_numpy())
     idx = tree.query(np.column_stack([x, y]))[1]
     zone = np.array([nodes[i].get("speed_zone") or "" for i in idx])
@@ -221,8 +231,9 @@ def pilot_demand(df, ships):
     return out
 
 
-def dock_speeds(df, ships):
-    """Speeds of sea-going ships under way in the docks, per basin and near the locks."""
+def dock_speeds(df, ships, classes=SEA_GOING, by_basin=True):
+    """Speeds of these ships under way in the docks (per basin, or all together), in the canals and near
+    the locks."""
     import pickle
 
     from pyproj import Transformer
@@ -238,15 +249,17 @@ def dock_speeds(df, ships):
     nodes = [(n, d) for n, d in graph.nodes(data=True) if d["type"] not in ("lock", "anchorage", "approach")]
     tree = cKDTree([(d["x"], d["y"]) for _, d in nodes])
     locks = cKDTree([(d["x"], d["y"]) for _, d in graph.nodes(data=True) if d["type"] == "lock"])
-    fixes = df[(df.sog >= UNDER_WAY_KN) & df.mmsi.map(ships["class"]).isin(SEA_GOING) & (df.port_zone != "")]
+    fixes = df[(df.sog >= UNDER_WAY_KN) & df.mmsi.map(ships["class"]).isin(classes) & (df.port_zone != "")]
     x, y = Transformer.from_crs("EPSG:4326", graph.graph["crs"], always_xy=True).transform(fixes.lon.to_numpy(), fixes.lat.to_numpy())
     dist, idx = tree.query(np.column_stack([x, y]))
     near_lock = locks.query(np.column_stack([x, y]))[0] <= LOCK_APPROACH_M
     basin = np.array([nodes[i][1].get("basin") or "" for i in idx])
     region = np.array([nodes[i][1]["region"] for i in idx])
     # near a lock: only the outer harbours and docks, not the river traffic passing the lock heads
+    docks = basin if by_basin else np.where(basin != "", "dock", "")
     area = np.where(near_lock & np.isin(region, ("port", "canal")), "lock_approach",
-                    np.where((region == "port") & (basin != "") & ~near_lock, basin, ""))
+                    np.where((region == "port") & (basin != "") & ~near_lock, docks,
+                             np.where(region == "canal", "canal", "")))
     sog = fixes.sog.to_numpy()
     out = {}
     for name in sorted(set(area) - {""}):
@@ -255,6 +268,38 @@ def dock_speeds(df, ships):
             out[str(name)] = {"p50": round(float(np.median(sog[m])), 1), "p95": round(float(np.percentile(sog[m], 95)), 1),
                          "fixes": int(m.sum()), "ships": len(set(fixes.mmsi.to_numpy()[m]))}
     log.info("dock speeds: %s", out)
+    return out
+
+
+def lock_passages(df, ships):
+    """Passages per day of each lock, sea-going and inland."""
+    import pickle
+    import sys
+
+    from pyproj import Transformer
+
+    sys.path.insert(0, str(REPO_ROOT / "src" / "environment"))
+    graph = pickle.load(open(GRAPH, "rb"))["graph"]
+    days = df.t.nunique() * 5 / 1440
+    d = df[df.mmsi.map(ships["class"]).isin(SEA_GOING + INLAND)].sort_values(["mmsi", "t"])
+    x, y = Transformer.from_crs("EPSG:4326", graph.graph["crs"], always_xy=True).transform(d.lon.to_numpy(), d.lat.to_numpy())
+    points = shapely.points(x, y)
+    seconds = d.t.astype("int64").to_numpy() // 10**9
+    mmsi = d.mmsi.to_numpy()
+    sea = d.mmsi.map(ships["class"]).isin(SEA_GOING).to_numpy()
+    out = {}
+    for _, n in graph.nodes(data=True):
+        if n["type"] != "lock":
+            continue
+        lock = n["lock"]
+        ends = [np.mean([[graph.nodes[m]["x"], graph.nodes[m]["y"]] for m in lock.sides[s]["nodes"]], axis=0) for s in ("a", "b")]
+        width = max(c.width_m for c in lock.chambers)
+        i = np.flatnonzero(shapely.distance(points, shapely.LineString(ends)) < width / 2 + 15)
+        if len(i):
+            first = np.r_[True, (mmsi[i][1:] != mmsi[i][:-1]) | (seconds[i][1:] - seconds[i][:-1] > 3 * 3600)]
+            out[n["name"]] = {"sea_going": round(float(sea[i][first].sum() / days), 1),
+                              "inland": round(float((~sea[i][first]).sum() / days), 1)}
+    log.info("lock passages per day: %s", out)
     return out
 
 
@@ -305,7 +350,9 @@ def main():
         "PILOT_BASES": bases(stops, ships.index[is_pilot], "pilot_base"),
         "MOORING_MIN": fit_manoeuvres(m),
         "DOCK_SPEED_KN": dock_speeds(data.df, ships),
-        "PILOT_DEMAND": pilot_demand(data.df, ships),
+        "INLAND_DOCK_SPEED_KN": dock_speeds(data.df, ships, INLAND, by_basin=False),
+        "PILOT_DEMAND": pilot_demand(data.df, ships, data.visits),
+        "LOCK_PASSAGES": lock_passages(data.df, ships),
     }
     period = f"{data.df.t.min():%Y-%m-%d %H:%M} to {data.df.t.max():%Y-%m-%d %H:%M} UTC"
     docstring = __doc__.split("Usage:")[0].replace("Fit the port", "Port", 1) + \

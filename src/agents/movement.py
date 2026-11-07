@@ -17,7 +17,7 @@ starboard side; or one overtaking the other on its port side) gain s1 + s2; ship
 (following each other) only |s1 - s2|, so a ship cannot sail into or sit on top of the one ahead of
 it in its lane, and only two fit abreast. So two barges pass in one 50 m lane, two 32 m bulk carriers
 need neighbouring lanes, two 61 m ULCVs need two lanes between them, and at sea (250 m cells) ships
-pass freely. Ships crossing each other keep s1 + s2 (sides do not apply). Lock, anchorage and
+pass freely. Ships crossing each other wait for the other to clear (shifting does not separate them). Lock, anchorage and
 approach nodes hold no hull (the resources hold the ships there). Routes of wide ships keep to cells
 with room for their beam (clearance.py). ship.lateral_m records how far a ship had to stand off the
 centre line to keep that distance (for the viewer: ships passing in one lane are drawn side by side).
@@ -43,18 +43,23 @@ on the other ship's starboard side (regs §5.4: overtake on its port side); deto
 off its starboard side. In restricted visibility ships slow down (weather_gates.VIS_SPEED_CAP_KN).
 A ship blocked for REROUTE_AFTER steps looks for a way round the other hulls (overtaking, getting
 out of a head-on blockage); routes keep to starboard. A head-on or crossing deadlock with no way
-round lets the two ships pass after DEADLOCK_AFTER steps (logged as squeeze_past); so does a knot of
+round first makes them stand aside (SIDESTEP_AFTER), as far as there is water for it; only with no room
+for that either do the two ships pass after DEADLOCK_AFTER steps (logged as squeeze_past); so does a knot of
 several stuck ships (a ship blocked that long by a ship that is itself stuck under way passes it and
 the other stuck ships on its way ahead). A ship stuck LANE_FREE_AFTER steps detours without the lanes.
 """
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import shapely
+import shapely.ops
 from scipy.spatial import cKDTree
 
 import navigation_rules as NR
+import port_infrastructure as PI
 import weather_gates as WG
 from clearance import lane_width
 
@@ -76,6 +81,13 @@ UNDER_WAY = ("sailing", "to_station", "to_anchorage")
 OVERTAKE_SAME_DIRECTION = 0.7          # cos of the angle between two headings for "same way"
 OVERTAKE_LATERAL_M = 400.0             # alongside: closer than this sideways
 STARBOARD_AVOID_M = 1500.0             # a detour to overtake keeps off this much of the other's starboard side
+IN_LINE_M = 1.0                         # hulls closer than this across the heading lie in line
+SIDESTEP_AFTER = 2                      # blocked this many steps (10 min) by a ship it cannot get past: stand aside
+SIDESTEP_MAX_M = 150.0                  # ... up to this far off the centre line, where there is water for it
+SIDESTEP_PROBE_M = 25.0
+SIDESTEP_MARGIN_M = 0.5                 # water under the keel needed where it stands aside
+NEAREST_CELL_M = {"river": 110.0, "sea": 180.0}     # a point this close to a cell is that cell's water (else 40 m)
+DEPTH_HOLD_MAX = 156                    # stopped by the depth this many steps (13 h, a tide): it proceeds (logged)
 
 
 def required_gap(b1, b2):
@@ -94,6 +106,10 @@ class Mover:
         water = np.flatnonzero(~self.special)
         self.tree = cKDTree(np.column_stack([fg.x[water], fg.y[water]]))
         self.tree_ids = water
+        self.near_cell = np.full(fg.n, 40.0)
+        for region, m in NEAREST_CELL_M.items():
+            if region in fg.labels["region"]:
+                self.near_cell[fg.mask("region", region)] = m
         self.stretches = {}
         self.main_waterway = np.zeros(fg.n, dtype=bool)
         for n, d in sim.graph.nodes(data=True):
@@ -102,10 +118,19 @@ class Mover:
             if d.get("main_waterway"):
                 self.main_waterway[n] = True
         self.fairway = fg.fairway.astype(bool)
+        # inland craft sail faster than sea-going ships in the docks and canals (AIS); both slow at the locks
+        self.inland_limit_kn = fg.speed_limit_kn.copy()
+        approach = sim.graph.graph.get("speed_limits", {}).get("lock_approach_kn", 0.0)
+        inland = getattr(PI, "INLAND_DOCK_SPEED_KN", {})
+        for zone, key in (("dock", "dock"), ("canal", "canal")):
+            if key in inland:
+                m = (self.zone_label == zone) & ~(self.inland_limit_kn <= approach)
+                self.inland_limit_kn[m] = inland[key][NR.SPEED_PERCENTILE]
         self.vis_cap = None
         self.denied = set()
         self.ships = {}                                        # key -> Ship on the mesh
         self.lines = {}                                        # key -> hull centre line (n x 2)
+        self.boxes = {}                                        # key -> bounding box of that line, and the beam
         self.occ = {}                                          # cell -> keys of the hulls covering it
         self.allow = {}                                        # key -> keys it may pass this step (deadlocks)
         self.next_index = 0
@@ -150,39 +175,88 @@ class Mover:
         return sorted({int(self.tree_ids[i]) for h in hits for i in h})
 
     def shift(self, ship):
-        """How far the ship can move off its cell centre line, sideways, inside its lane."""
+        """How far the ship can move off its cell centre line, sideways: inside its lane, or as far as it has
+        been given room to stand aside (sidestep_m)."""
         head = ship.cells[-1] if ship.cells else (ship.route[0] if ship.route else None)
         if head is None:
             return 0.0
-        return max(0.0, (self.lane[head] - ship.beam) / 2)
+        return max(0.0, (self.lane[head] - ship.beam) / 2, getattr(ship, "sidestep_m", 0.0))
+
+    def room_aside(self, ship, side):
+        """How far the ship's centre line can move to this side (+1 starboard, -1 port) with its whole hull in
+        water deep enough for it now: probed from its bow, middle and stern out to SIDESTEP_MAX_M."""
+        k = self._key(ship)
+        line = self.lines.get(k)
+        u = self._heading(line) if line is not None else None
+        if u is None:
+            return 0.0
+        fg, level = self.fg, self.sim.level_now
+        n = np.array([u[1], -u[0]]) * side
+        need = ship.draught + SIDESTEP_MARGIN_M
+        room = SIDESTEP_MAX_M
+        for p in (line[0], line[len(line) // 2], line[-1]):
+            reach = 0.0
+            for o in np.arange(SIDESTEP_PROBE_M, SIDESTEP_MAX_M + ship.beam / 2 + SIDESTEP_PROBE_M, SIDESTEP_PROBE_M):
+                dist, i = self.tree.query(p + n * o)
+                cell = self.tree_ids[i]
+                if dist > self.near_cell[cell] or fg.depth_m[cell] + level[cell] < need:
+                    break
+                reach = o
+            room = min(room, max(reach - ship.beam / 2, 0.0))
+            if room == 0.0:
+                break
+        return room
 
     @staticmethod
     def _line(xy):
         return shapely.LineString(xy if len(xy) > 1 else np.vstack([xy, xy + 1e-3]))
 
-    def allowance(self, ship, line, side, other, other_line):
-        """How much two ships can move apart sideways inside their lanes: s1 + s2 on opposite sides of the
-        lane (meeting on their own starboard sides, or one overtaking on the other's port side) and when
-        crossing; |s1 - s2| on the same side (one behind the other: shifting does not separate them)."""
-        s1, s2 = self.shift(ship), self.shift(other)
-        u1, u2 = self._heading(line), self._heading(other_line)
+    def apart(self, ship, line, side, other, other_line):
+        """(y, g): how two ships lie and move relative to each other, across this ship's heading. y: where the
+        other's hull lies (m, + = to starboard); g: how far apart their sides would take them when they lie
+        exactly in line (meeting: each to its starboard; same way: the sides they keep). None when they cross."""
+        mine, theirs = self._line(line), self._line(other_line)
+        a, b = shapely.ops.nearest_points(mine, theirs)
+        # the headings where the hulls are closest, not of the whole hulls: a ship following a bend alongside
+        # another is not crossing it
+        u1, u2 = self._heading_at(mine, a), self._heading_at(theirs, b)
         if u1 is None or u2 is None:
-            return s1 + s2
+            return None
         c = float(np.dot(u1, u2))
         if abs(c) < OVERTAKE_SAME_DIRECTION:
-            return s1 + s2
-        apart = (side != other.side) if c > 0 else (side == other.side)
-        return s1 + s2 if apart else abs(s1 - s2)
+            return None
+        s1, s2 = self.shift(ship), self.shift(other)
+        l2 = other.side * s2 if c > 0 else -s2
+        return (b.x - a.x) * u1[1] - (b.y - a.y) * u1[0], l2 - side * s1
+
+    @staticmethod
+    def _heading_at(line, point, reach=30.0):
+        """The heading of a line around one of its points."""
+        s = line.project(point)
+        p0, p1 = line.interpolate(max(s - reach, 0.0)), line.interpolate(min(s + reach, line.length))
+        d = np.array([p1.x - p0.x, p1.y - p0.y])
+        n = float(np.hypot(*d))
+        return d / n if n > 0 else None
+
+    def separation(self, ship, line, side, other, other_line, d):
+        """The distance two ships can stand apart, shifting to their sides."""
+        rel = self.apart(ship, line, side, other, other_line)
+        if rel is None:                                # crossing: shifting does not help, it waits for the other ...
+            now = self.lines.get(self._key(ship))
+            if now is not None and self._line(now).distance(self._line(other_line)) < required_gap(ship.beam, other.beam):
+                return math.inf                        # ... unless they already touch: only moving can part them
+            return d
+        y, g = rel
+        # side by side each moves away from the other, whichever side that is (a remembered side took them
+        # towards each other, or stopped two ships that had room); exactly in line their sides decide
+        return abs(y) + self.shift(ship) + self.shift(other) if abs(y) > IN_LINE_M else abs(g)
 
     def conflict(self, ship, line, cells, side=None):
         """The first other ship whose hull is too close to this centre line, or None. side: the side of
         its lane the ship would keep (default: the one it keeps now)."""
         k = self._key(ship)
         side = ship.side if side is None else side
-        others = set()
-        for c in cells:
-            others |= self.occ.get(c, set())
-        others.discard(k)
+        others = self.near(k, ship, line)
         if not others:
             return None
         mine = self._line(line)
@@ -194,9 +268,21 @@ class Mover:
             gap = required_gap(ship.beam, other.beam)
             if d >= gap:
                 continue
-            if d + self.allowance(ship, line, side, other, self.lines[o]) < gap:
+            if self.separation(ship, line, side, other, self.lines[o], d) < gap:
                 return other
         return None
+
+    def near(self, k, ship, line):
+        """The ships whose hull lies close enough to this centre line to matter, from where the hulls are:
+        on the river a cell is 200 m long, and a short hull between two rows of cells covered no cell, so
+        looking for ships on the same cells missed it."""
+        x0, y0, x1, y1 = line[:, 0].min(), line[:, 1].min(), line[:, 0].max(), line[:, 1].max()
+        out = []
+        for o, (a0, b0, a1, b1, beam) in self.boxes.items():
+            r = required_gap(ship.beam, beam)
+            if o != k and a0 - r <= x1 and a1 + r >= x0 and b0 - r <= y1 and b1 + r >= y0:
+                out.append(o)
+        return out
 
     def free_side(self, ship, line, cells):
         """The side of its lane on which the ship's hull at `line` conflicts with no one: starboard (+1)
@@ -217,26 +303,30 @@ class Mover:
         """ship.lateral_m of every ship under way: how far it stands off its centre line, to its side of
         the lane, to keep the required distance from the ships it is passing (0 when none is that close)."""
         for k, ship in self.ships.items():
-            f = 0.0
-            if ship.state.value in UNDER_WAY and ship.hull:
-                others = set()
-                for c in ship.hull:
-                    others |= self.occ.get(c, set())
-                others.discard(k)
+            f, away = 0.0, ship.side
+            if ship.state.value in UNDER_WAY + ("pilot_change",):   # (a short hull between two rows of cells has no hull cells)
+                others = self.near(k, ship, self.lines[k])
                 if others:
                     mine = self._line(self.lines[k])
                     for o in others:
-                        if o in self.allow.get(k, ()):
-                            continue
                         other = self.ships[o]
                         d = mine.distance(self._line(self.lines[o]))
                         gap = required_gap(ship.beam, other.beam)
                         if d >= gap:
                             continue
-                        a = self.allowance(ship, self.lines[k], ship.side, other, self.lines[o])
-                        if a > 0:
-                            f = max(f, min(1.0, (gap - d) / a))
-            ship.lateral_m = ship.side * f * self.shift(ship)
+                        rel = self.apart(ship, self.lines[k], ship.side, other, self.lines[o])
+                        if rel is None:
+                            continue
+                        y, g = rel
+                        beside = abs(y) > IN_LINE_M
+                        a = self.shift(ship) + self.shift(other) if beside else abs(g)
+                        need = min(1.0, (gap - d) / a) if a > 0 else 0.0
+                        if need > f:
+                            f = need
+                            away = (-1 if y > 0 else 1) if beside else ship.side
+            if f == 0.0:
+                ship.sidestep_m = 0.0                  # clear of the others: back to its lane
+            ship.lateral_m = away * f * self.shift(ship)
 
     # ------------------------------------------------------------------ occupancy
     def occupy(self, ship, head, line=None):
@@ -250,6 +340,7 @@ class Mover:
             self.occ.setdefault(c, set()).add(k)
         self.lines[k] = line
         self.ships[k] = ship
+        self.boxes[k] = (line[:, 0].min(), line[:, 1].min(), line[:, 0].max(), line[:, 1].max(), ship.beam)
 
     def _clear(self, k, ship):
         for c in getattr(ship, "hull", []) or []:
@@ -263,9 +354,10 @@ class Mover:
         k = self._key(ship)
         self._clear(k, ship)
         ship.cells, ship.hull = [], []
-        ship.side, ship.lateral_m = 1, 0.0
+        ship.side, ship.lateral_m, ship.sidestep_m = 1, 0.0, 0.0
         self.ships.pop(k, None)
         self.lines.pop(k, None)
+        self.boxes.pop(k, None)
 
     def place(self, ship, cells=None):
         """Put a ship on the mesh at its route position; False if another hull is too close."""
@@ -291,7 +383,7 @@ class Mover:
         fg, sim = self.fg, self.sim
         zone = self.zone_label[node]
         stw = ship.stw_kn(LEG.get(zone, "river"), NR.planning_speed_kn)
-        limit = fg.speed_limit_kn[node]
+        limit = fg.speed_limit_kn[node] if ship.sea_going else self.inland_limit_kn[node]
         if zone == "dock" and np.isnan(limit):
             limit = sim.dock_speed_kn
         current = 0.0
@@ -360,6 +452,25 @@ class Mover:
                             return i - 1
             own |= set(st)
         return i_to
+
+    def _depth_limit(self, ship, i_from, i_to):
+        """Last route index in (i_from, i_to] with water under the keel now: the VTS checks a voyage when it
+        starts, but a ship held up on the way can miss its tide, and then waits for the water. Never for
+        more than DEPTH_HOLD_MAX steps (logged: a route over a bank the tide never covers)."""
+        cells = np.asarray(ship.route[i_from + 1:i_to + 1], dtype=np.int64)
+        sim = self.sim
+        bad = ~sim.passable.get(sim.k, sim.level_now, ship.draught)[cells] & ~self.special[cells]
+        if not bad.any():
+            ship.depth_hold = 0
+            return i_to
+        ship.depth_hold = getattr(ship, "depth_hold", 0) + 1
+        if ship.depth_hold == 1:
+            ship.note(sim.t, "hold_depth", at=int(cells[np.argmax(bad)]))
+        if ship.depth_hold > DEPTH_HOLD_MAX:
+            if ship.depth_hold == DEPTH_HOLD_MAX + 1:
+                ship.note(sim.t, "depth_hold_overridden", at=int(cells[np.argmax(bad)]))
+            return i_to
+        return i_from + int(np.argmax(bad))
 
     def _heading(self, line):
         d = line[-1] - line[0]
@@ -457,14 +568,30 @@ class Mover:
         waiting at a lock or a berth are a queue, not a knot, and are not passed."""
         self.allow = {}
         if not hasattr(self, "squeezed"):
-            self.squeezed = set()
+            self.squeezed, self.passing = set(), set()
+        for pair in list(self.passing):                # a squeeze lasts until they are clear of each other
+            a, b = tuple(pair)
+            if a in self.lines and b in self.lines and self._line(self.lines[a]).distance(self._line(self.lines[b])) \
+                    < required_gap(self.ships[a].beam, self.ships[b].beam):
+                self.allow.setdefault(a, set()).add(b)
+                self.allow.setdefault(b, set()).add(a)
+            else:
+                self.passing.discard(pair)
         for ship in sailing:
-            if ship.blocked_steps < DEADLOCK_AFTER:
+            if ship.blocked_steps < SIDESTEP_AFTER:
                 continue
             b = self.blocker(ship)
             if b is None:
                 continue
             pair = self.head_on(ship, b) or self.blocker(b) is ship
+            stopped = b.state.value == "pilot_change"  # lying stopped in the fairway: go round it
+            if pair or stopped or self._stuck(b):
+                # stand aside into the water that is there, instead of waiting the hour below
+                ship.sidestep_m = max(getattr(ship, "sidestep_m", 0.0), self.room_aside(ship, ship.side))
+                if b.state.value in UNDER_WAY:
+                    b.sidestep_m = max(getattr(b, "sidestep_m", 0.0), self.room_aside(b, b.side))
+            if ship.blocked_steps < DEADLOCK_AFTER:
+                continue
             if not (pair or self._stuck(b)):
                 continue
             k = self._key(ship)
@@ -477,6 +604,7 @@ class Mover:
             for ko in others:
                 self.allow.setdefault(k, set()).add(ko)
                 self.allow.setdefault(ko, set()).add(k)
+                self.passing.add(frozenset((k, ko)))
                 o = self.ships.get(ko)
                 if o is not None and (ship.id, o.id) not in self.squeezed:
                     self.squeezed.add((ship.id, o.id))
@@ -536,6 +664,8 @@ class Mover:
                 i0 = int(np.searchsorted(ship.s, ship.head, side="right")) - 1
                 i_want = int(np.searchsorted(ship.s, want[ship.id], side="right")) - 1
                 i_ok = self._stretch_limit(ship, i0, i_want, directions, inside) if i_want > i0 else i0
+                if i_ok > i0:
+                    i_ok = self._depth_limit(ship, i0, i_ok)
                 heads = ([want[ship.id]] if i_ok == i_want else []) + [float(ship.s[i]) for i in range(i_ok, i0, -1)]
                 for h in heads:
                     if h <= ship.head + 1e-6:

@@ -17,7 +17,8 @@ schedule's dates.
 
 Level 2, background traffic: a non-homogeneous Poisson process per class and entry source,
 rate = entry_probabilities.RATE_PER_HOUR x HOURLY_FACTOR(hour of day). Attributes are whole AIS
-ships (background_traffic.sample_attributes), the destination depends on class and source.
+ships that went to that destination (background_traffic.sample_attributes), the destination depends on
+class and source.
 """
 
 from __future__ import annotations
@@ -216,7 +217,7 @@ class Generator:
         ends = [source, dest[5:] if dest.startswith("exit_") else dest]
         limits = [CANAL_LIMITS[e] for e in ends if e in CANAL_LIMITS]
         for _ in range(100):
-            a = BT.sample_attributes(cls, self.rng)
+            a = BT.sample_attributes(cls, self.rng, dest)
             loa = float(a["loa"])
             beam = float(a["beam"] or loa / 7)
             if all(loa <= L and beam <= B for L, B in limits):

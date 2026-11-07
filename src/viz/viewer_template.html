@@ -395,7 +395,9 @@ function shipAt(i, t) {                              // {lat, lon, st, route, he
   if (P.legacy && q >= 0 && P.t[q] - P.t[r] <= 15.01) { const f = (t - P.t[r]) / (P.t[q] - P.t[r]); la += (nLat[P.v[q]] - la) * f; lo += (nLon[P.v[q]] - lo) * f; }
   return { lat: la, lon: lo, st: P.st[r], route: -1, node: P.legacy ? -1 : P.v[r] };
 }
-let drawn = [];           // [shipIndex, x, y, radius, state]
+let drawn = [];           // [shipIndex, x, y, radius, state, node]
+const DWELL_PORT = M.states.indexOf("dwell_port");
+let inPort = new Map();   // node -> ships lying there in a port with no berth model (drawn on one spot)
 function shipColour(i, st) { return colourBy === "kind" ? C.s[M.kind_group[S.cls[i]] ?? 1] : C.s[M.state_group[st] ?? 1]; }
 function drawShips() {
   const g = sizeCanvas(shipCanvas);
@@ -404,13 +406,19 @@ function drawShips() {
   const mpp = 156543.03392 * Math.cos(map.getCenter().lat * Math.PI / 180) / 2 ** map.getZoom();
   let sel = null;
   g.lineCap = "round"; g.lineJoin = "round";
-  // ships lying still at one node (a pilot station, a port, a lock's waiting berths, the same berth zone)
-  // are held there by a resource, not placed in the water: fan them out so each one shows
+  // ships lying still at one node (a pilot station, a lock's waiting berths, the same berth zone) are held
+  // there by a resource, not placed in the water: fan them out so each one shows. Ships lying in a port with
+  // no berth model (Vlissingen, Terneuzen, the canals) stay on its node: the fan has a fixed size on the
+  // screen, so at a small scale these groups, the largest of all, covered far more than the port
   const here = [], atNode = new Map();
+  inPort = new Map();
   for (let i = 0; i < NS; i++) {
     const a = shipAt(i, T); if (!a) continue;
     here.push([i, a]);
-    if (a.route < 0 && a.node >= 0) atNode.set(a.node, (atNode.get(a.node) || 0) + 1);
+    if (a.route < 0 && a.node >= 0) {
+      const m = a.st === DWELL_PORT ? inPort : atNode;
+      m.set(a.node, (m.get(a.node) || 0) + 1);
+    }
   }
   const fanned = new Map();
   for (const [i, a] of here) {
@@ -419,7 +427,7 @@ function drawShips() {
     const p = map.latLngToContainerPoint([a.lat, a.lon]);
     const col = shipColour(i, a.st);
     const rad = Math.min(Math.max(2 + S.loa[i] / 70, 2.5), 8);
-    if (a.route < 0 && atNode.get(a.node) > 1) {       // the k-th ship at a shared node: a sunflower spiral
+    if (a.route < 0 && a.st !== DWELL_PORT && atNode.get(a.node) > 1) {       // the k-th ship at a shared node: a sunflower spiral
       const k = fanned.get(a.node) || 0; fanned.set(a.node, k + 1);
       const rr = 2.2 * rad * Math.sqrt(k), ang = k * 2.39996;
       p.x += rr * Math.cos(ang); p.y += rr * Math.sin(ang);
@@ -435,7 +443,7 @@ function drawShips() {
       g.fillStyle = col; g.fill(); g.lineWidth = 1; g.strokeStyle = C.surface; g.stroke();
       a.p = p; a.rad = rad;
     }
-    drawn.push([i, p.x, p.y, a.rad, a.st]);
+    drawn.push([i, p.x, p.y, a.rad, a.st, a.node]);
   }
   if (sel && sel.p) { g.beginPath(); g.arc(sel.p.x, sel.p.y, sel.rad + 4, 0, 2 * Math.PI); g.lineWidth = 2; g.strokeStyle = C.ink; g.stroke(); }
   if (sel && follow) map.panTo([sel.lat, sel.lon], { animate: false });
@@ -451,7 +459,7 @@ map.on("mousemove", e => { const d = nearest(e.containerPoint.x, e.containerPoin
     tip.innerHTML = `<b>${fmt(dep, 1)} m of water</b><br>charted ${fmt(DC.depth[c] / 100, 1)} m below LAT ${DC.ga[c] < 0 ? "+ basin level" : "+ water level"} ${fmt(lvl, 2)} m`;
     tip.style.display = "block"; tip.style.left = (e.containerPoint.x + 14) + "px"; tip.style.top = (e.containerPoint.y + 10) + "px"; return; }
   const i = d[0]; map.getContainer().style.cursor = "pointer";
-  tip.innerHTML = `<b>${esc(S.name[i] || S.id[i])}</b> ${S.name[i] ? `<span style="color:${C.ink2}">${esc(S.id[i])}</span>` : ""}<br>${esc(M.class_label[S.cls[i]] || S.cls[i])} · ${fmt(S.loa[i], 0)} × ${fmt(S.beam[i], 0)} m, T ${fmt(S.draught[i], 1)} m<br>${esc(label(M.states[d[4]]))}`;
+  tip.innerHTML = `<b>${esc(S.name[i] || S.id[i])}</b> ${S.name[i] ? `<span style="color:${C.ink2}">${esc(S.id[i])}</span>` : ""}<br>${esc(M.class_label[S.cls[i]] || S.cls[i])} · ${fmt(S.loa[i], 0)} × ${fmt(S.beam[i], 0)} m, T ${fmt(S.draught[i], 1)} m<br>${esc(label(M.states[d[4]]))}${d[4] === DWELL_PORT && inPort.get(d[5]) > 1 ? `<br>${inPort.get(d[5])} ships lying here` : ""}`;
   tip.style.display = "block"; tip.style.left = (e.containerPoint.x + 14) + "px"; tip.style.top = (e.containerPoint.y + 10) + "px"; });
 map.on("mouseout", () => { tip.style.display = "none"; });
 map.on("click", e => { const d = nearest(e.containerPoint.x, e.containerPoint.y, 10); if (d !== -1) selectShip(d[0]); });

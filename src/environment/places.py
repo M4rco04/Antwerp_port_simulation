@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 import sys
 from pathlib import Path
 
@@ -40,11 +41,12 @@ CORE_MIN_DEPTH_M = 8.0          # places snap to cells joined to the main river 
 INLAND_CORE_DEPTH_M = 3.0       # ... or this for places only inland craft use
 INLAND_ONLY = ("albert_canal", "upper_sea_scheldt", "schelde_rijn_canal", "zuid_beveland_canal")
 SEA_GATES = ("sea_west", "sea_southwest", "sea_north")
+# a ship enters or leaves at sea in deep water: the median AIS position of the north gate lies on a bank of
+# 9 m with 20 m of water 4 km away, and every 15 m ship from the north started on it
+SEA_GATE_MIN_DEPTH_M = 20.0
 OUTSIDE = ("zeebrugge", "oosterschelde")
 # entry source -> what to snap it to: a node region, a canal zone, or an anchorage name
 SNAP = {
-    "anchorage_westhinder": {"anchorage": "Westhinder"},
-    "anchorage_everingen_c": {"anchorage": "Everingen C"},
     "ghent_terneuzen_canal": {"zone": "ghent_terneuzen_canal"},
     "zuid_beveland_canal": {"zone": "zuid_beveland_canal"},
     "schelde_rijn_canal": {"zone": "schelde_rijn_canal"},
@@ -135,17 +137,28 @@ def add_places(graph):
     infra = _data_module("port_infrastructure")
     anchorages = graph.graph.get("anchorages", {})
 
-    for name, loc in (entry.SOURCE_LOCATION.items() if entry else []):
+    # every source with a rate needs a place: a ship that came in from sea and anchored has its anchorage as
+    # source but no first fix there, so SOURCE_LOCATION does not list it; its anchorage node says where it is
+    anchorage_of = {"anchorage_" + re.sub(r"[^a-z0-9]+", "_", a.lower()).strip("_"): a for a in anchorages}
+    locations = dict(entry.SOURCE_LOCATION) if entry else {}
+    for rates in (entry.RATE_PER_HOUR.values() if entry else []):
+        for name in rates:
+            if name not in locations and name in anchorage_of:
+                d = graph.nodes[anchorages[anchorage_of[name]]]
+                locations[name] = {"lon": d["longitude"], "lat": d["latitude"]}
+    for name, loc in locations.items():
         lon, lat = loc["lon"], loc["lat"]
         rule = SNAP.get(name, {"region": ("sea",)} if name in SEA_GATES or name in OUTSIDE else {})
-        if "anchorage" in rule and rule["anchorage"] in anchorages:
-            node, dist = anchorages[rule["anchorage"]], 0.0
+        if name in anchorage_of:
+            node, dist = anchorages[anchorage_of[name]], 0.0
         else:
             mask = None
             if "zone" in rule:
                 mask = snap.zone == rule["zone"]
             elif "region" in rule:
                 mask = np.isin(snap.region, rule["region"])
+            if name in SEA_GATES:
+                mask = mask & (snap.depth >= SEA_GATE_MIN_DEPTH_M)
             node, dist = snap(lon, lat, mask, INLAND_CORE_DEPTH_M if name in INLAND_ONLY else CORE_MIN_DEPTH_M)
         places[name] = _place(graph, "source", node, lon, lat, dist,
                               (entry.SOURCE_DESCRIPTION.get(name, name) if hasattr(entry, "SOURCE_DESCRIPTION") else name),
@@ -184,6 +197,9 @@ def add_places(graph):
         for table in (background.P_DESTINATION_GIVEN_CLASS, getattr(background, "P_EXIT_GIVEN_CLASS", {})):
             for v in table.values():
                 names |= set(v)
+        for per in getattr(background, "NEXT_CALL", {}).values():
+            for zone, following in per.items():
+                names |= {zone} | (set(following) - {"leave"})
     berths = graph.graph.get("berths", {})
     for zone in sorted(names):
         base = zone[5:] if zone.startswith("exit_") else zone

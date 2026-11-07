@@ -53,6 +53,13 @@ class LockTimes:
     gap_side_m: float = 2.0           # ... and side by side
 
 
+# assumed: how long a lockage waits to fill up (lockages carried one ship or none in three of four cycles). Set so
+# that the time per passage stays near the AIS (0.97 h): 20 and 15 min carried more ships but took 1.5 h
+BUNDLE_HOLD_MIN = 10.0
+EMPTY_HOLD_MIN = 10.0
+SMALL_SHIP_LOA_M, SMALL_SHIP_BEAM_M = 80.0, 9.0
+
+
 @dataclass
 class ShipRequest:
     ship_id: str
@@ -64,6 +71,7 @@ class ShipRequest:
     container: bool = False
     turn: int = 0                     # queue number, given by Lock.request
     requested_at: float = 0.0
+    entered_at: float = 0.0
 
     @property
     def exclusive(self):
@@ -232,11 +240,31 @@ class Lock:
                 small = ship.loa <= self.times.small_loa_m
                 c.task, c.timer_min = ("enter", ship), self.times.small_entry_min if small else self.times.entry_min
                 return True
+            if self._hold_open(c, t):
+                return False
             if c.ships or c.queue[there]:
                 c.state, c.task, c.timer_min = "closing", None, self.times.gate_min
                 events.append(self._event("closing", t, c, side=here, ships=len(c.ships)))
                 return True
             return False
+        return False
+
+    def _hold_open(self, c, t):
+        """Keep the gates open a while so that a lockage carries more than one ship: for ships still coming
+        once one is in (up to BUNDLE_HOLD_MIN from when the first went in, while there is room for another),
+        and before sailing empty for a ship on the far side (EMPTY_HOLD_MIN from its request). Not for a
+        ship with a tide to keep or one that has the chamber to itself."""
+        there = other_side(c.side)
+        if c.ships:
+            first = min(p.ship.entered_at for p in c.ships)
+            if any(p.ship.exclusive or p.ship.priority <= 2 for p in c.ships) or t - first >= BUNDLE_HOLD_MIN:
+                return False
+            smallest = ShipRequest("room", SMALL_SHIP_LOA_M, SMALL_SHIP_BEAM_M, 0.0, c.side)
+            return pack(c.length_m, c.width_m, [p.ship for p in c.ships] + [smallest],
+                        self.times.gap_long_m, self.times.gap_side_m) is not None
+        if c.queue[there]:
+            first = c.queue[there][0]
+            return first.priority > 2 and not first.exclusive and t - first.requested_at < EMPTY_HOLD_MIN
         return False
 
     def _next_to_enter(self, c, t, levels, events):
@@ -266,6 +294,7 @@ class Lock:
                     c.reserved_for = None
                 return [self._event("exit", t, c, item.ship, side=c.side)]
             if kind == "enter":
+                item.entered_at = t
                 c.ships = pack(c.length_m, c.width_m, [p.ship for p in c.ships] + [item],
                                self.times.gap_long_m, self.times.gap_side_m)
                 return [self._event("enter", t, c, item, side=c.side)]

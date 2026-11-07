@@ -47,12 +47,12 @@ log = logging.getLogger("rules")
 RIVER_ACROSS_M = 50.0
 ZEESCHELDE_FAIRWAY_HALF_M = 150.0           # assumed: no buoy data upstream of the border
 MOUTH_FAIRWAY_HALF_M = 500.0                # assumed: Vlissingen precautionary area, below the first main-fairway buoy
-# dock and lock-approach speeds: no published limit was found (regs §7). They come from the AIS
+# dock, canal and lock-approach speeds: no published limit was found (regs §7). They come from the AIS
 # (src/data/port_infrastructure.py DOCK_SPEED_KN: the SPEED_PERCENTILE of sea-going ships under
-# way); these values only when that is missing
+# way, the median because ships sail at the limit); these values only when that is missing
 DOCK_SPEED_LIMIT_KN = 6.0                    # assumed fallback
 LOCK_APPROACH_SPEED_KN = 4.0                 # assumed fallback, within LOCK_APPROACH_M of a lock
-SPEED_PERCENTILE = "p95"
+SPEED_PERCENTILE = "p50"
 LOCK_APPROACH_M = 600.0
 NM = 1852.0
 
@@ -328,14 +328,19 @@ def assign_cell_attributes(graph, buoys, zones_be, lines):
     for name, row in observed.items():
         if name != "lock_approach":
             limit[(zone == "dock") & (basin_name == name)] = row[SPEED_PERCENTILE]
+    if "canal" in observed:
+        limit[zone == "canal"] = observed["canal"][SPEED_PERCENTILE]
     approach_kn = observed.get("lock_approach", {}).get(SPEED_PERCENTILE, LOCK_APPROACH_SPEED_KN)
     lock_area = np.zeros(len(ids), dtype=bool)
     lock_xy = np.array([(d["x"], d["y"]) for _, d in graph.nodes(data=True) if d["type"] == "lock"])
     if len(lock_xy):
         near = shapely.STRtree(shapely.points(lock_xy)).query(shapely.points(X, Y), predicate="dwithin",
                                                               distance=LOCK_APPROACH_M)[0]
-        limit[np.unique(near)] = np.fmin(limit[np.unique(near)], approach_kn)
-        lock_area[np.unique(near)] = True
+        near = np.unique(near)
+        # the slow approach is the outer harbours and docks (as fitted), not the river passing the lock heads
+        slow = near[np.isin(region[near], ("port", "canal")) & (zone[near] != "river")]
+        limit[slow] = np.fmin(limit[slow], approach_kn)
+        lock_area[near] = True
 
     # stretches
     stretch_of = [[] for _ in ids]
