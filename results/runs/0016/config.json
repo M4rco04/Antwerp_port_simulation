@@ -1,0 +1,16 @@
+{
+  "label": "",
+  "start": "2026-10-21 00:00",
+  "days": 30.0,
+  "warmup": 2.0,
+  "seed": 11,
+  "weather": "bootstrap",
+  "containers": "nhpp",
+  "container_rate": 1.0,
+  "bunching": true,
+  "delays": true,
+  "background": true,
+  "routing": "lanes",
+  "max_minutes": 60.0,
+  "progress_hours": 2.0
+}

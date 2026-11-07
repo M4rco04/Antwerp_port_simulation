@@ -1,0 +1,11 @@
+Traceback (most recent call last):
+  File "C:\Users\rober\Documents\Agh\Symulacja Systemów Dyskretnych\Antwerp_port_simulation\src\sim\pipeline.py", line 171, in execute
+    sim = engine.Simulation(cfg["start"], cfg["days"], cfg["seed"], cfg["delays"], cfg["warmup"], cfg["background"],
+                            weather_mode=cfg["weather"], container_mode=cfg["containers"],
+                            container_rate=cfg["container_rate"], bunching=cfg["bunching"], routing=cfg["routing"])
+  File "C:\Users\rober\Documents\Agh\Symulacja Systemów Dyskretnych\Antwerp_port_simulation\src\sim\engine.py", line 125, in __init__
+    self.weather = Weather.generate(self.start, hours, self.rng, mode=weather_mode)
+                   ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\rober\Documents\Agh\Symulacja Systemów Dyskretnych\Antwerp_port_simulation\src\environment\weather.py", line 75, in generate
+    raise ValueError("the KNMI record does not cover the simulated period: use mode='bootstrap'")
+ValueError: the KNMI record does not cover the simulated period: use mode='bootstrap'
