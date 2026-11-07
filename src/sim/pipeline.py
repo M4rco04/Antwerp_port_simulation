@@ -71,8 +71,8 @@ def clean_config(cfg: dict) -> dict:
         raise ValueError("routing must be lanes or shortest")
     if out["containers"] not in ("replay", "nhpp"):
         raise ValueError("containers must be replay or nhpp")
-    if not 0 < out["days"] <= 60:
-        raise ValueError("days must be between 0 and 60")
+    if not out["days"] > 0:
+        raise ValueError("days must be above 0")
     if not 0 <= out["warmup"] < out["days"]:
         raise ValueError("the warm-up must be shorter than the run")
     if not 0 < out["container_rate"] <= 5:

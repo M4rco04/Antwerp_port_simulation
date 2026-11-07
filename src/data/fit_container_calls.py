@@ -35,7 +35,8 @@ SCHEDULE_YEAR = 2026
 MATCH_WINDOW_H = 96
 # berth stops in Antwerp this close together are one port call (shifting berth)
 SHIFT_MAX_H = 3
-DIMENSIONS = {"loa": "length", "beam": "width", "draught": "draught"}
+# the draught a ship usually sails at, not the largest it ever reported (that overstated the deep tail)
+DIMENSIONS = {"loa": "length", "beam": "width", "draught": "draught_median"}
 
 
 def parse_schedule_time(values):
@@ -66,7 +67,7 @@ def fit_dimensions(container):
         model[dim] = {"a": round(float(a), 5), "b": round(float(b), 5),
                       "r2": round(float(1 - resid.var() / y.var()), 3)}
     cov = np.cov(np.vstack(residuals))
-    table = sorted((int(r.teu), int(r.length), int(r.width), round(float(r.draught), 1)) for r in rows.itertuples())
+    table = sorted((int(r.teu), int(r.length), int(r.width), round(float(r.draught_median), 1)) for r in rows.itertuples())
     return {
         "model": model,
         "residual_cov": [[round(float(v), 6) for v in row] for row in cov],

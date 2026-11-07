@@ -34,6 +34,10 @@ from scipy.sparse.csgraph import dijkstra
 log = logging.getLogger("fast_graph")
 
 EDGE_KINDS = ("sea", "river", "canal", "port", "link", "lock_gate", "anchorage_access", "virtual")
+# locks that AIS shows almost nobody using (Royers, Kattendijk: 0.4 passages a day against 50 at the main
+# locks): a route takes them only when there is no other way, not to save a few km through the docks
+LITTLE_USED_LOCKS = ("Royers", "Kattendijk")
+LITTLE_USED_LOCK_PENALTY_M = 100_000.0
 NODE_FIELDS_FLOAT = ("x", "y", "longitude", "latitude", "depth_m", "chainage_m", "lane_offset_m", "speed_limit_kn")
 NODE_FIELDS_CODE = ("region", "zone", "type", "basin", "speed_zone")
 LOCK_PENALTY_M = 10_000.0
@@ -178,7 +182,20 @@ class FastGraph:
             self._st = {"is_lock": is_lock, "anch": anch, "depth": self.edge_depth[self.entry_edge],
                         "weight": self.edge_weight[self.entry_edge],
                         "lock_entry": is_lock[rows] | is_lock[cols], "anch_entry": anch[rows] | anch[cols]}
+            extra = np.zeros(len(rows))
+            for i in np.flatnonzero(is_lock):
+                if self.graph.nodes[int(self.ids[i])]["name"] in LITTLE_USED_LOCKS:
+                    extra[(rows == i) | (cols == i)] = LITTLE_USED_LOCK_PENALTY_M / 2
+            self._st["lock_extra"] = extra
         return self._st
+
+    def _lock_entries(self, name):
+        """Bool per CSR entry: into or out of this lock."""
+        cache = self.__dict__.setdefault("_lock_entry_cache", {})
+        if name not in cache:
+            i = next(j for j in np.flatnonzero(self._static()["is_lock"]) if self.graph.nodes[int(self.ids[j])]["name"] == name)
+            cache[name] = (self.entry_rows == i) | (self.indices == i)
+        return cache[name]
 
     def passable_entries(self, level, need, loa_m=0.0, beam_m=0.0, ends=(), entries=None):
         """Bool mask over the CSR entries a ship may sail along (over entries, an index array of
@@ -236,13 +253,17 @@ class FastGraph:
         return out
 
     def route(self, source, target, draught_m, ukc_m=0.0, loa_m=0.0, beam_m=0.0, level=None, nodes_mask=None,
-              lock_penalty_m=LOCK_PENALTY_M, keep_right=False, min_clearance=None, lane_factor=None):
+              lock_penalty_m=LOCK_PENALTY_M, keep_right=False, min_clearance=None, lane_factor=None,
+              depth_penalty=None, avoid_locks=()):
         """Shortest allowed path between two graph node ids (list of node ids); raises
         networkx.NetworkXNoPath like find_route. keep_right: prefer the starboard half of the
         river (regs §5.1), see keep_right_factor. min_clearance: only cells with at least this
         much water to either side (self.clearance, see clearance.py), for wide ships. lane_factor: a
         cost multiplier per CSR entry (lanes.Lanes.factor: hold the starboard side of the buoyed
-        fairway); where it is nan the keep-right factor applies."""
+        fairway); where it is nan the keep-right factor applies. depth_penalty = (level, need_m, per_m):
+        a cell shallower than need_m at that level costs 1 + per_m x the metres it lacks: the route keeps
+        to the deep channel wherever there is one, without forbidding the cells that need the tide.
+        avoid_locks: names of locks this ship takes only if no other will do."""
         import networkx as nx
 
         s, t = self.index[int(source)], self.index[int(target)]
@@ -259,12 +280,18 @@ class FastGraph:
             entries = np.arange(len(self.indices))
         ok = self.passable_entries(level, draught_m + ukc_m, loa_m, beam_m, ends=(s, t), entries=entries)
         e = entries[ok]
-        w = st["weight"][e] + np.where(st["lock_entry"][e], lock_penalty_m / 2, 0.0)
+        w = st["weight"][e] + np.where(st["lock_entry"][e], lock_penalty_m / 2, 0.0) + st["lock_extra"][e]
+        for name in avoid_locks:
+            w = w + self._lock_entries(name)[e] * LITTLE_USED_LOCK_PENALTY_M / 2
         if lane_factor is not None:
             lf = lane_factor[e]
             w = w * np.where(np.isfinite(lf), lf, self.keep_right_factor()[e] if keep_right else 1.0)
         elif keep_right:
             w = w * self.keep_right_factor()[e]
+        if depth_penalty is not None:
+            low, need, per_m = depth_penalty
+            short = need - (st["depth"][e] + np.minimum(low[self.entry_rows[e]], low[self.indices[e]]))
+            w = w * np.where(st["lock_entry"][e], 1.0, 1.0 + per_m * np.clip(short, 0.0, None))
         M = sparse.csr_matrix((w, (self.entry_rows[e], self.indices[e])), shape=(self.n, self.n))
         dist, pred = dijkstra(M, directed=True, indices=s, return_predecessors=True)
         if not np.isfinite(dist[t]):

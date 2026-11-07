@@ -298,7 +298,8 @@ def pack_positions(pos, idx, step_min, run):
     """Per ship, its position records in time order (offsets per ship index):
         route >= 0   the ship is v metres along routes[route] (a list of nodes): drawn along that water,
                      lat metres to starboard of it (passing or overtaking in one lane)
-        route = -1   the ship lies at node v (ships at one node are fanned out by the page)
+        route = -1   the ship lies at node v (ships at one node are fanned out by the page, except those
+                     lying in a port with no berth model, which share the node's spot)
     Runs saved before routes were recorded (15-min points) become node records at extra nodes, flagged
     legacy, which the page joins with straight lines as before."""
     lat, lon = node_coords()

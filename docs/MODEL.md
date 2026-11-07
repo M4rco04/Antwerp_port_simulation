@@ -51,7 +51,9 @@ From these, the fitted quantities are:
 \lambda_{c,s} = \frac{N_{c,s}}{T}, \qquad f_c(h) = \frac{\tilde n_c(h) / T(h)}{\frac{1}{24}\sum_{k} \tilde n_c(k) / T(k)}
 ```
 
-- **Ship attributes:** the list of whole observed ships per class (LOA, beam, largest reported draught, dangerous-goods category), resampled as a unit so the correlations between dimensions are kept.
+- **Ship attributes:** the list of whole observed ships per class and per class and destination (LOA, beam, the draught reported on arrival, dangerous-goods category), resampled as a unit so the correlations between dimensions, and between a ship's size and where it goes, are kept. Draughts outside 0.5–17.5 m, and inland draughts above 5 m, count as not reported.
+- **Draught change:** the departure draught over the arrival draught of each visit where both were seen, resampled per class (§15.5).
+- **Inland calls:** inland craft call at several places on one visit. Their stops of at least 1 h, with successive stops in one zone merged, give the probability of each next zone or of leaving after a call. A craft not heard for 6 h has left, so a stop never spans that gap; if it was under way on one side of the silence and both ends lie in a zone at the edge of the area, its return is a new visit, and so a new arrival. Their stays are then scaled so that they reproduce the AIS stock by Little's law (mean stay = craft lying in port / calls per hour), because with many stays still going on when the data ends the lognormal's tail is an extrapolation.
 - **Destination** given class and source: the berth zone of the visit's longest stop, or the exit it left by when it never stopped. **Exit** given class and last berth zone. Both are empirical frequencies.
 - **Time at berth and at anchor:** a lognormal per class (and per berth zone where there are enough stops), fitted by maximum likelihood. A stop still running when the data ends is right-censored; stops under 0.5 h (3 h in lock zones) are never recorded, so the likelihood is left-truncated there. With d\_i = 1 for a completed stop of x\_i hours and truncation point t\_i:
 
@@ -119,7 +121,7 @@ A berth whose access W is less than its allowed draught plus its minimum under-k
 - **Lane offset:** the signed distance from the channel axis, positive on the right bank looking upstream (starboard for an inbound ship). Lane = offset / 50 m.
 - **Fairway:** in the Western Scheldt, inside the lateral buoys of the main fairway (the union of convex hulls of every 6 consecutive buoys); in the Zeeschelde, within 150 m of the axis (no buoy data); off Vlissingen below the first buoy, within 500 m; at sea, the buoyed channels and the deep-water route; canals entirely.
 - **Speed zone:** sea (pilot station to Vlissingen), river (Vlissingen to Antwerp), canal, dock — the legs of the planning speeds (§7).
-- **Speed limit:** none on the river (only safe speed applies); in the docks and within reach of the locks, the 95th percentile of the AIS speeds of sea-going ships in that basin, since no published number exists.
+- **Speed limit:** none on the river (only safe speed applies); in the docks, the canals and within reach of the locks (not the river passing the lock heads), the median AIS speed of sea-going ships there, since no published number exists and ships sail at the limit. Inland craft have their own AIS medians in the docks and canals.
 - **Main dock waterways:** the right-bank route from Kreekrak to Royers and the left-bank route to Kallo, which have right of way over side docks (§11.4).
 - **Regulated stretches:** the stretches with encounter rules (Pas van Borssele, Nauw van Bath, Bocht van Bath and others), each defined between named buoys or chainages along the axis.
 - **Clearance:** the distance from a cell's centre to the edge of the water. The mesh's edges are drawn on a 25 m raster, the drawing is closed over the gaps between grid lines, and a Euclidean distance transform DT gives the distance to non-water. A border cell stands for water half a lane beyond its centre:
@@ -161,13 +163,13 @@ The residual is an AR(1) process, available as optional noise for stochastic run
 ### 4.3 Level at a cell and passability
 
 - A tidal cell takes its level from the two gauges either side of it along the estuary, interpolated by its position between them (weight w): h(n,t) = (1 − w) h\_a(t) + w h\_b(t). A cell behind locks keeps its basin's fixed level.
-- A ship needs a depth of draught plus under-keel clearance: 10 % of the draught for sea-going ships, 0.3 m for inland craft. A cell or edge is passable when
+- A ship needs a depth of draught plus under-keel clearance: 10 % of the draught for sea-going ships on tidal water, at most 0.6 m (the berth register's minimum) behind the locks, 0.3 m for inland craft. A cell or edge is passable when
 
 ```math
 d(n) + h(n,t) \;\ge\; T + \mathrm{UKC}
 ```
 
-- Passability masks are computed once per time step and depth class (the required depth rounded up to 0.5 m) and shared by all ships of that class.
+- Routes and the VTS check use this condition. Under way a ship also checks the cells ahead against its draught alone: masks computed once per time step and draught class (rounded up to 0.5 m) and shared by all ships of that class. A ship that has missed its tide stops and waits for the water (logged as `hold_depth`; after 13 h it proceeds, logged).
 
 ### 4.4 Tidal current
 
@@ -288,7 +290,7 @@ N_{c,s} \sim \mathrm{Poisson}\big(\lambda_{c,s}\, f_c(h)\, \Delta t\big)
 Each new ship gets:
 
 1. **Destination** drawn from P(destination | class, source): a berth zone, a port, or straight through to an exit.
-2. **Attributes:** one whole observed ship of its class (LOA, beam, draught, dangerous-goods category). A missing beam is LOA/7, a missing draught the class median. A ship entering from or leaving to a canal behind a lock is redrawn (up to 100 times) until it fits that lock's largest chamber: Schelde-Rijn 320 × 24 m, Zuid-Beveland 280 × 24 m, Albert canal 180 × 22 m.
+2. **Attributes:** one whole observed ship of its class that went to that destination, or of its class where fewer than 5 did (LOA, beam, draught, dangerous-goods category). A missing beam is LOA/7, a missing draught the class median. A ship entering from or leaving to a canal behind a lock is redrawn (up to 100 times) until it fits that lock's largest chamber: Schelde-Rijn 320 × 24 m, Zuid-Beveland 280 × 24 m, Albert canal 180 × 22 m.
 3. **Later, at the berth:** a dwell time from the lognormal of its class and zone, and an exit from P(exit | class, berth zone).
 
 A ship entering at an anchorage starts at anchor and asks the VTS for clearance like any other arrival (one that needs no pilot weighs anchor and sails at once); one entering from sea that needs a pilot first sails to its pilot station (Wandelaar, or Steenbank for northern arrivals when it can reach the river from there at any tide). Time at anchor is not drawn: it emerges from the VTS and the queues, and the AIS anchorage waits serve only as a check.
@@ -309,7 +311,7 @@ Every rule in the model keys on a handful of flags derived from a ship's class, 
 | Tide-dependent | T > 13.10 m: can only sail in a tidal window |
 | Oversized | River and sea: LOA ≥ 210 m or T ≥ 10 m; Oostgat–Sardijngeul: 170 m or 7 m; above Doel–Lillo: 170 m or 8 m; docks: LOA ≥ 200 m, B ≥ 27 m and T ≥ 10 m |
 | Gas tanker (IMO2) | Sea-going tanker in hazard category A |
-| Under-keel clearance | 10 % of T for sea-going ships, 0.3 m for inland craft |
+| Under-keel clearance | 10 % of T for sea-going ships (at most 0.6 m behind the locks), 0.3 m for inland craft |
 
 **Speed through the water.** Container ships, bulk carriers and tankers sail at the planning speeds of the joint nautical rules, by leg and direction; other classes at an assumed class speed.
 
@@ -378,7 +380,7 @@ The VTS is a first-come-first-served gatekeeper: every 15 minutes it walks the o
 
 **The checks, in order:**
 
-1. **Route.** A route exists from where the ship lies to its target for its depth need, length and beam (§10), sought at the run's lowest water first, then at the lowest water of the next 7 hours, then at the level now (§10.2). A voyage to a sea exit is draught-checked only up to its pilot station (§10.1). If none exists even at high water, the voyage is infeasible and the ship is removed with its reason logged.
+1. **Route.** A route exists from where the ship lies to its target for its depth need, length and beam (§10), sought at the run's lowest water first, else the deep channel for a tide-bound voyage (§10.2). A voyage to a sea exit is draught-checked only up to its pilot station (§10.1). If none exists even at the usual high water, the voyage is infeasible and the ship is removed with its reason logged.
 2. **Weather.** No weather gate stops it (§5.1).
 3. **Tide.** The whole route stays deep enough at the time the ship gets to each cell, leaving now and leaving 60 minutes later (the regulations require at least a 60-minute window at the start). With s\_i the distance along the route to cell i and v the planning speed of its leg, the arrival times and the test are
 
@@ -387,6 +389,8 @@ t_i = t_0 + \sum_{k=1}^{i} \frac{s_k - s_{k-1}}{v_k}, \qquad d(n_i) + h(n_i, t_i
 ```
 
 Lock, anchorage and approach nodes are skipped in this test (they have no water of their own), and so is the open-sea leg from the pilot station to a sea exit.
+
+Bulk carriers and tankers also keep the arrival windows of regs §8.6: T 13.5–14.5 m at CP no later than HW + 1 h; T above 14.5 m to the right-bank locks at CP within HW ± 15 min, and to Kieldrecht at the lock's approach (taken for the Deurganckdok mouth) from HW to HW + 40 min, with HW the high water at Antwerp.
 
 4. **Pilot.** Enough pilots are free for the first pilot stretch of the voyage (§13.1; two on the river for the largest ships), a free pilot boat for a boarding at sea or at Vlissingen, and pilots can be booked for every later stretch of the voyage (river after Vlissingen, docks after a lock, sea after Vlissingen going out) for the time the ship gets there: its arrival time at each change of pilot stretch from its planning speed plus 60 min per lock on the way, booked from 30 min before, but never from before now (a change only minutes ahead needs a pilot free now). On clearance these pilots are booked. Bookings are per pilot and per time: a pilot may hold several, and a booking at time t keeps the pilot only for the job starting then (its zone's usual time on board plus return: sea 150 + 120 min, river 180 + 90, docks 60 + 30). A pilot can therefore be booked, or take a job now, whenever that job would not overlap another ship's booking of it; a pilot on board is expected back after its usual time on board plus the return; a booking not taken up 6 h after its time lapses, and when a ship takes the pilots of a zone, all its bookings in that zone end.
 5. **Destination.** The ship's terminal has a free stretch of quay that fits it, or a berth in its zone is free.
@@ -413,8 +417,8 @@ A route is a least-cost path (Dijkstra) on the fine mesh, using only water deep 
 ### 10.1 Choosing the target
 
 - **Container ship to a terminal:** the position on the quay (best fit, with a fair queue after 24 h; §15.1) where the ship's length plus the mooring gap to each neighbour fits on quay whose berths allow its draught and accept sea-going ships (§15.1). The target cell is the reachable berth cell nearest the middle of that stretch. A full quay means wait; a quay that can never fit the ship makes the voyage infeasible (a ULCV first tries a fallback terminal, §16).
-- **Ship to a berth zone:** a berth in the zone that fits it, drawn uniformly among the free ones. A berth fits when the harbour master's limits allow it (allowed draught, maximum length and beam, sea-going or inland category, tanker berth only for tankers and only tankers at tanker berths); where those limits are missing, the berth's depth plus the water level (mean tide + 1 m on tidal berths) must exceed T + 0.3 m, and its length at least half the LOA. The berth must be reachable at the ship's draught.
-- **Ship to a port or an exit:** that place's cell. A ship too deep for its planned sea exit uses another one. A voyage to a sea exit is routed for the ship's draught only as far as the pilot station on the way out (Steenbank for the north exit when the ship can reach it at any tide, else Wandelaar), where the sea pilot would leave; from there it sails the open sea to the exit like an arrival's approach, without a draught limit (the sea mesh only covers the AIS tracks, and the exit cells at the edge of the area lie on the banks). The sea pilot leaves the ship there by pilot boat (the ship does not wait if none is free), so a departure's sea pilot is on board from Vlissingen to the station, as an arrival's is.
+- **Ship to a berth zone:** a berth in the zone that fits it, drawn among the free ones, weighted by the calls AIS saw there by ships of its class. A berth fits when the harbour master's limits allow it (allowed draught, maximum length and beam, sea-going or inland category, tanker berth only for tankers and only tankers at tanker berths); where those limits are missing, the berth's depth plus the water level (mean tide + 1 m on tidal berths) must exceed T + 0.3 m. A ship longer than a berth lies across the free berths next to it along the same quay, which it holds for its stay; with no such quay free it waits. The berth must be reachable at the ship's draught.
+- **Ship to a port or an exit:** that place's cell. A ship too deep for its planned sea exit uses another one. A voyage to a sea exit is routed for the ship's draught only as far as the pilot station on the way out (Steenbank for the north exit, Wandelaar for the others), where the sea pilot would leave; from there it sails the open sea to the exit like an arrival's approach, keeping to water deep enough for it wherever there is any. The sea gates are snapped to water at least 20 m deep. The sea mesh covers only the AIS tracks, with no way from the north gate to Wandelaar except through the Oostgat and the river, so a ship too deep for the Oostgat at the usual high water enters and leaves by the west gate. The sea pilot leaves the ship there by pilot boat (the ship does not wait if none is free), so a departure's sea pilot is on board from Vlissingen to the station, as an arrival's is.
 
 ### 10.2 The route: lanes in the buoyed fairway
 
@@ -464,11 +468,12 @@ An edge may be used only when:
 - an anchorage is the start or the end, never a way through;
 - for a ship with B/2 > 25 m, both its cells have clearance c ≥ B/2 (§3.4). If no such route exists, a route without that condition is taken and logged as narrow.
 
-**Water level.** A route is sought at three levels in turn, with h(n, t) the water level at cell n at time t (tide and surge, §4; in the docks the constant dock level):
+**Water level.** A route is sought in two steps, with h(n, t) the water level at cell n at time t (tide and surge, §4; in the docks the constant dock level):
 
-1. the lowest water of the whole run, h_min(n) = min over t of h(n, t): valid at any time, cached;
-2. the lowest water of the next 7 hours (a voyage plus the 60-minute window): such a route always passes the VTS tide check (§9);
-3. the level now: a tide-bound voyage, which the VTS then checks against the tide.
+1. at the lowest water of the whole run, h_min(n) = min over t of h(n, t): valid at any time;
+2. for a tide-bound ship, the deep channel: every cell passable at the usual high water (the median over the run of each tide's high water), with a cell that lacks s metres at h_min costing (1 + 20 s) times its length. The route keeps to the deepest water, and the VTS tide check (§9) finds the time to sail it.
+
+Both are cached: where a ship sails does not depend on when it sails. A route is never sought for the level of the moment, except for a detour or a trip to an anchorage: that takes any cell wet just then and fails the tide check further along.
 
 Because the level at a cell is a weighted mean of the gauges with non-negative weights, A ≥ 0, the lowest water is bounded below cheaply from the gauges' own minima, which is what is used:
 
@@ -476,11 +481,11 @@ Because the level at a cell is a weighted mean of the gauges with non-negative w
 h_{\min}(n) \;\ge\; \sum_g A_{ng}\, \min_t L_g(t) + c_n
 ```
 
-(Earlier versions planned at LAT, zero everywhere. In the docks, where the water stands about 5 m above LAT, that made every deep dock voyage fall back to the level of the moment, and that route, the shortest across whatever was deep enough just then, then failed the tide check.)
+**Cache.** Routes are cached by (start, target, depth need on tidal water and in the docks in 0.5 m classes, LOA in 25 m classes, beam in 5 m classes, lane profile, locks avoided). A detour search that failed is not repeated within the same hour.
 
-**Cache.** Routes at the run's lowest water are cached by (start, target, depth need in 0.5 m classes, LOA in 25 m classes, beam in 5 m classes, lane profile). A search that failed at one of the other two levels is not repeated at that level within the same hour.
+**Locks.** Royers and Kattendijk, which AIS shows almost nobody using, are taken only when there is no other way. Of the locks side by side (Zandvliet and Berendrecht, Boudewijn and Van Cauwelaert) each ship draws one by the AIS shares of sea-going or inland passages, and takes the other only if its choice will not do; ships at least 43 m wide prefer Berendrecht (regs §8).
 
-**Feasibility.** Whether a ship can ever reach a target is tested once per ship size with one search from the source to all cells at mean high water. A voyage that fails it is removed rather than left waiting forever.
+**Feasibility.** Whether a ship can ever reach a target is tested once per ship size with one search from the source to all cells at the usual high water. A voyage that fails it is removed rather than left waiting forever.
 
 **Segments.** The route is split at each lock: the ship sails to the lock, queues, passes it, then continues on the next segment.
 
@@ -502,28 +507,28 @@ Ships are hulls of their real length and beam moving along their routes; each st
 
 ### 11.2 Separation
 
-Two hulls conflict when their centre lines (as polylines) come closer than the required distance, which is the sum of the half-beams plus a clearance of 20 % of the wider beam, less the room each ship has to shift sideways inside its own lane:
+Two hulls conflict when their centre lines (as polylines) come closer than the required distance, the sum of the half-beams plus a clearance of 20 % of the wider beam, and shifting sideways cannot make up the difference:
 
 ```math
-D_{ij} = \frac{B_i + B_j}{2} + 0.2\,\max(B_i, B_j) - \sigma_i - \sigma_j, \qquad \sigma_i = \max\Big(0,\, \frac{L(n_i) - B_i}{2}\Big)
+D_{ij} = \frac{B_i + B_j}{2} + 0.2\,\max(B_i, B_j), \qquad \sigma_i = \max\Big(0,\, \frac{L(n_i) - B_i}{2}\Big)
 ```
 
-with L(n) the lane width of the ship's cell (50 m on the river, 250 m at sea, the cell size in port). Two inland barges pass in one 50 m lane; two 32 m bulk carriers need neighbouring lanes; two 61 m ULCVs need two lanes between them; at sea ships pass freely.
+with L(n) the lane width of the ship's cell (50 m on the river, 250 m at sea, the cell size in port), or more once the ship has been given room to stand aside (below). Which ships are near each other is found from where their hulls lie, not from shared cells: a short hull between two rows of 200 m river cells covers no cell.
 
-**Sides of the lane.** Shifting only separates two ships if they shift to opposite sides. Each ship keeps a side of its lane, starboard by default and port while it overtakes, and the sideways room counts in full only for ships on opposite sides:
+**How two ships stand apart.** Whether a shift separates two ships depends on how they lie, judged where the hulls are closest (same way when the local headings have cos ≥ 0.7, opposite when ≤ −0.7, crossing otherwise, so a ship following a bend alongside another is not crossing it). With y\_ij the distance across the heading from one hull to the other:
 
 ```math
-\Sigma_{ij} = \begin{cases} \sigma_i + \sigma_j & \text{opposite sides (meeting, each on its own starboard side; overtaking on the other's port side), or crossing} \\ |\sigma_i - \sigma_j| & \text{same side (one behind the other in the lane)} \end{cases}
+d_{ij}^{\max} = \begin{cases} |y_{ij}| + \sigma_i + \sigma_j & \text{side by side: each moves away from the other} \\ \sigma_i + \sigma_j & \text{exactly in line and meeting, each to its starboard, or overtaking on the other's port side} \\ |\sigma_i - \sigma_j| & \text{exactly in line on the same side (one behind the other)} \\ d_{ij} & \text{crossing: it waits for the other (ships that already touch may move, to part)} \end{cases}
 ```
 
-and the conflict test is d\_ij + Σ\_ij < (B\_i + B\_j)/2 + 0.2 max(B\_i, B\_j), with d\_ij the distance between the centre lines. "Same" and "opposite" are judged against the ships' headings (same way when cos ≥ 0.7, opposite when ≤ −0.7, crossing otherwise). A ship whose way is blocked on its starboard side by a ship sailing the same way takes the port side of the lane if that is free and the stretch allows overtaking (§11.5), and returns to starboard once past. So at most two ships fit abreast in a lane, and a ship can no longer sail into, or sit on top of, the ship ahead of it.
+and the ships conflict when this stays below D\_ij. A ship whose way is blocked on its starboard side by a ship sailing the same way takes the port side of the lane if that is free and the stretch allows overtaking.
 
-(Earlier versions subtracted σ\_i + σ\_j for every pair, whatever the sides. Two ships on one centre line, one following the other, then never conflicted in a lane wider than about twice their beam, and any number could share it. In run 0012 that let same-way ships overlap in 2,846 pair-steps, 158 pairs for more than 30 minutes and up to 4 h, mostly barges in the canals, river and docks.)
+**Standing aside.** A ship blocked for 10 minutes by a ship coming the other way, by one stuck under way, or by one stopped for a pilot change moves aside into the water that is there: the room to its side, up to 150 m, with its whole hull in water at least its draught + 0.5 m deep now. It returns to its lane once clear. Only with no such room for either ship do the two pass after 1 h, logged as `squeeze_past`; they stay allowed until they are clear of each other.
 
-**Drawn positions.** A ship that uses the sideways room stands off its centre line by the share of it it needs, to its side of the lane, and that offset is recorded with its position (§17), so the viewer draws two ships passing in one lane side by side rather than one over the other:
+**Drawn positions.** A ship that uses the sideways room stands off its centre line by the share of it it needs, away from the ship it is passing, and that offset is recorded with its position (§17), so the viewer draws two ships passing in one lane side by side rather than one over the other:
 
 ```math
-\ell_i = \text{side}_i \cdot \sigma_i \cdot \min\Big(1,\; \max_j \frac{D_{ij} - d_{ij}}{\Sigma_{ij}}\Big), \qquad D_{ij} = \frac{B_i + B_j}{2} + 0.2\,\max(B_i, B_j)
+\ell_i = \text{dir}_i \cdot \sigma_i \cdot \min\Big(1,\; \max_j \frac{D_{ij} - d_{ij}}{d_{ij}^{\max} - |y_{ij}|}\Big)
 ```
 
 ### 11.3 The step
@@ -591,7 +596,9 @@ An arriving ship that the VTS cannot clear goes to the nearest anchorage it is a
 | Tide-dependent, T ≥ 14 m | Wielingen Zuid |
 | All others | Rede Vlissingen (both parts), Westhinder, Oostdyck, Everingen A–E, Put van Terneuzen A–B, Springergeul, Zuid Everingen, Marlemon, Schaar van Ouden Doel |
 
-Among the allowed ones with room, the ship sails to the one nearest to it that it can reach (at the run's lowest water, else at the level now). If none can be reached, it waits where it is and the VTS sends it at its next round.
+Among the allowed ones with room, the ship takes the sea anchorages first, which lie outside the pilotage area, then the nearest one, if its route (at the run's lowest water, else the deep channel) passes the tide check. To any but a sea anchorage it takes a sea pilot, who leaves at the anchorage. If none can be reached, or no pilot is free, it waits where it is and the VTS sends it at its next round.
+
+A ship that enters the area at an anchorage lies there for a draw from the fitted anchor stay (§2.1) before it asks the VTS.
 
 **Room.** Anchorage areas are official polygons, official circles, or the hull of their boundary buoys where only those are published. A ship at anchor swings round its anchor on a circle of radius
 
@@ -683,6 +690,8 @@ t_{\mathrm{level}} = 5\,\mathrm{min} + 3\,\mathrm{min/m} \times |h_a - h_b|
 
 5. the gates open (5 min) at the other side, and the cycle repeats from there.
 
+The gates wait so that a lockage carries more than one ship: up to 10 minutes from when the first ship went in, while there is room for another, and up to 10 minutes before sailing empty for a ship on the far side (both assumed). Not for a tide-dependent ship or one that has the chamber to itself.
+
 The levels are the tide on the tidal side and the basin's fixed level on the other. All durations are first estimates to be calibrated.
 
 **Tidal gate.** A lock of the tidal-gate type lets ships pass straight through (10 min each) while the two levels differ by less than 0.10 m, and works as above otherwise.
@@ -743,10 +752,11 @@ with r the terminal's moves per crane-hour. A ship that finds no free crane wait
 
 - **Wind:** handling pauses while gusts exceed 20 m/s (assumed crane stop).
 - When handling ends, the ship draws its exit and asks the VTS for departure clearance.
+- **Cranes during a call:** a ship working with fewer cranes than it should have takes more as they come free, its remaining time shortened accordingly; a ship gives up its cranes when the work is done, not when it sails.
 
 ### 15.5 Background ships
 
-Their time at berth is a lognormal draw for their class and berth zone (§2.1); ships calling at a port outside Antwerp (Vlissingen, Terneuzen, Breskens) lie there for that time without a berth model. Then they ask for clearance (if they need a pilot) or leave.
+River cruise ships (class passenger, draught under 4.5 m) count as inland craft and need no pilot. Their time at berth is a lognormal draw for their class and berth zone (§2.1); ships calling at a port outside Antwerp (Vlissingen, Terneuzen, Breskens) lie there for that time without a berth model, at the nearest water they can reach if they are too deep for the mesh's way in. Inland craft also call in the canal zones, and after a call may sail on to their next call (§2.1). Sea-going ships then take their departure draught: the arrival draught times a resampled change from visits that came in about as deep (a ship that comes in deep has cargo to unload), at most the limit for leaving (regs §8: 15.2 m for container ships, 14.5 m for bulk carriers and tankers), the berth's allowed draught, and what they can sail away with. Then they ask for clearance (if they need a pilot) or leave.
 
 ## 16. Rules for the largest container ships (ULCV)
 
@@ -802,9 +812,9 @@ The largest gaps are the simple VTS, the short AIS record, and a set of duration
 
 **Data**
 
-- The AIS record covers 6 days (123 observed hours of entries), so background traffic has no weekly pattern and rare classes and routes rest on few ships. Draught is the largest value a ship reported, not its design draught.
+- The AIS record covers 11 days (244 observed hours of entries), so background traffic has no weekly pattern and rare classes and routes rest on few ships. Draught is what a ship reported, not its design draught.
 - Container ships absent from the schedule (some feeders) are not generated.
-- A background ship's destination is drawn without regard to its draught; a ship that can never reach it is removed (logged).
+- A background ship that can never reach its destination is removed (logged).
 - Pilot pool sizes are derived from AIS with assumed times on board and return times; no official count was found.
 
 **Water and space**
