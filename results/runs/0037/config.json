@@ -1,0 +1,16 @@
+{
+  "label": "Anakin Skywalker",
+  "start": "2023-01-27 08:00",
+  "days": 60.0,
+  "warmup": 2.0,
+  "seed": 33,
+  "weather": "bootstrap",
+  "containers": "nhpp",
+  "container_rate": 1.0,
+  "bunching": true,
+  "delays": true,
+  "background": true,
+  "routing": "lanes",
+  "max_minutes": 60.0,
+  "progress_hours": 2.0
+}
