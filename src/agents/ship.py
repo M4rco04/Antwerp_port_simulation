@@ -73,7 +73,8 @@ class Ship:
     terminal: str | None = None             # level 1: Terminal name, or None (a berth in a dock zone)
     berth_zone: str | None = None
     schedule: dict = field(default_factory=dict)   # level 1: scheduled berth arrival / departure
-    moves: int = 0                          # level 1: call size (container moves)
+    moves: int = 0                          # level 1: call size (container moves), set when handling starts
+    stay_h: float | None = None             # level 1: the scheduled stay at the berth (h)
     cranes_wanted: int = 0                  # level 1: cranes the terminal would give a ship this size
     dwell_h: float = 0.0                    # level 2: time at the berth
     exit: str | None = None                 # where it leaves after the berth
@@ -236,14 +237,6 @@ class Ship:
     @property
     def remaining_m(self):
         return float(self.s[-1] - self.head) if self.s is not None and len(self.s) else 0.0
-
-
-def container_moves(teu, rng):
-    """Call size in moves by ship size (sprzet_ladunkowy.md §3)."""
-    for top, lo, hi in ((3000, 500, 1000), (5000, 1000, 2500), (10000, 2500, 4500), (14000, 4500, 7000),
-                        (math.inf, 7000, 11000)):
-        if teu < top:
-            return int(rng.integers(lo, hi + 1))
 
 
 def cranes_for(teu):

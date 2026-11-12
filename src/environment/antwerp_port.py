@@ -80,6 +80,10 @@ CHARTS = PROJECT_ROOT / "data" / "charts" / "scheldt_navigation.gpkg"
 # draught and depths per berth; the older slots_cords file (same berth ids, no depths) as a fallback
 BERTH_DATA = PROJECT_ROOT / "data" / "berths" / "havenmeester_ligplaatsen.geojson"
 SLOT_DATA = BERTH_DATA if BERTH_DATA.is_file() else PROJECT_ROOT / "slots_cords" / "paczka_final.json"
+PLOT_DATA = PROJECT_ROOT / "data" / "berths" / "havenmeester_bedrijven.geojson"   # company plots (fetch_berth_data.py)
+PLOT_REACH_M = 150.0         # a berth belongs to the nearest company plot within this distance
+TANK_BARGE_DATA = PROJECT_ROOT / "data" / "berths" / "tankvaart.geojson"   # fetch_berth_data.py
+TANK_BARGE_REACH_M = 30.0    # the cells within this distance of a tank-barge stretch serve it
 DEFAULT_BERTH_UKC_M = 0.5            # when the harbour master gives no minimum UKC
 NOT_BERTHS = ("Sluis",)              # berth types that are not places to moor (the lock chambers)
 # the port's sounded bed levels (src/environment/fetch_port_soundings.py): docks and Zeeschelde
@@ -419,12 +423,15 @@ class Water:
         return chart_water | in_osm, depth, source
 
 
+AIS_DIR = None              # snapshot directory for the traffic layers (--ais); None: data/ais
+
+
 def scheldt_traffic():
     """Positions of the simulated ship classes on Scheldt-bound visits (src/data/ais_pipeline.py)."""
     sys.path.insert(0, str(PROJECT_ROOT / "src" / "data"))
     import ais_pipeline
 
-    data = ais_pipeline.prepare()
+    data = ais_pipeline.prepare(AIS_DIR) if AIS_DIR else ais_pipeline.prepare()
     visits = data.visits
     keep = visits.index[visits.scheldt_bound & visits["class"].isin(ais_pipeline.SIMULATED_CLASSES)]
     df = data.df[data.df.visit.isin(keep)]
@@ -752,6 +759,15 @@ def load_berths():
     berths = berths[~berths.LPL_UN.astype(str).str.startswith("ZEEBR")].copy()     # Zeebrugge: outside the model
     berths["LPL"] = berths.LPL.astype(str)
     berths["number"] = berths.LPL.str.extract(r"^[A-Z]?(\d+)")[0].astype(float)
+    berths["plot_activity"], berths["plot_company"] = None, None
+    if PLOT_DATA.is_file():                    # the company plot behind each berth, and what it does
+        plots = gpd.read_file(PLOT_DATA).to_crs(PROJECTED_CRS)[["activity", "company", "geometry"]]
+        near = gpd.sjoin_nearest(berths[["geometry"]], plots, how="left", max_distance=PLOT_REACH_M)
+        near = near[~near.index.duplicated()]
+        berths["plot_activity"] = near.activity.astype(object).where(near.activity.notna(), None)
+        berths["plot_company"] = near.company.astype(object).where(near.company.notna(), None)
+    else:
+        log.warning("%s missing: run src/environment/fetch_berth_data.py --plots-only", PLOT_DATA)
     return berths
 
 
@@ -792,6 +808,32 @@ def tag_berths(graph, berths, X, Y, ids):
             if row.LPL_UN not in data["berths"]:
                 data["berths"].append(row.LPL_UN)
     return berth_nodes
+
+
+def tank_barge_berths(graph, X, Y, ids):
+    """graph.graph["tank_barge_berths"]: the harbour master's stretches where inland tank barges may lie (nautical
+    port map, "Tankvaart"): id, cone class, length, the cells along it and the berth zone of the nearest berth."""
+    if not TANK_BARGE_DATA.is_file():
+        log.warning("%s missing: run src/environment/fetch_berth_data.py --plots-only", TANK_BARGE_DATA)
+        graph.graph["tank_barge_berths"] = []
+        return []
+    lines = gpd.read_file(TANK_BARGE_DATA).to_crs(PROJECTED_CRS).rename(columns={"class": "cone_class"})
+    tree = shapely.STRtree(shapely.points(X, Y))
+    berths = graph.graph.get("berths", {})
+    named = [(b["zone"], shapely.Point(*b["quay_edge"][0])) for b in berths.values() if b.get("zone") and b.get("quay_edge")]
+    btree = shapely.STRtree([p for _, p in named])
+    out = []
+    for row in lines.itertuples():
+        hit = tree.query(row.geometry.buffer(TANK_BARGE_REACH_M), predicate="intersects")
+        nodes = sorted({int(ids[i]) for i in hit if graph.nodes[int(ids[i])]["type"] not in ("anchorage", "approach")})
+        if not nodes:
+            continue
+        zone = named[int(btree.nearest(row.geometry.centroid))][0] if named else None
+        out.append({"id": int(row.id), "class": int(row.cone_class),
+                    "length_m": round(float(row.geometry.length), 1), "nodes": nodes, "zone": zone})
+    graph.graph["tank_barge_berths"] = out
+    log.info("tank-barge stretches: %d on the graph (%.1f km)", len(out), sum(t["length_m"] for t in out) / 1000)
+    return out
 
 
 def apply_port_soundings(graph):
@@ -1505,6 +1547,7 @@ def build_graph(refresh_osm: bool = False) -> nx.Graph:
     assign_cell_attributes(graph, buoys, zones_be, lines)
     apply_port_soundings(graph)
     build_berth_catalogue(graph, berths, berth_nodes, berth_zone, berth_use())
+    tank_barge_berths(graph, GX, GY, ids)
     apply_berth_data(graph)
     build_terminals(graph)
     add_places(graph)
@@ -1635,7 +1678,11 @@ def main() -> None:
     parser.add_argument("--html", type=Path, default=DEFAULT_HTML)
     parser.add_argument("--no-browser", action="store_true", help="Generate the HTML without opening a browser.")
     parser.add_argument("--refresh-osm", action="store_true", help=f"Download the OSM water again (else {OSM_WATER_FILE.name}).")
+    parser.add_argument("--ais", type=Path, default=None,
+                        help="AIS snapshot directory (default data/ais); use the one the fits were made from")
     args = parser.parse_args()
+    global AIS_DIR
+    AIS_DIR = args.ais
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     graph = build_graph(args.refresh_osm)

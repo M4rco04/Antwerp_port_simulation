@@ -111,11 +111,18 @@ A few things to know when reading the fits:
 - **A sea-going ship in from sea and out to sea with no call seen** has an unknown destination, not "the sea": such visits last a median of 34 h and most reach Vlissingen, so the call was not heard. Taking them at face value made 17% of bulk carriers and tankers board a pilot and leave within the hour.
 - **A ship that leaves the way it came in with no call seen** likewise has an unknown destination.
 - **A craft only ever seen inside one canal or edge zone** is not Scheldt traffic and is left out of the rates.
-- **The sea-going stays are not scaled to the stock.** Only the inland stays are (`INLAND_STAY_SCALE`).
+- **Anchor stays are fitted on the sea anchorages and scaled to their stock** (`ANCHOR_STAY_SCALE`), for bulk
+  carriers and tankers, the classes that arrive at anchor in the model. Little's law: the mean stay is the number
+  at anchor at Westhinder, Oostdyck and Schouwenbank divided by the anchor stops there per hour (14 h and 19 h).
+  The draws stop at the longest stay seen, so the scale is solved for, not taken as a ratio. The fitted tails (means of
+  33 h and 58 h) held twice the AIS number at anchor. Berth stays of sea-going ships are not scaled.
 
 Rerun all fits after the collector has added data (the infrastructure fit needs the graph), then rebuild the graph:
 
     py src/data/fit_entry_probabilities.py; py src/data/fit_background_traffic.py; py src/data/fit_container_calls.py
     py src/data/fit_port_infrastructure.py; cd src/environment; py fit_currents.py; cd ../..
     py src/environment/antwerp_port.py --no-browser
+
+The graph build reads the AIS too (the traffic layers that decide the sea mesh and lanes). Build it from the same
+snapshots as the fits (`--ais <dir>`), or the berth catalogue, lanes and fits come from different data.
 

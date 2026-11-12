@@ -16,13 +16,21 @@ field names are written as plain ASCII names:
 
 Placeholders (-99.99, draughts outside 0-25 m) are written as null.
 
+The nautical port map's layer "Tankvaart" (service LIGPL, layer 7) gives the stretches of quay where inland tank
+barges may lie, by the blue cones they may carry (1 no cone, 3 no cone with 6 m from vehicles, 2 at most one,
+5 only one-cone barges, 4 at most two). The same map's layer 20 "bedrijven" (companies) gives each plot of land its company and activity (natte bulk,
+raffinage, chemie, containers, droge bulk, ...). The berth catalogue uses the plot behind a berth to tell tanker
+berths where the harbour master's data gives no berth type (terminals.py).
+
 Usage:
-    py src/environment/fetch_berth_data.py
-Writes data/berths/havenmeester_ligplaatsen.geojson.
+    py src/environment/fetch_berth_data.py                # berths and plots
+    py src/environment/fetch_berth_data.py --plots-only    # plots and tank-barge stretches
+Writes data/berths/havenmeester_ligplaatsen.geojson, havenmeester_bedrijven.geojson and tankvaart.geojson.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
 import re
@@ -35,6 +43,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "data" / "berths" / "havenmeester_ligplaatsen.geojson"
 LAYER = "https://webapps.portofantwerpbruges.com/arcgis/rest/services/extern/havenmeesterkaart/MapServer/58"
+PLOTS_OUT = ROOT / "data" / "berths" / "havenmeester_bedrijven.geojson"
+PLOTS_LAYER = "https://webapps.portofantwerpbruges.com/arcgis/rest/services/extern/havenmeesterkaart/MapServer/20"
+TANK_OUT = ROOT / "data" / "berths" / "tankvaart.geojson"
+TANK_LAYER = "https://webapps.portofantwerpbruges.com/arcgis/rest/services/extern/LIGPL/MapServer/7"
+TANK_CLASSES = {1: "no cone", 3: "no cone, 6 m from vehicles", 2: "at most one blue cone",
+                5: "only one-cone barges", 4: "at most two blue cones"}
 
 log = logging.getLogger("berths")
 
@@ -93,14 +107,58 @@ def clean(props):
     return out
 
 
-def main():
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    query = urllib.parse.urlencode({"where": "1=1", "outFields": "*", "returnGeometry": "true", "outSR": 4326,
-                                    "f": "geojson"})
-    with urllib.request.urlopen(f"{LAYER}/query?{query}", timeout=180) as r:
+def query(layer, fields="*"):
+    q = urllib.parse.urlencode({"where": "1=1", "outFields": fields, "returnGeometry": "true", "outSR": 4326,
+                                "f": "geojson"})
+    with urllib.request.urlopen(f"{layer}/query?{q}", timeout=180) as r:
         data = json.loads(r.read().decode("utf-8"))
     if "error" in data:
         raise RuntimeError(data["error"])
+    return data
+
+
+def fetch_plots():
+    """The company plots (layer 20): terminal code, company name and activity of each."""
+    data = query(PLOTS_LAYER, "TERMINALCODE,ACTIVITEIT,GEBRUIK,BEDRIJFSNAAM")
+    features = [{"type": "Feature", "geometry": f["geometry"],
+                 "properties": {"terminal_code": f["properties"].get("TERMINALCODE"),
+                                "activity": f["properties"].get("ACTIVITEIT"), "use": f["properties"].get("GEBRUIK"),
+                                "company": f["properties"].get("BEDRIJFSNAAM")}}
+                for f in data["features"] if f.get("geometry")]
+    PLOTS_OUT.parent.mkdir(parents=True, exist_ok=True)
+    PLOTS_OUT.write_text(json.dumps({"type": "FeatureCollection", "name": "havenmeester_bedrijven", "source": PLOTS_LAYER,
+                                     "retrieved": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                                     "features": features}, ensure_ascii=False), encoding="utf-8")
+    log.info("%d company plots -> %s", len(features), PLOTS_OUT)
+
+
+def fetch_tank_barge_berths():
+    """The stretches where inland tank barges may lie (LIGPL layer 7), with their blue-cone class."""
+    data = query(TANK_LAYER)
+    features = []
+    for f in data["features"]:
+        if not f.get("geometry"):
+            continue
+        code = int(f["properties"].get("LIGPLAATS_TANKSCHEPEN") or 0)
+        features.append({"type": "Feature", "geometry": f["geometry"],
+                         "properties": {"id": f["properties"].get("OBJECTID"), "class": code,
+                                        "meaning": TANK_CLASSES.get(code)}})
+    TANK_OUT.write_text(json.dumps({"type": "FeatureCollection", "name": "tankvaart", "source": TANK_LAYER,
+                                    "retrieved": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                                    "features": features}, ensure_ascii=False), encoding="utf-8")
+    log.info("%d tank-barge stretches -> %s", len(features), TANK_OUT)
+
+
+def main():
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--plots-only", action="store_true", help="only download the company plots")
+    args = parser.parse_args()
+    fetch_plots()
+    fetch_tank_barge_berths()
+    if args.plots_only:
+        return
+    data = query(LAYER)
     features = []
     for f in data["features"]:
         if not f.get("geometry"):

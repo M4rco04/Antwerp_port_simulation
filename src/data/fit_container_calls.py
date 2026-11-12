@@ -30,9 +30,9 @@ log = logging.getLogger("container")
 
 SCHEDULE_TZ = "Europe/Brussels"
 SCHEDULE_YEAR = 2026
-# a port call belongs to a schedule line if it starts this close to the scheduled arrival
-# (wide: ships run a day or two late, and a ship calls Antwerp at most about weekly)
-MATCH_WINDOW_H = 96
+# a port call belongs to a schedule line if it starts this close to the scheduled arrival: half a week, so
+# that a weekly service's call is never paired with the line of the week before or after (it was 96 h)
+MATCH_WINDOW_H = 84
 # berth stops in Antwerp this close together are one port call (shifting berth)
 SHIFT_MAX_H = 3
 # the draught a ship usually sails at, not the largest it ever reported (that overstated the deep tail)
@@ -103,29 +103,45 @@ def port_calls(calls):
 
 
 def match_schedule(schedule, container, calls, times):
-    """Each schedule line in the AIS period paired with the nearest Antwerp port call of that ship."""
+    """Schedule lines in the AIS period paired with Antwerp port calls of the same ship, one line to one call,
+    so that the hours between scheduled and actual arrival add up to the least (two lines of a ship used to be
+    able to take the same call).
+
+    A delay counts for the fit only if any delay within the window could have been seen: the line is scheduled
+    at least the window inside the AIS period at both ends. Lines near the ends are seen only when early (at the
+    start) or not late (at the end), which pulled the delays down."""
+    from scipy.optimize import linear_sum_assignment
     lines = schedule.assign(key=schedule.Vessel.map(normalise_name),
                             arrival=parse_schedule_time(schedule.Arrival),
                             departure=parse_schedule_time(schedule.Departure))
     lo, hi = times.iloc[0] - pd.Timedelta(hours=MATCH_WINDOW_H), times.iloc[-1] + pd.Timedelta(hours=MATCH_WINDOW_H)
     lines = lines[lines.arrival.between(lo, hi)]
     mmsis = container.groupby(container.name.map(normalise_name)).apply(lambda g: list(g.index))
-    rows = []
-    for line in lines.itertuples():
+    pairs = []
+    for i, line in enumerate(lines.itertuples()):
         cand = calls[calls.mmsi.isin(mmsis.get(line.key, []))]
-        if cand.empty:
-            continue
         off = (cand.start - line.arrival).dt.total_seconds().div(3600)
-        if off.abs().min() > MATCH_WINDOW_H:
+        pairs += [(i, j, float(h)) for j, h in off.items() if abs(h) <= MATCH_WINDOW_H]
+    li, ci = sorted({i for i, _, _ in pairs}), sorted({j for _, j, _ in pairs})
+    cost = np.full((len(li), len(ci)), 1e6)
+    for i, j, h in pairs:
+        cost[li.index(i), ci.index(j)] = abs(h)
+    inside_lo, inside_hi = times.iloc[0] + pd.Timedelta(hours=MATCH_WINDOW_H), times.iloc[-1] - pd.Timedelta(hours=MATCH_WINDOW_H)
+    rows = []
+    for a, b in zip(*linear_sum_assignment(cost)):
+        if cost[a, b] >= 1e5:
             continue
-        call = cand.loc[off.abs().idxmin()]
+        line, call = lines.iloc[li[a]], calls.loc[ci[b]]
+        inside = inside_lo <= line.arrival <= inside_hi
         rows.append({"vessel": line.Vessel, "terminal": line.Terminal, "zone": call.zone,
                      "lat": call.lat, "lon": call.lon,
-                     "arrival_delay_h": off.loc[call.name] if call.start_observed else np.nan,
+                     "arrival_delay_h": ((call.start - line.arrival).total_seconds() / 3600
+                                         if call.start_observed and inside else np.nan),
                      "departure_delay_h": ((call.end - line.departure).total_seconds() / 3600
-                                           if call.end_observed and pd.notna(line.departure) else np.nan)})
+                                           if call.end_observed and inside and pd.notna(line.departure) else np.nan)})
     matched = pd.DataFrame(rows)
-    log.info("%d schedule lines in the AIS period, %d matched to a berth call", len(lines), len(matched))
+    log.info("%d schedule lines in the AIS period, %d matched to a berth call, %d arrival delays kept",
+             len(lines), len(matched), matched.arrival_delay_h.notna().sum())
     return matched
 
 
@@ -168,7 +184,9 @@ TEU_DIMENSIONS     dimension = exp(a) * TEU**b for loa, beam, draught (m), fitte
 SCHEDULE_DELAY_H   arrival / departure -> n, mean_h, median_h, sd_h, p10_h, p90_h, values:
                    actual berth arrival / departure minus the schedule (positive = late),
                    berth shifts within Antwerp counted as one call. Schedule times read as
-                   {tz} local time; only delays within +-{window} h can be matched.
+                   {tz} local time. One line to one call, within +-{window} h; only lines
+                   scheduled that long inside the AIS period at both ends count (so that no
+                   delay within the window goes unseen).
 ENTRY_TO_BERTH_H   entry category (sea / anchorage) -> the same summary: hours from entering
                    the area to berthing in Antwerp (includes any anchorage wait)
 TERMINAL_LOCATION  schedule terminal code -> median lat/lon of its berth calls, berth zones, n

@@ -1,6 +1,6 @@
 # Antwerp Port Simulation — Mathematical Model and Mechanics
 
-As of 2 November 2026.
+As of 11 November 2026.
 
 ## 1. Overview
 
@@ -10,21 +10,26 @@ The simulation is a time-stepped, agent-based model of all shipping on the Schel
 - **Level 1 — container ships.** Full agents: dimensions from TEU, terminal and quay allocation, tidal berthing windows, STS crane handling, ULCV rules, full VTS clearance.
 - **Level 2 — background traffic.** Bulk and general cargo, tankers, inland cargo, inland tankers and passenger ships. They use the same river, locks, anchorages, pilots and tugs, but their time at berth is a random dwell time instead of a handling model.
 - **Time.** A fixed step of Δt = 5 minutes (the AIS snapshot interval). Processes shorter than a step are countdown timers in minutes, so no time is lost to rounding. A run usually covers 1–4 weeks after a warm-up of 2 days, whose ships are excluded from the statistics.
-- **Randomness.** One seeded random generator drives all draws (arrivals, attributes, delays, weather days, tie-breaks), so a run is reproducible from its seed.
+- **Randomness.** A run is reproducible from its seed. The seed feeds six independent random streams: when ships arrive, what they are, the weather, durations (stays, mooring, anchor waits), choices (berths, exits, next calls) and tie-breaks in the right of way. Arrivals and weather do not depend on what happens in the port, so two configurations run with the same seed see the same ships in the same weather (common random numbers, §17).
 
 The sections follow the model's layers: the data and what is taken from it (§2), the environment — space, water and weather (§3–5) — the ships and how they are generated (§6–7), the step loop and the decision makers (§8–10), ship movement (§11), the resources (§12–15), the special rules for the largest container ships (§16), and the outputs and limitations (§17–18). Regulation references ("regs") point to the Antwerp and Scheldt port regulations as summarised for the model.
 
 ## 2. Data and what is taken from it
 
-The model is built from twelve datasets. Each one supplies either geometry, water, traffic behaviour or rules; nothing in the simulation is tuned by hand where a dataset can supply it.
+The model is built from seventeen datasets. Each one supplies either geometry, water, traffic behaviour or rules; nothing in the simulation is tuned by hand where a dataset can supply it.
 
 | Dataset | Source | What is taken from it | How |
 | --- | --- | --- | --- |
-| AIS snapshots | Every 5 min, the whole area; 1,559 snapshots from 26 Oct to 1 Nov 2026, about 1.0 million positions of 3,391 ships | Arrival rates, entry points, ship sizes, destinations, berth and anchorage times, berth use, tug and pilot-boat bases, mooring times, dock speeds, pilot demand, fairway centrelines, the area sea traffic uses, current calibration | The pipeline of §2.1 |
-| Container schedule | Liner calls 20 Oct–22 Nov 2026: vessel, TEU, scheduled berth arrival and departure, terminal code (322 calls) | Container arrivals (replayed or fitted), TEU per call, terminal | §6.1 |
+| AIS snapshots | Every 5 min, the whole area; 3,014 snapshots from 26 Oct to 6 Nov 2026 | Arrival rates, entry points, ship sizes, destinations, berth and anchorage times, berth use, tug and pilot-boat bases, mooring times, dock speeds, pilot demand, fairway centrelines, the area sea traffic uses, current calibration | The pipeline of §2.1 |
+| Container schedule | Liner calls 20 Oct–9 Dec 2026, two files read together: vessel, TEU, scheduled berth arrival and departure, terminal code (466 calls, 7 whole weeks) | Container arrivals (replayed, drawn as whole weeks, or fitted), TEU per call, terminal, time at the berth | §6.1 |
 | Depth chart | Rijkswaterstaat 20 m bed levels (surveys to 2024) converted to LAT with the NLLAT2018 separation; EMODnet bathymetry (\~115 m) elsewhere; blended over 200 m | Depth below LAT of every sea, Western Scheldt and Dutch port cell | Cell value = chart value at the cell (§3.2) |
 | Port soundings | Port of Antwerp-Bruges sounded bed levels (TAW), 5 m raster | Depths of the Zeeschelde and the Antwerp docks | Median of the raster within 25 m of the cell, TAW converted to LAT (§3.2) |
 | Harbour-master berth register | Port of Antwerp-Bruges, every berth: allowed draught, sounded depth (TAW), minimum under-keel clearance, category, quay type | Berth limits; depth at berths without soundings; berth suitability for tankers and sea-going ships | §3.3, §15 |
+| Company plots | Port of Antwerp-Bruges harbour-master map, layer 20: every plot of port land with its company and activity (wet bulk, refining, chemicals, containers, ...) | Tanker berths where the berth register gives no berth type | Nearest plot within 150 m of the berth (§15.2) |
+| Lock operating times | Rijkswaterstaat, Capaciteit Zeeuwse sluizen (2001), table 3: operating time per lockage of Kreekrak, Hansweert and Terneuzen; IVS90 passage time at Kreekrak (45 min, 1998) | Gate and levelling times of those locks; a check on passage times | §14 |
+| Lock counts | Rijkswaterstaat waterways report for the national market and capacity analysis (NMCA, 2017): commercial passages a year at Kreekrak (69,058) and Hansweert (41,112) | Inland arrival scale (§6) | Passages a day compared with the model's |
+| Tank-barge stretches | Port of Antwerp-Bruges nautical port map, "Tankvaart" layer: 141 stretches with their blue-cone class | Where inland tankers lie when no tanker berth is free | Cells within 30 m of a stretch (§15.2) |
+| Lock registrations | Rijkswaterstaat IVS90 data for 2014 and 2018, analysed by Deltares (2021): passages by ship class, lockages, empty lockages and arrivals by hour and weekday at the Kreekrak and Terneuzen locks | Calibration targets for the locks (ships per lockage, empty lockages, passages per day) | Values taken from the memo's vector charts (§14) |
 | Berth catalogue | Charted berth slots with polygons and quay lines | Quay lines of the terminals, berth positions and the cells that serve them | §15 |
 | OpenStreetMap water and locks | Water polygons and lock gate lines | Water mask where the chart has no data (canals, docks); lock chamber positions | §3.1, §14 |
 | Navigation chart layers | Buoys, anchorages (official polygons or circles where published), traffic separation schemes | Fairway outline, regulated stretches between named buoys, anchorage areas and anchor berths | §3.4, §12 |
@@ -40,7 +45,7 @@ The model is built from twelve datasets. Each one supplies either geometry, wate
 3. **Classes.** Container: the name is in the schedule, is a container line's name, or the ship is cargo of 250 m or more. Sea-going bulk/general cargo and tankers: a valid IMO number. Inland cargo and inland tankers: no valid IMO number and LOA ≥ 50 m. Passenger ships. Service craft and unknown types are dropped.
 4. **Scheldt only.** A visit is kept if the ship gets east of the Vlissingen–Breskens line, enters a Scheldt port or canal, or waits with a Scheldt destination. North Sea through traffic and Zeebrugge-only calls are dropped.
 5. **Entry point.** Each visit is assigned the place it entered by: a sea gate (west, north or south-west edge of the area), an anchorage (widened by 1.5 km), or a port or canal box.
-6. **Censoring.** A ship first seen within 20 minutes of a collector start was already in the area and is not an arrival. The observed exposure is the collector's uptime: T = 123.4 h for the current fits.
+6. **Censoring.** A ship first seen within 20 minutes of a collector start was already in the area and is not an arrival. The observed exposure is the collector's uptime: T = 244.3 h for the current fits.
 7. **Stops.** A stop is lying still (< 1 kn) for at least 30 minutes within 1 km. It is a berth stop, an anchorage stop or other. In a lock zone a stop under 3 h is a lock passage, not a berth call.
 
 From these, the fitted quantities are:
@@ -67,7 +72,7 @@ From these, the fitted quantities are:
 \begin{pmatrix}\ln \mathrm{LOA}\\ \ln B\\ \ln T\end{pmatrix} = \begin{pmatrix}3.204\\1.405\\0.788\end{pmatrix} + \begin{pmatrix}0.277\\0.259\\0.190\end{pmatrix}\ln \mathrm{TEU} + L\,z, \qquad z \sim N(0, I_3)
 ```
 
-- **Schedule delay:** actual start of the AIS berth stop minus the scheduled arrival, matched within ±96 h (45 calls, median 30 h); drawn by resampling the observed values.
+- **Schedule delay:** actual start of the AIS berth stop minus the scheduled arrival; drawn by resampling the observed values. Lines and calls of a ship are paired one to one within ±84 h (half a week: a weekly service's call is never paired with the line of another week), and only lines scheduled at least 84 h inside the AIS period count, so that no delay within the window goes unseen: 38 calls, mean 36 h, median 37 h, standard deviation 26 h. The delay is real, not a pairing error: matched calls lie at their line's terminal, stay as long as scheduled (departure delay minus arrival delay: mean −0.4 h) and mostly keep their order at a terminal (Kendall τ 0.6 to 1.0). Nine in ten container ships sail from the sea to their berth without anchoring (median 6.3 h), so the delay is lateness at sea, not waiting in the area.
 - **Port infrastructure:** berth use per class (berth stops ≥ 0.5 h within 150 m of a berth; a tanker berth has ≥ 2 tanker calls making ≥ 50 % of its calls); tug and pilot-boat bases (600 m clusters of their stops with ≥ 50 vessel-hours from ≥ 2 vessels); mooring and unmooring times (§15.3); dock speeds (median and 95th percentile of sea-going ships under way per dock basin); the most ships needing a pilot at once per zone (§13).
 - **Geometry:** the fairway centrelines are fitted to the tracks of large ships, and the sea grid covers only where Scheldt traffic sails (§3.1). Ships' speeds over ground calibrate the Western Scheldt currents (§4.4).
 
@@ -237,9 +242,11 @@ The forecast used for the 3 h trend is the simulated weather itself: the model a
 
 Container ships come from the liner schedule, either replayed or as a Poisson process fitted to it; every other class arrives by a non-homogeneous Poisson process fitted to AIS.
 
+Inland arrivals are scaled to Rijkswaterstaat's lock counts by the factor k = 1.44. The counts are commercial passages a day at Kreekrak (189), Hansweert (113) and Terneuzen (126), 428 in all, against 297 with the AIS rates. The AIS hears an inland craft in only about a third of its snapshots and misses trips out and back, and the gap is alike at the three locks (×1.37 to ×1.51). Inland stays are divided by k, so that the number of craft lying in port stays at the AIS value (arrivals × stay is unchanged).
+
 ### 6.1 Container ships
 
-**Replay mode.** Every schedule line is one ship. Its berth time is the scheduled arrival plus a delay Δ drawn from the 45 observed delays (resampled with replacement; switchable off), and it enters the area 8 h before that:
+**Replay mode.** Every schedule line is one ship. Its berth time is the scheduled arrival plus a delay Δ drawn from the 38 observed delays (resampled with replacement; switchable off), and it enters the area 8 h before that:
 
 ```math
 t_{\mathrm{berth}} = t_{\mathrm{sched}} + \Delta, \qquad t_{\mathrm{enter}} = t_{\mathrm{berth}} - 8\,\mathrm{h}
@@ -247,7 +254,17 @@ t_{\mathrm{berth}} = t_{\mathrm{sched}} + \Delta, \qquad t_{\mathrm{enter}} = t_
 
 Ships due to enter before the run starts are dropped; the warm-up fills the port instead.
 
-**Fitted mode.** Berth arrivals form a Cox process: a Poisson process whose rate varies with the weekday and hour (Brussels time) and is multiplied by a random factor per day, because liner calls bunch (the schedule's calls per day have variance 18.7 against a mean of 9.8; a plain Poisson process would have them equal).
+**Entry timed to the berth time (virtual arrival).** 8 h is the earliest a ship enters. When it would enter, its planned voyage is worked out: the approach to the pilot station, boarding (20 min), the route to the middle of its terminal's quay at its planning speed (speed limits and 60 min per lock included), 10 min per pilot change and the mean mooring time for its length. A ship that would berth before its berth time slows down at sea and enters that much later:
+
+```math
+t_{\mathrm{enter}} = \max\big(t_{\mathrm{berth}} - 8\,\mathrm{h},\; t_{\mathrm{berth}} - t_{\mathrm{voyage}}\big)
+```
+
+So a ship that meets no delay berths at its berth time, not before it, and a ship that is late is not held. The time slowed at sea is recorded per ship and is not time in the area. This applies in both modes, to ships bound for one of the four modelled terminals.
+
+**Weeks mode.** A schedule made for the run from whole weeks of the real one, for runs of any length and start date. Liner services are weekly (of the gaps between a vessel's repeat calls, 54 % are a multiple of 7 days), so a real week is a set of calls that fits the quays. Week k of the run is one of the schedule's 7 whole weeks drawn at random, and its calls are moved to that week with their weekday, hour, ship, terminal and stay; delays are drawn as in replay mode. The berth plan is then made again on paper with the ships as late as they are, as a terminal's planner does: the lengths (from TEU, plus a 22.5 m gap) of the ships at a terminal over a call's whole stay against the terminal's quay; a call that does not fit is moved to when a ship there has left, and the ship is told (it slows down at sea, below). This covers a ship still at the quay where two drawn weeks join, a late ship that would meet the next one, and the hours in which the schedule itself puts more ship length at a quay than the model has (4 % of hours at DP World, 6 % at PSA Noordzee, never at the other two). In 60 days it moves about one call in twenty, by 12 to 24 h, with delays or without: late ships do not make the plan harder to keep.
+
+**Fitted mode.** Berth arrivals are drawn one by one, so calls at one terminal overlap as a planned schedule never lets them; use weeks mode unless the arrival rate itself is to be changed. Berth arrivals form a Cox process: a Poisson process whose rate varies with the weekday and hour (Brussels time) and is multiplied by a random factor per day, because liner calls bunch (the schedule's calls per day have variance 18.7 against a mean of 9.8; a plain Poisson process would have them equal).
 
 ```math
 \lambda(t) = \bar\lambda \cdot w_{\mathrm{dow}(t)} \cdot f_{\mathrm{hour}(t)} \cdot G_{\mathrm{day}(t)} \cdot \rho, \qquad G \sim \mathrm{Gamma}(k, 1/k)
@@ -267,7 +284,7 @@ k = \frac{\sum_d m_d^2}{\sum_d (n_d - m_d)^2 - \sum_d m_d} = 23.6
 **Both modes.**
 
 - **Size:** LOA, beam and draught from TEU with correlated scatter (§2.1). The draught is capped at 16 m and at the deepest draught its terminal's quay allows for a ship of that length, since a real ship calls loaded to what the berth allows.
-- **Call size and cranes:** container moves and the crane count the terminal would give, both from TEU (§15.4).
+- **Stay and cranes:** the time at the berth is the scheduled stay; the crane count the terminal would give comes from TEU (§15.4). A line without a departure time gets the stay of a random line of its size class.
 - **Terminal:** the schedule code maps to MPET, DP World Antwerp Gateway, PSA Noordzee or PSA Europa; a missing code is drawn from the codes' shares. Other codes go to the dock zone where that code's ships berth in AIS, with the schedule's own time at berth as the dwell.
 - **Entry point:** a sea gate drawn from the AIS shares of container ships.
 
@@ -598,7 +615,7 @@ An arriving ship that the VTS cannot clear goes to the nearest anchorage it is a
 
 Among the allowed ones with room, the ship takes the sea anchorages first, which lie outside the pilotage area, then the nearest one, if its route (at the run's lowest water, else the deep channel) passes the tide check. To any but a sea anchorage it takes a sea pilot, who leaves at the anchorage. If none can be reached, or no pilot is free, it waits where it is and the VTS sends it at its next round.
 
-A ship that enters the area at an anchorage lies there for a draw from the fitted anchor stay (§2.1) before it asks the VTS.
+A ship that enters the area at an anchorage lies there for a draw from the fitted anchor stay (§2.1) before it asks the VTS. That stay is fitted on the sea anchorages only (Westhinder, Oostdyck, Schouwenbank), where these ships lie, and scaled so that arrivals × mean stay gives the number of bulk carriers and tankers the AIS shows at anchor there (Little's law, as for the inland stays). Many anchor stays were still going on when the AIS data ended, so the fitted tail was an extrapolation, and it held twice the AIS number at anchor.
 
 **Room.** Anchorage areas are official polygons, official circles, or the hull of their boundary buoys where only those are published. A ship at anchor swings round its anchor on a circle of radius
 
@@ -631,9 +648,11 @@ P_z = \Big\lceil 1.25\; N_{\max,z} \Big(1 + \frac{t_{\mathrm{return},z}}{t_{\mat
 
 | Zone | N\_max (AIS) | Time on board (assumed) | Return time (assumed) | Pilots |
 | --- | --- | --- | --- | --- |
-| Sea | 7 | 150 min | 120 min | 16 |
-| River | 22 | 180 min | 90 min | 42 |
+| Sea | 30 | 150 min | 120 min | 68 |
+| River | 27 | 180 min | 90 min | 51 |
 | Dock | 12 | 60 min | 30 min | 23 |
+
+The pools almost never run short (60-day run 0037: 18 of 68 sea pilots, 21 of 51 river pilots and 5 of 23 dock pilots busy on average), which follows from sizing them on the AIS peak. Published figures give no pool per zone: about 340 Flemish pilots in four corps (Flows, October 2025), on call 6 days in 11, about 900 hours on the bridge a year (Beroepsvereniging van Loodsen); the Dutch pilots on the Scheldt and the Brabo dock pilots are not counted in them. A scenario with fewer pilots needs the real numbers on duty (docs/PINNED.md).
 
 - **Use.** At clearance the ship takes the pilots its first zone needs (two on the river for the largest ships, §7) and books those of its later zones (§9); at each change it drops them, takes its booked pilots, and the dropped ones become free after their zone's return time.
 - **Waiting for a pilot.** If no pilot is free when a ship reaches a change anyway (the booking's estimate was too early), it does not wait in the fairway: it goes to an anchorage within 5 km on the river or at sea (the Vlissingen roads, the Schaar van Ouden Doel), or off the mesh where it is in the docks, and sails on when a pilot is free.
@@ -673,7 +692,7 @@ Each lock is a resource of one or more chambers, each running its own cycle of c
 
 **Waiting berths.** A ship bound into a lock joins its queue when it is 800 m from the gate: it waits at the lock's waiting berths in the outer harbour, off the approach channel, so ships coming out of the lock find the approach free. A ship leaving a lock is put back on the mesh at the gate only when there is room; until then it waits in the chamber.
 
-**Choosing a chamber.** A ship queues at the chamber that is big enough (LOA ≤ length, B ≤ width) and deep enough (T + UKC ≤ sill depth + level), with the fewest ships waiting on its side, preferring one already at its level, then the narrowest. Each ship receives a turn number; a chamber's queue on each side is sorted by (VTS priority class, turn).
+**Choosing a chamber.** A ship queues at a chamber that is big enough (LOA ≤ length, B ≤ width) and deep enough (T + UKC ≤ sill depth + level). Like a lock master, it fills one chamber before starting another: it joins the chamber whose group on its side (waiting, or inside and still loading) it still packs into, the biggest group first. Only when there is no such group does it take the chamber with the fewest ships waiting on its side, preferring one already at its level, then the narrowest. (Taking the fewest-waiting chamber every time spread the traffic over Terneuzen's three chambers, giving 1.2 ships per lockage where Rijkswaterstaat's registrations give about 1.8 of the modelled classes, §2.) Each ship receives a turn number; a chamber's queue on each side is sorted by (VTS priority class, turn).
 
 **Packing.** Ships in a chamber are placed by greedy first fit in two dimensions: ships sorted by (LOA descending, beam descending, turn), each placed at the first free corner, sorted by distance along then across the chamber, where its rectangle (LOA × B) fits inside the chamber and keeps 10 m lengthwise and 2 m sideways from every ship already placed. Every placement adds two new corners (behind it and beside it). The biggest ship thus goes at the front, and a later, smaller ship may fill a gap.
 
@@ -692,7 +711,9 @@ t_{\mathrm{level}} = 5\,\mathrm{min} + 3\,\mathrm{min/m} \times |h_a - h_b|
 
 The gates wait so that a lockage carries more than one ship: up to 10 minutes from when the first ship went in, while there is room for another, and up to 10 minutes before sailing empty for a ship on the far side (both assumed). Not for a tide-dependent ship or one that has the chamber to itself.
 
-The levels are the tide on the tidal side and the basin's fixed level on the other. All durations are first estimates to be calibrated.
+The levels are the tide on the tidal side and the basin's fixed level on the other.
+
+Where Rijkswaterstaat gives a lock's operating time (closing, levelling and opening: "bedieningstijd schutproces", Capaciteit Zeeuwse sluizen, 2001), that time replaces steps 3 to 5, with half of it levelling and a quarter for each gate movement: Kreekrak 11 min, Hansweert 15 min, Terneuzen east chamber 20.5 min, Terneuzen west lock 26.5 min. The Antwerp locks take theirs from data/equipment/locks.csv, which gives the time of one passage (the ship sails in, the gates close, the level is made, they open, it sails out): Zandvliet 40 min, Berendrecht 35, Kieldrecht 30, Kallo 30, Boudewijn 40, Van Cauwelaert 45, Royers 15, Kattendijk 45. The operating time is that less one ship's entry and exit as modelled (12 + 8 min for a sea-going ship; 4 + 3 min at Royers and Kattendijk, which take inland craft): 20, 15, 10, 10, 20, 25, 8 and 38 min. The file calls its figure operation or passage time; read as operating time alone it would give passages of 50 to 65 min at the sea locks and 40 min of gates and levelling at Zandvliet, against the 11 to 26 min of the Dutch locks, while read as a passage it agrees with what the formula gave (35 to 47 min with the tide). The new Terneuzen lock keeps the formula above. Entry and exit times are first estimates.
 
 **Tidal gate.** A lock of the tidal-gate type lets ships pass straight through (10 min each) while the two levels differ by less than 0.10 m, and works as above otherwise.
 
@@ -706,10 +727,12 @@ Container terminals are quay lines on which ships are placed by length; other be
 
 A terminal's quay is a polyline built from the quay-side edges of its berth polygons; positions along it are quay metres s.
 
+- **One quay:** berth slots drawn with a gap of under 60 m between them count as one stretch of quay (PSA Europa's and PSA Noordzee's slots leave 50 m on quays that are straight and unbroken, and a 340 m ship found no place across the gap).
 - **Free stretches:** the quay minus the stretches occupied by moored ships, each occupying \[s₀ − g, s₀ + LOA + g\] with a mooring gap g = 22.5 m (Antwerp's 20–25 m).
+- **Planned for the arrival:** the quay is booked when the ship is cleared, for the time it gets there. For a ship at sea (at the pilot station or a sea anchorage) that is its planned voyage later (§6.1), less 1 h: the metres of a ship planned to have left by then count as free, so the next ship sails in while the one before it is still working. A ship's planned leaving is the end of its stay plus 1 h for unmooring; both hours are assumed. A ship that arrives while the one before it is still there (it waits for its tide or a pilot) waits off the quay until it has left. For a ship already on the river or in the docks the quay must be free now. Before, the quay had to be free at clearance and was held empty for the 6 h of the voyage in: a call took 36 h of quay for 30 h of stay, and DP World and PSA Noordzee, half used on paper, filled up (replications 0002: every ship there more than 12 h late).
 - **Suitable stretches:** the parts of the quay whose berths allow the ship's draught and, for a sea-going ship, are sea-going berths.
 - **Position:** the shortest free and suitable stretch at least LOA long (best fit), the ship lying at its start, so long and deep stretches stay free for the long ships that need them. No fit means the quay is full and the ship waits.
-- **Fair queue:** ships waiting for quay at a terminal queue in order of arrival. Once the first in that queue has waited 24 h, later ships get no quay at that terminal before it, so a long or deep ship that needs a large stretch is not passed over indefinitely by smaller ones.
+- **Fair queue:** ships waiting for quay at a terminal queue in order of arrival. Once the first in that queue has waited 24 h, later ships get no quay at that terminal before it, so a long or deep ship that needs a large stretch is not passed over indefinitely by smaller ones. The first ship holds the others back only while quay is what it waits for: one that has room by now and waits for its tide, a pilot or the VTS leaves the queue (such a ship kept DP World's quay empty for four days with seven ships at anchor behind it).
 
 | Terminal | STS cranes | Moves per crane-hour | Cranes per ship at most | Other rules |
 | --- | --- | --- | --- | --- |
@@ -722,7 +745,14 @@ A terminal's quay is a polyline built from the quay-side edges of its berth poly
 
 ### 15.2 Other berths
 
-A berth in a dock zone holds one ship that fits it (§10.1). When none is free the ship waits for one. Tanker berths take only tankers, and tankers only tanker berths, unless nothing in the zone would fit even when empty.
+A berth in a dock zone holds one ship that fits it (§10.1). When none is free the ship waits for one. An inland craft does not wait: an inland tanker lies at a tank-barge stretch of the zone (below), and any other inland craft, or a tanker when no stretch has room, lies alongside at the zone. Tanker berths take only tankers, and tankers only tanker berths, unless nothing in the zone would fit even when empty. In that case a sea-going ship takes a berth of the other kind, and an inland craft lies alongside at the zone without taking a berth: an inland tanker at a container terminal is a bunker barge alongside a ship.
+
+Whether a berth is a tanker berth comes from three sources, in this order:
+1. the harbour master's berth type (Tankinstelling, gas and tank installation, tank cleaning) or quay type (Tanker): 745 of 1,021 berths;
+2. otherwise, the company plot behind the berth (havenmeester map layer 20, nearest plot within 150 m): wet bulk, refining and chemicals count as tanker berths, while services and unknown activities say nothing. On the berths that also have a harbour master's type this agrees 90 % of the time (chemicals 60 %);
+3. otherwise, the AIS calls (§2.1: at least 2 tanker calls making at least 50 % of the calls), which agree 78 % of the time.
+
+**Tank-barge stretches.** The harbour master marks 141 stretches of quay (42 km) where inland tank barges may lie, by the blue cones they may carry (nautical port map, "Tankvaart"). A barge with dangerous goods (AIS hazard category) does not use a no-cone stretch, and one without does not use a stretch reserved for one-cone barges. The barges on a stretch lie end to end, 10 m apart. The tanker takes the reachable stretch of its zone with the most room left.
 
 ### 15.3 Mooring and unmooring
 
@@ -741,14 +771,14 @@ t = (a + b\,\mathrm{LOA})\, e^{\varepsilon}, \qquad \varepsilon \sim N(0, \sigma
 
 ### 15.4 Container handling
 
-- **Call size** M (container moves), drawn uniformly by ship size: under 3,000 TEU 500–1,000 moves; 3,000–5,000 TEU 1,000–2,500; 5,000–10,000 TEU 2,500–4,500; 10,000–14,000 TEU 4,500–7,000; larger 7,000–11,000.
-- **Cranes:** the terminal gives by size 2, 3, 5, 6 or 8 cranes (same TEU classes), capped by the crane density (one crane per 45 m of ship), the terminal's cap per ship and the cranes free:
+- **Time at the berth:** the call's scheduled stay S (scheduled departure minus arrival; median 25 h, 20 h under 3,000 TEU to 40 h above 14,000 TEU). The cranes are a placeholder (docs/PINNED.md): they are shared out as below and shown, but do not set the stay. The moves recorded for a call are S · n · r, crane-hours rather than a count of boxes. Two earlier rules were dropped: a uniform draw of moves by size class gave stays of 10 to 30 h against the schedule's 20 to 40 h; the work of the scheduled stay with all the cranes a ship of its size gets asked for more cranes than a terminal has (DP World: 13 cranes, about three ships at once wanting 5 to 8 each), so ships stayed 41 h for 30 h scheduled, the quay filled and nine in ten ships there berthed more than 12 h late (run 0039).
+- **Cranes:** the terminal gives by size 2, 3, 5, 6 or 8 cranes (same TEU classes), capped by the crane density (one crane per 45 m of ship), the terminal's cap per ship and the cranes free (n_full is the same without the last term):
 
 ```math
 n = \min\big(n_{\mathrm{wanted}}(\mathrm{TEU}),\; \lfloor \mathrm{LOA}/45 \rfloor,\; n_{\max},\; n_{\mathrm{free}}\big), \qquad t_{\mathrm{handling}} = \frac{M}{n\, r}
 ```
 
-with r the terminal's moves per crane-hour. A ship that finds no free crane waits for one.
+with r the terminal's moves per crane-hour. A ship that finds no free crane stays its scheduled stay all the same and gets cranes as they come free (waiting for one before the stay began added 8 h to the 33 h scheduled at DP World).
 
 - **Wind:** handling pauses while gusts exceed 20 m/s (assumed crane stop).
 - When handling ends, the ship draws its exit and asks the VTS for departure clearance.
@@ -794,9 +824,15 @@ A run records every ship's timeline, every event, and the state of the port each
 | Event log | Every state change and every rule event with its time and details: clearances and the VTS's waiting reason, weather holds, reroutes, refused overtakes, encounter overrides, deadlock passes, lock reservations and ULCV holds, fallback berths, draught caps, removals with their reason |
 | Time series | Each step: ships in the area by state, pilots busy per zone, tugs, pilot boats and boatmen busy, wind force and visibility |
 | Positions | Every ship's position and state every step, for animation and for comparison with the AIS snapshots: a ship under way as its route, its bow's distance along it and its sideways offset from the centre line (m, + = starboard: passing or overtaking in one lane, §11.2); a ship lying still as its node: its own cell at an anchorage, the lock in a lock, its waiting place before a lock in a lock queue, else where it lies (a berth, a port, the pilot station). Ships that lie at the same node are fanned out by the viewer, since a resource holds them there, not a place in the water |
-| Summary | Ships generated and finished, ships still in the area, removals, mean ships at anchor, per class the count and mean hours in the area, mean use of each resource |
+| Summary | Ships generated and finished, ships still in the area, removals, mean ships at anchor, per class the count and mean hours in the area, mean use of each resource; how often each release valve fired, in all and per 1,000 ships; container ships against their berth time (mean and median delay, shares more than 1 h early, more than 2 h and 12 h late, mean time slowed at sea) |
 
 **Time in port** of a ship is decomposed by state, so time at anchor, on the river, in locks, at berth and in handling add up to its total. A container ship's delay against the schedule is its actual minus scheduled berth time.
+
+**Replications.** One run is one draw. `src/sim/replicate.py` runs a configuration with several seeds and gives every result as a mean with its 95 % confidence interval (Student's t over the replications). Because arrivals and weather have their own random streams (§1), two configurations run on the same seeds are compared seed by seed, which is much tighter than comparing two means.
+
+**Choosing the warm-up.** The same script applies Welch's procedure: the ships in the area per step, averaged over the replications and smoothed with a moving average of one day, plotted against time. The warm-up is where that curve stops rising; the script suggests the first time after which it stays inside the band it keeps over the last half of the run, and warns when that is later than the warm-up used.
+
+**Verification.** `tests/` holds the checks that must pass whatever the traffic. The parts are tested against hand calculations (lock packing, the duration of one lockage, quay allocation, crane counts, the pilot pool, the random streams). The whole model is run with its invariants checked after every step: every ship that entered is in the area or done; one ship per berth; ships moored at a terminal do not overlap and their cranes add up to no more than the terminal has; ships in a lock chamber lie inside it and apart; pilots are on board ships in the area only; no negative times; a ship's times in its states add up to its time in the area; a seed reproduces a run exactly.
 
 **Warm-up.** The run starts empty; ships entering in the first 2 days (by default) are excluded from the statistics, so they cover a port that has filled up.
 
@@ -807,12 +843,12 @@ The largest gaps are the simple VTS, the short AIS record, and a set of duration
 **Decision making**
 
 - The VTS is first come first served with five checks. It books pilots for a whole voyage but makes no reservations of river stretches or lock slots (except a ULCV's chamber), plans no horizon and optimises nothing; the pilot bookings rest on assumed typical times on board, so a ship sometimes still waits for its pilot (off the fairway). A planning VTS and a selfish baseline (to measure the price of anarchy) are not built.
-- Container ships are not steered to arrive in their berth window, and there is no virtual arrival (speed adjustment at sea).
+- A container ship is timed to berth at its berth time (§6.1), but the terminal keeps no window for it: quay goes to whoever asks first, so a ship can find its quay taken by one that is late or early. In the fitted arrival mode calls at one terminal overlap more than a planned schedule lets them (docs/PINNED.md).
 - The weather forecast is perfect: the 3-hour ULCV wind trend reads the simulated weather itself.
 
 **Data**
 
-- The AIS record covers 11 days (244 observed hours of entries), so background traffic has no weekly pattern and rare classes and routes rest on few ships. Draught is what a ship reported, not its design draught.
+- The AIS record covers 12 days (244 observed hours of entries), so background traffic has no weekly pattern and rare classes and routes rest on few ships. Only live data can be collected, so the record grows by waiting. Draught is what a ship reported, not its design draught.
 - Container ships absent from the schedule (some feeders) are not generated.
 - A background ship that can never reach its destination is removed (logged).
 - Pilot pool sizes are derived from AIS with assumed times on board and return times; no official count was found.
@@ -827,8 +863,8 @@ The largest gaps are the simple VTS, the short AIS record, and a set of duration
 
 **Processes**
 
-- Lock durations (gates, levelling, entry and exit times) are first estimates.
+- Lock durations are published for Kreekrak, Hansweert and two Terneuzen chambers (§14). The Antwerp locks have a passage time each (data/equipment/locks.csv), from which the operating time is taken by subtracting the assumed entry and exit of one ship. For the Terneuzen new lock the gate and levelling times are assumed, and so are the entry and exit times and the hold for more ships at every lock: no public source gives them, and a ship in a chamber is heard by AIS about once, too seldom to time a lockage (docs/PINNED.md).
 - Container handling uses a fixed rate per crane; the crane-buffer blocking model of the terminal documentation (buffer of 4 containers, yard clearance N(240 s, 30 s)) is not applied.
 - Assumed thresholds without a published value: the extreme-weather ban at 9 Bft, no sea boarding at 8 Bft, crane stop at 20 m/s gusts, the extra tug at 6 Bft, and the speed caps in restricted visibility.
-- Release valves (an encounter rule overridden after 1 h, a deadlock passed after 1 h) keep the model moving; how often they fire is reported rather than hidden.
+- Release valves (an encounter rule overridden after 1 h, a hold for depth overridden, a deadlock passed after 1 h) keep the model moving; how often each fires is a result of every run (§17).
 - Service craft (dredgers, tugs on other work) and Zeebrugge traffic are not simulated.

@@ -37,6 +37,10 @@ STS_CYCLE_S = (95.0, 5.0)                # normal (mean, sd) seconds per move
 STS_BUFFER_CAPACITY = 4                  # containers under a crane before it blocks
 YARD_DELAY_S = (240.0, 30.0)             # normal (mean, sd): a straddle carrier clears one container
 CRANE_SPACING_M = 45.0                   # one STS per 45 m of ship (crane density limit)
+# Berth slots of one quay drawn with a gap between them are one stretch of quay: PSA Europa's slots leave 50 m
+# at quay metre 883 and PSA Noordzee's 50 m at 820, on quays that are straight and unbroken, and a ship of 340 m
+# found no place across them. A slot that does not take the ship (an inland berth, a shallower one) still splits.
+QUAY_JOIN_M = 60.0
 MIN_CRANE_GAP_M = 15.0                   # two cranes on one ship keep one bay free between them
 MOORING_GAP_M = (20.0, 25.0)             # between moored ships, Antwerp
 
@@ -66,6 +70,8 @@ class Moored:
     since: float
     cranes: int = 0
     head_out: bool = False
+    arrived: bool = True                  # False: quay booked for a ship still on its way
+    leaves: float | None = None           # minute its quay is planned to be free again (None: not known)
 
 
 @dataclass
@@ -86,9 +92,12 @@ class Terminal:
     gap_m: float = sum(MOORING_GAP_M) / 2
 
     # --- quay ---------------------------------------------------------------
-    def free_intervals(self):
-        """Stretches of quay [a, b] where a new ship's hull may lie (gaps to the moored ships kept)."""
-        busy = sorted((s.s0 - self.gap_m, s.s1 + self.gap_m) for s in self.ships)
+    def free_intervals(self, at=None):
+        """Stretches of quay [a, b] where a new ship's hull may lie (gaps to the moored ships kept). at: for
+        a ship that gets there at this minute, so the quay of a ship planned to have left by then counts as
+        free (berth planning: the next ship sails in while the one before it is still working)."""
+        busy = sorted((s.s0 - self.gap_m, s.s1 + self.gap_m) for s in self.ships
+                      if at is None or s.leaves is None or s.leaves > at)
         out, a = [], 0.0
         for b0, b1 in busy:
             if b0 > a:
@@ -106,16 +115,17 @@ class Terminal:
                        and (not sea_going or r.get("category") in (None, "zeevaart")))
         out = []
         for a, b in spans:
-            if out and a <= out[-1][1] + 1.0:
+            if out and a <= out[-1][1] + QUAY_JOIN_M:
                 out[-1] = (out[-1][0], max(out[-1][1], b))
             else:
                 out.append((a, b))
         return out
 
-    def find_position(self, loa, near_s=None, draught=None, sea_going=True):
+    def find_position(self, loa, near_s=None, draught=None, sea_going=True, at=None):
         """Quay metre where a ship of this length can lie (first fit, or the fit nearest near_s):
-        free quay that is also suitable for its draught and kind (suitable_intervals)."""
-        free = self.free_intervals()
+        free quay (at minute `at`, see free_intervals) that is also suitable for its draught and kind
+        (suitable_intervals)."""
+        free = self.free_intervals(at)
         if draught is not None or sea_going:
             ok = self.suitable_intervals(draught, sea_going)
             free = [(max(a, c), min(b, d)) for a, b in free for c, d in ok if min(b, d) > max(a, c)]
@@ -131,15 +141,16 @@ class Terminal:
     def free_quay_m(self):
         return sum(b - a for a, b in self.free_intervals())
 
-    def moor(self, ship_id, loa, now, s0=None, cranes=0):
-        """Moor a ship (at s0, or the first fit); returns its Moored, or None if it does not fit."""
+    def moor(self, ship_id, loa, now, s0=None, cranes=0, at=None, arrived=True):
+        """Moor a ship (at s0, or the first fit), or book its quay for minute `at` (arrived=False); returns
+        its Moored, or None if it does not fit."""
         if s0 is None:
-            s0 = self.find_position(loa)
-        elif not any(a <= s0 and s0 + loa <= b for a, b in self.free_intervals()):
+            s0 = self.find_position(loa, at=at)
+        elif not any(a <= s0 and s0 + loa <= b for a, b in self.free_intervals(at)):
             s0 = None
         if s0 is None:
             return None
-        ship = Moored(ship_id, loa, s0, s0 + loa, now, head_out=self.head_out(loa))
+        ship = Moored(ship_id, loa, s0, s0 + loa, now, head_out=self.head_out(loa), arrived=arrived)
         self.ships.append(ship)
         if cranes:
             self.assign_cranes(ship_id, cranes)
@@ -153,6 +164,12 @@ class Terminal:
 
     def ship(self, ship_id):
         return next(s for s in self.ships if s.ship_id == ship_id)
+
+    def quay_clear(self, ship_id):
+        """Has every other ship left the quay this ship is booked on (gaps kept)?"""
+        me = self.ship(ship_id)
+        return not any(s.arrived and s is not me and s.s0 - self.gap_m < me.s1 and s.s1 + self.gap_m > me.s0
+                       for s in self.ships)
 
     def berths_at(self, s0, s1):
         """Charted berth slots overlapping quay metres s0..s1."""
@@ -242,6 +259,20 @@ HARBOUR_MASTER_FIELDS = ("max_draught_m", "sounded_depth_taw_m", "design_depth_t
                          "berth_length_m", "category", "quay_type", "berth_type")
 
 
+# company plot activities (havenmeester map layer 20) that make the berths in front of them tanker berths, and the
+# ones that say nothing about the cargo. Checked against the berths with the harbour master's berth type: the plot
+# gives the same answer for 90 % of them (natte bulk 82 %, raffinage 90 %, chemie 60 %), the AIS calls for 78 %.
+TANKER_PLOT_ACTIVITIES = ("natte bulk", "raffinage", "chemie")
+SILENT_PLOT_ACTIVITIES = ("dienstverlening", "niet gekend", "niet van toepassing", "logistieke infrastructuur")
+
+
+def plot_tanker(activity):
+    """Tanker berth by the company plot behind it: True / False, or None if the plot does not tell."""
+    if not activity or activity in SILENT_PLOT_ACTIVITIES:
+        return None
+    return activity in TANKER_PLOT_ACTIVITIES
+
+
 def _value(v):
     if v is None or (isinstance(v, float) and v != v):
         return None
@@ -277,7 +308,15 @@ def build_berth_catalogue(graph, berths, berth_nodes, zone_of, use=None):
         u = use.get(row.LPL_UN)
         hm = {k: _value(getattr(row, k, None)) for k in HARBOUR_MASTER_FIELDS}
         quay, kind = hm["quay_type"], hm["berth_type"] or ""
-        official_tanker = None if quay is None and not kind else (quay == "Tanker" or "Tank" in kind or "Gas" in kind)
+        official_tanker = (None if quay is None and not kind
+                           else quay == "Tanker" or any(w in kind for w in ("Tank", "Gas", "LNG", "Biofuel")))
+        activity = _value(getattr(row, "plot_activity", None))
+        by_plot = plot_tanker(activity)
+        # tanker berth: the harbour master's berth type, else the company plot behind it, else the AIS calls
+        tanker, tanker_source = ((official_tanker, "harbour master") if official_tanker is not None
+                                 else (by_plot, "company plot") if by_plot is not None
+                                 else (u["tanker_berth"], "AIS") if u and u.get("tanker_berth") is not None
+                                 else (None, None))
         out[row.LPL_UN] = {
             "lpl": _value(row.LPL), "number": None if row.number != row.number else int(row.number),
             "type_code": _int(row.TYPE),
@@ -291,13 +330,17 @@ def build_berth_catalogue(graph, berths, berth_nodes, zone_of, use=None):
             "calls": u["calls"] if u else {}, "max_loa_seen_m": u["max_loa_m"] if u else None,
             # the harbour master's data (None where it gives none)
             **hm, "tanker_official": official_tanker,
-            "tanker_berth": official_tanker if official_tanker is not None else (u["tanker_berth"] if u else None),
+            "plot_activity": activity, "plot_company": _value(getattr(row, "plot_company", None)),
+            "tanker_berth": tanker, "tanker_source": tanker_source,
         }
     graph.graph["berths"] = out
-    log.info("berth catalogue: %d berths (%d with nodes, %d with an allowed draught, %d tanker berths: %d official)",
-             len(out), sum(bool(b["nodes"]) for b in out.values()),
+    log.info("berth catalogue: %d berths (%d with nodes, %d with an allowed draught, %d tanker berths: %d official, "
+             "%d by company plot, %d by AIS; %d not known)", len(out), sum(bool(b["nodes"]) for b in out.values()),
              sum(b["max_draught_m"] is not None for b in out.values()), sum(bool(b["tanker_berth"]) for b in out.values()),
-             sum(bool(b["tanker_official"]) for b in out.values()))
+             sum(bool(b["tanker_official"]) for b in out.values()),
+             sum(bool(b["tanker_berth"]) and b["tanker_source"] == "company plot" for b in out.values()),
+             sum(bool(b["tanker_berth"]) and b["tanker_source"] == "AIS" for b in out.values()),
+             sum(b["tanker_berth"] is None for b in out.values()))
     return out
 
 

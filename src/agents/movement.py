@@ -135,6 +135,9 @@ class Mover:
         self.allow = {}                                        # key -> keys it may pass this step (deadlocks)
         self.next_index = 0
         self.index_of = {}
+        # bow position and length per key (inf: not on the mesh), for finding the ships near a point at once
+        self.bow_xy = np.full((1024, 2), np.inf)
+        self.loa_of = np.zeros(1024)
 
     # ------------------------------------------------------------------ geometry
     def _key(self, ship):
@@ -172,7 +175,8 @@ class Mover:
         pts = np.vstack(pts)
         r = ship.beam / 2 + GAP_FRACTION * ship.beam + HULL_SAMPLE_M
         hits = self.tree.query_ball_point(pts, r)
-        return sorted({int(self.tree_ids[i]) for h in hits for i in h})
+        idx = np.fromiter((i for h in hits for i in h), dtype=np.int64)
+        return np.unique(self.tree_ids[idx]).tolist()
 
     def shift(self, ship):
         """How far the ship can move off its cell centre line, sideways: inside its lane, or as far as it has
@@ -340,6 +344,11 @@ class Mover:
             self.occ.setdefault(c, set()).add(k)
         self.lines[k] = line
         self.ships[k] = ship
+        if k >= len(self.loa_of):
+            grow = len(self.loa_of)
+            self.bow_xy = np.vstack([self.bow_xy, np.full((grow, 2), np.inf)])
+            self.loa_of = np.r_[self.loa_of, np.zeros(grow)]
+        self.bow_xy[k], self.loa_of[k] = line[-1], ship.loa
         self.boxes[k] = (line[:, 0].min(), line[:, 1].min(), line[:, 0].max(), line[:, 1].max(), ship.beam)
 
     def _clear(self, k, ship):
@@ -358,6 +367,8 @@ class Mover:
         self.ships.pop(k, None)
         self.lines.pop(k, None)
         self.boxes.pop(k, None)
+        if k < len(self.loa_of):
+            self.bow_xy[k] = np.inf
 
     def place(self, ship, cells=None):
         """Put a ship on the mesh at its route position; False if another hull is too close."""
@@ -494,13 +505,18 @@ class Mover:
         zone = self.zone_label[head_cell]
         i_old = int(np.searchsorted(ship.s, ship.head, side="right")) - 1
         passed = {x for c in ship.route[i_old:i_new + 1] for x in self.stretches.get(c, ())}
+        # the ships near enough to matter, found at once (this loop ran over every ship on the mesh for
+        # every move: a sixth of the run time)
+        n = self.next_index
+        near = np.hypot(self.bow_xy[:n, 0] - p_new[0], self.bow_xy[:n, 1] - p_new[1])             <= ship.loa + self.loa_of[:n] + dist + OVERTAKE_LATERAL_M
+        if not near.any():
+            return None
+        near = set(np.flatnonzero(near).tolist())
         for k, other in self.ships.items():
-            if other is ship or other.state.value not in UNDER_WAY:
+            if k not in near or other is ship or other.state.value not in UNDER_WAY:
                 continue
             line = self.lines[k]
             oh, ot = line[-1], line[0]
-            if np.hypot(*(oh - p_new)) > ship.loa + other.loa + dist + OVERTAKE_LATERAL_M:
-                continue
             uo = self._heading(line)
             if uo is None or float(np.dot(u, uo)) < OVERTAKE_SAME_DIRECTION:
                 continue

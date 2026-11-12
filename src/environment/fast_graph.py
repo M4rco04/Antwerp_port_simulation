@@ -187,6 +187,8 @@ class FastGraph:
                 if self.graph.nodes[int(self.ids[i])]["name"] in LITTLE_USED_LOCKS:
                     extra[(rows == i) | (cols == i)] = LITTLE_USED_LOCK_PENALTY_M / 2
             self._st["lock_extra"] = extra
+            self._st["lock_k"] = np.flatnonzero(self._st["lock_entry"])
+            self._st["anch_k"] = np.flatnonzero(self._st["anch_entry"])
         return self._st
 
     def _lock_entries(self, name):
@@ -201,23 +203,24 @@ class FastGraph:
         """Bool mask over the CSR entries a ship may sail along (over entries, an index array of
         CSR entries, when given)."""
         st = self._static()
-        e = np.arange(len(self.indices)) if entries is None else entries
-        rows, cols = self.entry_rows[e], self.indices[e]
-        ok = st["depth"][e] + np.minimum(level[rows], level[cols]) >= need
-        lock_entry = st["lock_entry"][e]
-        if lock_entry.any():
+        if entries is None:                     # all entries: no index arrays (a tenth of the time)
+            rows, cols, depth = self.entry_rows, self.indices, st["depth"]
+            lock_k, anch_k = st["lock_k"], st["anch_k"]
+        else:
+            rows, cols, depth = self.entry_rows[entries], self.indices[entries], st["depth"][entries]
+            lock_k, anch_k = np.flatnonzero(st["lock_entry"][entries]), np.flatnonzero(st["anch_entry"][entries])
+        ok = depth + np.minimum(level[rows], level[cols]) >= need
+        if len(lock_k):
             is_lock = st["is_lock"]
             sill = self.lock_sill(loa_m, beam_m)
-            k = np.flatnonzero(lock_entry)
-            lock_i = np.where(is_lock[rows[k]], rows[k], cols[k])
-            water_i = np.where(is_lock[rows[k]], cols[k], rows[k])
-            ok[k] = np.array([sill[int(l)] for l in lock_i]) + level[water_i] >= need
-        anch_entry = st["anch_entry"][e]
-        if anch_entry.any():
-            k = np.flatnonzero(anch_entry)
+            r, c = rows[lock_k], cols[lock_k]
+            lock_i = np.where(is_lock[r], r, c)
+            water_i = np.where(is_lock[r], c, r)
+            ok[lock_k] = np.array([sill[int(l)] for l in lock_i]) + level[water_i] >= need
+        if len(anch_k):
             ends = set(int(x) for x in ends)
-            ok[k] &= np.array([(not st["anch"][r] or r in ends) and (not st["anch"][c] or c in ends)
-                               for r, c in zip(rows[k], cols[k])])
+            ok[anch_k] &= np.array([(not st["anch"][r] or r in ends) and (not st["anch"][c] or c in ends)
+                                    for r, c in zip(rows[anch_k], cols[anch_k])])
         return ok
 
     def keep_right_factor(self, penalty=KEEP_RIGHT_PENALTY, margin_m=25.0):
@@ -269,37 +272,40 @@ class FastGraph:
         s, t = self.index[int(source)], self.index[int(target)]
         level = np.zeros(self.n) if level is None else level
         st = self._static()
+        rows, cols = self.entry_rows, self.indices
         if min_clearance is not None and getattr(self, "clearance", None) is not None:
             wide = self.clearance >= min_clearance
             nodes_mask = wide if nodes_mask is None else (nodes_mask & wide)
+        # every array runs over all CSR entries and an entry the ship may not use weighs inf: the matrix keeps
+        # the graph's own CSR layout (no index arrays, no COO -> CSR sort: these took a third of a route)
+        ok = self.passable_entries(level, draught_m + ukc_m, loa_m, beam_m, ends=(s, t))
         if nodes_mask is not None:
             keep = nodes_mask.copy()
             keep[[s, t]] = True
-            entries = np.flatnonzero(keep[self.entry_rows] & keep[self.indices])
-        else:
-            entries = np.arange(len(self.indices))
-        ok = self.passable_entries(level, draught_m + ukc_m, loa_m, beam_m, ends=(s, t), entries=entries)
-        e = entries[ok]
-        w = st["weight"][e] + np.where(st["lock_entry"][e], lock_penalty_m / 2, 0.0) + st["lock_extra"][e]
+            ok &= keep[rows] & keep[cols]
+        w = st["weight"] + np.where(st["lock_entry"], lock_penalty_m / 2, 0.0) + st["lock_extra"]
         for name in avoid_locks:
-            w = w + self._lock_entries(name)[e] * LITTLE_USED_LOCK_PENALTY_M / 2
+            w = w + self._lock_entries(name) * LITTLE_USED_LOCK_PENALTY_M / 2
         if lane_factor is not None:
-            lf = lane_factor[e]
-            w = w * np.where(np.isfinite(lf), lf, self.keep_right_factor()[e] if keep_right else 1.0)
+            w = w * np.where(np.isfinite(lane_factor), lane_factor, self.keep_right_factor() if keep_right else 1.0)
         elif keep_right:
-            w = w * self.keep_right_factor()[e]
+            w = w * self.keep_right_factor()
         if depth_penalty is not None:
             low, need, per_m = depth_penalty
-            short = need - (st["depth"][e] + np.minimum(low[self.entry_rows[e]], low[self.indices[e]]))
-            w = w * np.where(st["lock_entry"][e], 1.0, 1.0 + per_m * np.clip(short, 0.0, None))
-        M = sparse.csr_matrix((w, (self.entry_rows[e], self.indices[e])), shape=(self.n, self.n))
-        dist, pred = dijkstra(M, directed=True, indices=s, return_predecessors=True)
+            short = need - (st["depth"] + np.minimum(low[rows], low[cols]))
+            w = w * np.where(st["lock_entry"], 1.0, 1.0 + per_m * np.clip(short, 0.0, None))
+        M = sparse.csr_matrix((np.where(ok, w, np.inf), cols, self.indptr), shape=(self.n, self.n))
+        # limit: an entry of weight inf is never taken (without it the search would walk them at distance inf)
+        dist, pred = dijkstra(M, directed=True, indices=s, return_predecessors=True, limit=ROUTE_LIMIT_M)
         if not np.isfinite(dist[t]):
             raise nx.NetworkXNoPath(f"Node {target} not reachable from {source}")
         path = [t]
         while path[-1] != s:
             path.append(pred[path[-1]])
         return [int(self.ids[i]) for i in path[::-1]]
+
+
+ROUTE_LIMIT_M = 1e12                     # longer than any route (weights are metres, with penalties)
 
 
 class PassabilityCache:

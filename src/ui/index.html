@@ -86,7 +86,7 @@ a { color: var(--accent); }
     <fieldset>
       <legend>Traffic</legend>
       <div class="field"><label for="containers">Container ships</label>
-        <select id="containers"><option value="replay">Replay the schedule</option><option value="nhpp">Poisson process fitted to the schedule</option></select></div>
+        <select id="containers"><option value="replay">Replay the schedule</option><option value="weeks">Schedule of whole real weeks, drawn at random</option><option value="nhpp">Poisson process fitted to the schedule</option></select></div>
       <div class="field" id="row_delays"><label for="delays">Schedule delays</label><span class="check"><input type="checkbox" id="delays"> draw the AIS delay against the schedule</span></div>
       <div class="field nhpp"><label for="container_rate">Container rate ×</label><input type="number" id="container_rate" min="0.1" max="5" step="any">
         <div class="hint">1.2 = 20 % more container calls</div></div>

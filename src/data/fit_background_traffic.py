@@ -141,6 +141,51 @@ def scale_inland_stays(berth_dwell, by_zone, inland, data):
     return out
 
 
+ANCHOR_SCALED_CLASSES = ("bulk_general", "tanker")     # the classes that start a visit at anchor in the model
+# the anchorages out at sea, where the model's ships that arrive at anchor lie (175 of 181 at Westhinder in a
+# 30-day run); the anchorages in the Scheldt hold short stops of ships already under way (Everingen: 4-7 h)
+SEA_ANCHORAGE_ZONES = ("anchorage_westhinder", "anchorage_oostdyck", "anchorage_schouwenbank")
+
+
+def scale_anchor_stays(anchorage_wait, waits, data, scheldt):
+    """Fit the anchor stays of the classes that arrive at anchor on the sea anchorages only, and scale them so
+    that they give the stock the AIS shows there (Little's law: mean stay = ships at anchor / anchor stops per
+    hour), as for the inland stays. Many anchor stays were still going on when the data
+    ended (19 of 56 tankers), so the lognormal's tail is an extrapolation: with it the model held twice the
+    bulk carriers and tankers at anchor that the AIS shows. Only ever shortens."""
+    df, n_snapshots = data.df, data.times.size
+    hours = n_snapshots * 5 / 60
+    cls_of = df.mmsi.map(data.ships["class"])
+    at_anchor = df.stationary & df.anchorage.isin(SEA_ANCHORAGE_ZONES) & df.visit.isin(scheldt)
+    waits = waits[waits.zone.isin(SEA_ANCHORAGE_ZONES)]
+    rng = np.random.default_rng(0)
+    out = {}
+    for cls in ANCHOR_SCALED_CLASSES:
+        starts = waits[waits["class"] == cls]
+        f = fit_lognormal(starts.hours, starts.end_observed) if len(starts) else None
+        if not f:
+            continue
+        anchorage_wait[cls] = f
+        rate = len(starts) / hours
+        target = int((at_anchor & (cls_of == cls)).sum()) / n_snapshots / rate
+        z = rng.standard_normal(20000)
+        capped_mean = lambda mu: float(np.minimum(np.exp(mu + f["sigma"] * z), f["longest_seen_h"]).mean())
+        model = capped_mean(f["mu"])
+        # the draws stop at the longest stay seen, so shifting mu does not scale the mean in proportion: solve for it
+        lo, hi = f["mu"] - 5.0, f["mu"]
+        for _ in range(60):
+            mid = (lo + hi) / 2
+            lo, hi = (mid, hi) if capped_mean(mid) < target else (lo, mid)
+        factor = min(float(np.exp(lo - f["mu"])), 1.0)
+        f["mu"] = round(f["mu"] + float(np.log(factor)), 4)
+        f["median_h"] = round(float(np.exp(f["mu"])), 2)
+        f["mean_h"] = round(float(np.exp(f["mu"] + f["sigma"] ** 2 / 2)), 2)
+        out[cls] = {"mean_stay_from_stock_h": round(float(target), 1), "mean_stay_of_fit_h": round(model, 1),
+                    "factor": round(float(factor), 3)}
+    log.info("anchor stays scaled to the AIS stock: %s", out)
+    return out
+
+
 def next_call(calls, visits):
     """class -> zone -> {next zone or LEAVE: P}. The last call counts as leaving only if the visit's end
     was seen; a ship still lying there when the data ends says nothing about what it does next."""
@@ -247,6 +292,7 @@ def fit(data, stops, exits, inland_stops):
     waits = anchored[anchored.start_observed]
     anchorage_wait = {cls: fit_lognormal(g.hours, g.end_observed) for cls, g in waits.groupby("class")}
     anchorage_wait["all"] = fit_lognormal(waits.hours, waits.end_observed)
+    anchor_scale = scale_anchor_stays(anchorage_wait, waits, data, scheldt)
     p_anchorage = {cls: normalise(g.zone.value_counts().to_dict()) for cls, g in anchored.groupby("class")}
 
     location = {zone: {"lat": round(float(g.lat.median()), 5), "lon": round(float(g.lon.median()), 5)}
@@ -275,6 +321,7 @@ def fit(data, stops, exits, inland_stops):
         "BERTH_DWELL_H_BY_ZONE": by_zone,
         "INLAND_STAY_SCALE": stay_scale,
         "ANCHORAGE_WAIT_H": anchorage_wait,
+        "ANCHOR_STAY_SCALE": anchor_scale,
         "P_ANCHORAGE_GIVEN_CLASS": p_anchorage,
         "LOCK_ZONE_STOP_H": lock_stops(stops),
         "ZONE_LOCATION": location,
@@ -313,6 +360,7 @@ BERTH_DWELL_H                     class (or "all") -> lognormal time at berth in
 BERTH_DWELL_H_BY_ZONE             class -> berth zone -> the same, where there are enough stays
 INLAND_STAY_SCALE                 inland class -> the factor their stays were scaled by to give the AIS stock
 ANCHORAGE_WAIT_H                  class (or "all") -> lognormal time at anchor in hours
+ANCHOR_STAY_SCALE                 bulk_general / tanker -> the factor their anchor stays were scaled by to give the AIS stock
 P_ANCHORAGE_GIVEN_CLASS           class -> {{anchorage: P}} over the anchor stops
 LOCK_ZONE_STOP_H                  lock zone -> n, median_h, p90_h of stops shorter than {lock_max} h there
                                   (lock passage + wait, only the ones of 0.5 h or more)

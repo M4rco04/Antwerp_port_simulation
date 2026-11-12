@@ -28,6 +28,7 @@ and works as type B otherwise. The durations in LockTimes are first guesses to c
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
 ULCV_LOA_M = 350.0          # container ships this long get an empty chamber (regs §8.9)
 WIDE_BEAM_M = 43.0          # ships this wide prefer the lock(s) marked for them (Berendrecht)
@@ -58,6 +59,34 @@ class LockTimes:
 BUNDLE_HOLD_MIN = 10.0
 EMPTY_HOLD_MIN = 10.0
 SMALL_SHIP_LOA_M, SMALL_SHIP_BEAM_M = 80.0, 9.0
+# operating time of a lockage (closing the gates, levelling, opening them), min, where Rijkswaterstaat gives it
+# ("bedieningstijd schutproces", Capaciteit Zeeuwse sluizen, 2001, table 3). Half of it is levelling and a quarter
+# each gate movement. The other chambers keep LockTimes (gates + base + per metre of level difference).
+OPERATING_MIN = {"Kreekrak west": 11.0, "Kreekrak east": 11.0, "Hansweert west": 15.0, "Hansweert east": 15.0,
+                 "Terneuzen east lock": 20.5, "Terneuzen west lock": 26.5}
+
+
+def _antwerp_operating_min(path=Path(__file__).resolve().parents[2] / "data" / "equipment" / "locks.csv"):
+    """The Antwerp locks' operating times from data/equipment/locks.csv. The file gives the time of one passage
+    (the ship sails in, the gates close, the level is made, they open, it sails out): the operating time is that
+    less one ship's entry and exit as modelled here (LockTimes: 12 + 8 min for a sea-going ship; 4 + 3 min at
+    Royers and Kattendijk, which take inland craft). Read as operating time alone the file would give passages
+    of 50 to 65 min at the sea locks and 40 min of gates and levelling at Zandvliet against the 11 to 26 min
+    Rijkswaterstaat gives for the Dutch ones; read as a passage it agrees with what the assumed times gave
+    (35 to 47 min with the tide)."""
+    t, out = LockTimes(), {}
+    if not path.exists():
+        return out
+    for line in path.read_text(encoding="utf-8-sig").splitlines()[1:]:
+        cells = [c.strip() for c in line.split(";")]
+        if len(cells) >= 2 and cells[0] and cells[1]:
+            ship = t.small_entry_min + t.small_exit_min if cells[0] in BARGE_LOCKS else t.entry_min + t.exit_min
+            out[cells[0]] = max(float(cells[1]) - ship, 4.0)
+    return out
+
+
+BARGE_LOCKS = ("Royers", "Kattendijk")
+OPERATING_MIN.update(_antwerp_operating_min())
 
 
 @dataclass
@@ -176,13 +205,27 @@ class Lock:
             raise ValueError(f"{ship.ship_id} ({ship.loa} x {ship.beam} m) fits no chamber of {self.name}")
         ship.turn, ship.requested_at = self.next_turn, now
         self.next_turn += 1
-        best = min(options, key=lambda c: (len(c.queue[ship.from_side]) + (c.side != ship.from_side),
-                                           c.width_m))
+        best = min(options, key=lambda c: self._chamber_order(c, ship))
         best.queue[ship.from_side].append(ship)
         best.queue[ship.from_side].sort(key=lambda s: (s.priority, s.turn))
         if ship.exclusive:
             self.reserve(ship.ship_id, now, best.name)
         return best
+
+    def _chamber_order(self, c, ship):
+        """Fill a chamber before starting another, as a lock master does: first a chamber whose group on the
+        ship's side (waiting, or in it and loading) it still packs into, the biggest group first; else the fewest
+        waiting, preferably at its level. Taking the chamber with the fewest waiting spread the traffic over the
+        chambers: Terneuzen's three carried 1.2 ships a lockage where Rijkswaterstaat counted about 1.8 of the
+        classes modelled (IVS90, 2014 and 2018)."""
+        side = ship.from_side
+        group = list(c.queue[side])
+        if c.side == side and c.state == "open":
+            group += [p.ship for p in c.ships if p.ship.from_side == side]
+        joins = (bool(group) and not ship.exclusive and not any(s.exclusive for s in group)
+                 and not (c.reserved_for and c.reserved_for != ship.ship_id)
+                 and pack(c.length_m, c.width_m, group + [ship], self.times.gap_long_m, self.times.gap_side_m) is not None)
+        return (not joins, -len(group) if joins else len(c.queue[side]) + (c.side != side), c.width_m)
 
     def reserve(self, ship_id, from_min, chamber_name=None):
         """Keep a chamber for one ship only, from a given time (ULCV, regs §8.9)."""
@@ -215,6 +258,10 @@ class Lock:
                 break
         return events
 
+    def _gate_min(self, c):
+        op = OPERATING_MIN.get(c.name)
+        return op / 4 if op else self.times.gate_min
+
     def _event(self, kind, t, c, ship=None, **extra):
         return {"t": t, "lock": self.name, "chamber": c.name, "event": kind,
                 "ship": ship.ship_id if ship else None, **extra}
@@ -243,7 +290,7 @@ class Lock:
             if self._hold_open(c, t):
                 return False
             if c.ships or c.queue[there]:
-                c.state, c.task, c.timer_min = "closing", None, self.times.gate_min
+                c.state, c.task, c.timer_min = "closing", None, self._gate_min(c)
                 events.append(self._event("closing", t, c, side=here, ships=len(c.ships)))
                 return True
             return False
@@ -302,10 +349,11 @@ class Lock:
                 return [self._event("passed", t, c, item, side=other_side(item.from_side))]
         if c.state == "closing":
             dh = abs(levels.get("a", 0.0) - levels.get("b", 0.0))
-            c.state, c.timer_min = "levelling", self.times.level_base_min + self.times.level_min_per_m * dh
+            op = OPERATING_MIN.get(c.name)
+            c.state, c.timer_min = "levelling", (op / 2 if op else self.times.level_base_min + self.times.level_min_per_m * dh)
             return [self._event("levelling", t, c, level_difference_m=round(dh, 2))]
         if c.state == "levelling":
-            c.state, c.timer_min = "opening", self.times.gate_min
+            c.state, c.timer_min = "opening", self._gate_min(c)
             return []
         if c.state == "opening":
             c.state, c.side = "open", other_side(c.side)

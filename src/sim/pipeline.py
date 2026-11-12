@@ -40,7 +40,8 @@ DEFAULTS = {
     "warmup": 2.0,                     # days whose ships are left out of the statistics
     "seed": 1,
     "weather": "bootstrap",            # bootstrap: real days of the same season; replay: the observed dates
-    "containers": "replay",            # replay the schedule, or nhpp: a Poisson process fitted to it
+    "containers": "replay",            # replay the schedule; weeks: a schedule of whole real weeks drawn at
+                                       # random; nhpp: a Poisson process fitted to it
     "container_rate": 1.0,             # nhpp: multiplies the container arrival rate
     "bunching": True,                  # nhpp: daily gamma factor (liner calls bunch)
     "delays": True,                    # replay: draw the AIS delay against the schedule
@@ -69,8 +70,8 @@ def clean_config(cfg: dict) -> dict:
         raise ValueError("weather must be bootstrap or replay")
     if out["routing"] not in ("lanes", "shortest"):
         raise ValueError("routing must be lanes or shortest")
-    if out["containers"] not in ("replay", "nhpp"):
-        raise ValueError("containers must be replay or nhpp")
+    if out["containers"] not in ("replay", "weeks", "nhpp"):
+        raise ValueError("containers must be replay, weeks or nhpp")
     if not out["days"] > 0:
         raise ValueError("days must be above 0")
     if not 0 <= out["warmup"] < out["days"]:
@@ -257,8 +258,9 @@ def parser():
     p.add_argument("--no-background", action="store_true")
     p.add_argument("--weather", choices=("bootstrap", "replay"), default=DEFAULTS["weather"],
                    help="weather: real days of the same season drawn at random, or the observed dates")
-    p.add_argument("--containers", choices=("replay", "nhpp"), default=DEFAULTS["containers"],
-                   help="container ships: replay the schedule, or a Poisson process fitted to it")
+    p.add_argument("--containers", choices=("replay", "weeks", "nhpp"), default=DEFAULTS["containers"],
+                   help="container ships: replay the schedule, a schedule of whole real weeks drawn at random "
+                        "(any run length), or a Poisson process fitted to it")
     p.add_argument("--container-rate", type=float, default=DEFAULTS["container_rate"],
                    help="nhpp: multiply the fitted container arrival rate (scenarios)")
     p.add_argument("--no-bunching", action="store_true", help="nhpp: plain Poisson, without the daily gamma factor")

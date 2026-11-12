@@ -2,8 +2,8 @@
 
 Level 1, container ships, mode "replay" (default): replay of the schedule CSV. Each line gives the vessel, TEU, the
 scheduled berth arrival / departure (Europe/Brussels time) and the terminal code. TEU gives the
-dimensions (container_calls.dimensions_for_teu, with the fitted residual noise), the call size
-and the cranes. With delays=True the berth arrival is shifted by a delay drawn from the AIS
+dimensions (container_calls.dimensions_for_teu, with the fitted residual noise) and the cranes; the
+scheduled stay (departure - arrival) gives the call size (engine._start_handling). With delays=True the berth arrival is shifted by a delay drawn from the AIS
 (container_calls.SCHEDULE_DELAY_H). The ship enters the area ENTRY_LEAD_H before that, at a sea
 source drawn from entry_probabilities.
 
@@ -15,10 +15,22 @@ line drawn at random (TEU, terminal code, scheduled time at berth together), ent
 before its berth time. rate_factor scales the rate (scenarios). Runs need not lie inside the
 schedule's dates.
 
+Level 1, mode "weeks": a schedule made for the run from whole weeks of the real one (_week). Week k of the
+run is a real week drawn at random, its calls moved to that week with their weekday, hour, ship, terminal and
+stay. Liner services are weekly, so a real week is a set of calls that fits the quays; calls drawn one by one
+(mode "nhpp") overlap at a terminal as a planned schedule never does. With delays the berth time is
+shifted as in replay mode. The berth plan is then made again on paper: a call that finds the quay full for any
+part of its stay (the lengths of the ships at the terminal against its quay) is moved to when a ship there has
+left. That covers two weeks joining with a ship still at the quay, and a late ship meeting the next one. Runs of any length and any start date.
+
 Level 2, background traffic: a non-homogeneous Poisson process per class and entry source,
 rate = entry_probabilities.RATE_PER_HOUR x HOURLY_FACTOR(hour of day). Attributes are whole AIS
 ships that went to that destination (background_traffic.sample_attributes), the destination depends on
 class and source.
+
+Two random streams: rng draws when ships arrive (counts, times, the daily factor, schedule delays), and
+rng_attributes what they are (schedule line, dimensions, source, destination, AIS ship). Two runs with the same
+seed then have the same arrivals whatever else differs between them (common random numbers).
 """
 
 from __future__ import annotations
@@ -31,7 +43,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from ship import Ship, container_moves, cranes_for
+from ship import Ship, cranes_for
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src" / "data"))
@@ -39,7 +51,11 @@ import background_traffic as BT          # noqa: E402
 import container_calls as CC             # noqa: E402
 import entry_probabilities as EP         # noqa: E402
 
-SCHEDULE = ROOT / "data" / "schedules" / "2026_Oct20-Nov22.csv"
+SCHEDULES = ROOT / "data" / "schedules"     # every schedule file in it, together (they follow on each other)
+SCHEDULE = SCHEDULES
+WEEK_MIN = 7 * 24 * 60.0
+WEEK_AHEAD_MIN = 5 * 24 * 60.0             # a week's calls are made this long before it starts (early ships enter before it)
+QUAY_GAP_M = 22.5                          # between two ships at a quay (terminals.MOORING_GAP_M), for the paper check
 SCHEDULE_TZ = "Europe/Brussels"
 SCHEDULE_YEAR = 2026
 ENTRY_LEAD_H = 8.0                  # enter the area this long before the berth time
@@ -49,6 +65,13 @@ TERMINAL_OF_CODE = {"1700": "DP World Antwerp Gateway", "K1742": "MPET", "K1718"
 # the TEU fit's scatter can exceed any real ship: the largest container ships are 400 x 61.5 m
 MAX_LOA_M, MAX_BEAM_M = 400.0, 61.5
 BACKGROUND_CLASSES = ("bulk_general", "tanker", "inland_cargo", "inland_tanker", "passenger")
+# Inland arrivals are scaled to Rijkswaterstaat's lock counts: commercial passages a day at Kreekrak 189 and
+# Hansweert 113 (NMCA 2017, 69,058 and 41,112 a year) and Terneuzen 126 (IVS90 2018, Deltares 2021), 428 in all,
+# where the AIS rates gave 130, 75 and 92 (297; 12-day run, seed 69). The AIS hears an inland craft in about a
+# third of its snapshots and misses trips out and back; the gap is alike at the three locks (x 1.37-1.51). The
+# inland stays are divided by the same factor (engine), so that the craft lying in port stay at the AIS number.
+INLAND_TRIP_SCALE = round(428 / 297, 2)
+INLAND_CLASSES = ("inland_cargo", "inland_tanker")
 # canals reached only through a lock: the largest chamber's length and width (environment LOCKS):
 # a ship entering from or leaving to them must fit (Kreekrak, Hansweert, Royers)
 CANAL_LIMITS = {"schelde_rijn_canal": (320.0, 24.0), "zuid_beveland_canal": (280.0, 24.0), "albert_canal": (180.0, 22.0)}
@@ -85,13 +108,16 @@ def fit_container_nhpp(df, tz=SCHEDULE_TZ):
 
 
 def read_schedule(path=SCHEDULE):
+    """The schedule: one CSV, or every CSV of a folder together, in order of arrival."""
+    path = Path(path)
     rows = []
-    with open(path, encoding="utf-8-sig") as f:
-        for r in csv.reader(f, delimiter=";"):
-            if not r or r[0] == "Vessel" or len(r) < 4:
-                continue
-            r = (r + [""] * 6)[:6]
-            rows.append(dict(zip(("vessel", "teu", "voyage", "arrival", "departure", "terminal"), r)))
+    for file in (sorted(path.glob("*.csv")) if path.is_dir() else [path]):
+        with open(file, encoding="utf-8-sig") as f:
+            for r in csv.reader(f, delimiter=";"):
+                if not r or r[0] == "Vessel" or len(r) < 4:
+                    continue
+                r = (r + [""] * 6)[:6]
+                rows.append(dict(zip(("vessel", "teu", "voyage", "arrival", "departure", "terminal"), r)))
     df = pd.DataFrame(rows)
     df["teu"] = pd.to_numeric(df.teu, errors="coerce")
 
@@ -101,23 +127,30 @@ def read_schedule(path=SCHEDULE):
                                     nonexistent="shift_forward").dt.tz_convert("UTC")
 
     df["arrival"], df["departure"] = parse("arrival"), parse("departure")
-    return df[df.arrival.notna() & df.teu.notna()].reset_index(drop=True)
+    df = df[df.arrival.notna() & df.teu.notna()]
+    return df.sort_values("arrival", kind="stable").reset_index(drop=True)
 
 
 class Generator:
     def __init__(self, start, rng, delays=True, schedule=SCHEDULE, background=True, containers=True,
-                 container_mode="replay", rate_factor=1.0, bunching=True):
+                 container_mode="replay", rate_factor=1.0, bunching=True, rng_attributes=None, quay_m=None):
         self.start = pd.Timestamp(start)
         self.rng = rng
+        self.rng_att = rng if rng_attributes is None else rng_attributes
         self.delays = delays
         self.background = background
         self.counter = itertools.count(1)
         self.pending = []
         self.nhpp = None
+        self.weeks = None
         if containers:
             df = read_schedule(schedule)
             known = df.terminal[df.terminal != ""]
             self.codes = known.value_counts(normalize=True)
+            # scheduled stays (h) by ship size, for the lines without a departure time
+            stay = (df.departure - df.arrival).dt.total_seconds() / 3600
+            self.stays = {b: stay[(df.teu.map(cranes_for) == b) & stay.notna()].to_numpy() for b in set(df.teu.map(cranes_for))}
+            self.stays_all = stay[stay.notna()].to_numpy()
             if container_mode == "replay":
                 self._schedule(df)
             elif container_mode == "nhpp":
@@ -127,8 +160,10 @@ class Generator:
                 if not bunching:
                     self.nhpp["gamma_shape"] = None
                 self.day_factor = {}
+            elif container_mode == "weeks":
+                self._prepare_weeks(df, quay_m or {})
             else:
-                raise ValueError(f"container_mode {container_mode!r}: 'replay' or 'nhpp'")
+                raise ValueError(f"container_mode {container_mode!r}: 'replay', 'weeks' or 'nhpp'")
         self.median_draught = {c: float(np.nanmedian([r[2] for r in BT.ATTRIBUTES[c] if r[2]]))
                                for c in BACKGROUND_CLASSES}
 
@@ -145,26 +180,109 @@ class Generator:
             self.pending.append(ship)
         self.pending.sort(key=lambda s: s.spawn_t)
 
+    # ------------------------------------------------------------------ a schedule from whole weeks
+    def _prepare_weeks(self, df, quay_m):
+        """The whole weeks of the schedule (from the day of its first call; a last part-week is left out), and
+        per terminal the quay the paper check allows: its quay (quay_m, from the engine) or, if that is more,
+        the most the real schedule itself has there at once by the same count."""
+        tz = SCHEDULE_TZ
+        # in local clock time (no time zone): a call keeps its weekday and hour across a change of the clocks
+        local = df.arrival.dt.tz_convert(tz).dt.tz_localize(None)
+        first = local.min().normalize()
+        n = int((local.max() - first) / pd.Timedelta(days=7))
+        if n < 1:
+            raise ValueError("the schedule covers less than one week")
+        week = ((local - first) / pd.Timedelta(days=7)).astype(int)
+        df = df[week < n].assign(week=week[week < n], offset=local - first - pd.to_timedelta(week * 7, unit="D"))
+        stay = df.departure - df.arrival
+        df = df.assign(stay=stay, metres=[CC.dimensions_for_teu(t)["loa"] + QUAY_GAP_M for t in df.teu],
+                       quay=df.terminal.map(TERMINAL_OF_CODE))
+        start_day = self.start.tz_convert(tz).tz_localize(None).normalize()
+        back = (start_day.dayofweek - first.dayofweek) % 7
+        peak = {}
+        for name, g in df[df.quay.notna() & df.stay.notna()].groupby("quay"):
+            events = sorted([(a, m) for a, m in zip(g.arrival, g.metres)] + [(a + s, -m) for a, s, m in zip(g.arrival, g.stay, g.metres)])
+            used = top = 0.0
+            for _, m in events:
+                used += m
+                top = max(top, used)
+            peak[name] = top
+        self.weeks = {"calls": df, "n": n, "week0": start_day - pd.Timedelta(days=back),
+                      "quay": {k: quay_m.get(k) or v for k, v in peak.items()}, "plan": {}, "made": 0,
+                      "drawn": [], "moved": 0, "moved_h": 0.0}
+        self._weeks_until(0.0)
+
+    def _weeks_until(self, t0):
+        """Make the calls of every run week that starts within WEEK_AHEAD_MIN of t0."""
+        w = self.weeks
+        while self.minutes(self._utc_of(w["week0"] + pd.Timedelta(days=7 * w["made"]))) <= t0 + WEEK_AHEAD_MIN:
+            self._week(w["made"])
+            w["made"] += 1
+        self.pending.sort(key=lambda s: s.spawn_t)
+
+    def _week(self, k):
+        w = self.weeks
+        source = int(self.rng.integers(w["n"]))
+        w["drawn"].append(source)
+        begin = w["week0"] + pd.Timedelta(days=7 * k)
+        old = begin - pd.Timedelta(days=14)
+        for r in w["calls"][w["calls"].week == source].itertuples():
+            arrival = self._utc_of(begin + r.offset)
+            departure = arrival + r.stay if pd.notna(r.stay) else pd.NaT
+            berth_t = arrival + pd.Timedelta(hours=CC.sample_arrival_delay(self.rng) if self.delays else 0.0)
+            if pd.notna(r.quay) and pd.notna(r.stay):
+                # the berth plan on paper, made again with the ships as late as they are: a call that finds the
+                # quay full for any part of its stay is moved to when a ship there has left
+                plan = w["plan"].setdefault(r.quay, [])
+                plan[:] = [p for p in plan if p[1] > self._utc_of(old)]
+                wanted = berth_t
+                while True:
+                    over = [p for p in plan if p[0] < berth_t + r.stay and p[1] > berth_t]
+                    at = [berth_t] + [p[0] for p in over if p[0] > berth_t]
+                    if all(sum(p[2] for p in over if p[0] <= t < p[1]) + r.metres <= w["quay"][r.quay] for t in at):
+                        break
+                    berth_t = min(p[1] for p in over)
+                if berth_t > wanted:
+                    w["moved"] += 1
+                    w["moved_h"] += (berth_t - wanted).total_seconds() / 3600
+                plan.append((berth_t, berth_t + r.stay, r.metres))
+            ship = self._container(r, arrival, departure, berth_t)
+            if ship.spawn_t >= 0:                           # due before the run starts: the warm-up replaces it
+                self.pending.append(ship)
+
+    @staticmethod
+    def _utc_of(local):
+        """A local clock time of the schedule's time zone as UTC."""
+        return local.tz_localize(SCHEDULE_TZ, ambiguous=True, nonexistent="shift_forward").tz_convert("UTC")
+
     def _container(self, r, arrival, departure, berth_t):
         """A container ship for schedule line r berthing at berth_t, with its scheduled arrival / departure."""
-        code = r.terminal or self.rng.choice(self.codes.index, p=self.codes.to_numpy())    # missing code: drawn
+        code = r.terminal or self.rng_att.choice(self.codes.index, p=self.codes.to_numpy())    # missing code: drawn
         spawn = self.minutes(berth_t) - ENTRY_LEAD_H * 60
-        dims = CC.dimensions_for_teu(r.teu, self.rng)
+        dims = CC.dimensions_for_teu(r.teu, self.rng_att)
+        if pd.notna(departure):
+            stay_h = (departure - arrival).total_seconds() / 3600
+        else:                                # no departure in the schedule: the stay of a call of its size
+            pool = self.stays.get(cranes_for(r.teu))
+            pool = pool if pool is not None and len(pool) else self.stays_all
+            stay_h = float(pool[int(self.rng_att.integers(len(pool)))])
         zone = None
         if code not in TERMINAL_OF_CODE:
             zones = CC.TERMINAL_LOCATION.get(code, {}).get("zones") or {"antwerp_right_bank_docks": 1.0}
             zone = max(zones, key=zones.get)
         ship = Ship(id=f"C{next(self.counter):04d}", cls="container", loa=round(min(dims["loa"], MAX_LOA_M), 1),
                     beam=round(min(dims["beam"], MAX_BEAM_M), 1), draught=round(min(dims["draught"], 16.0), 2), level=1,
-                    source=EP.sample_source("container", self.rng, category="sea"),
+                    source=EP.sample_source("container", self.rng_att, category="sea"),
                     destination=zone or "antwerp_terminal", spawn_t=spawn, teu=float(r.teu), name=r.vessel,
                     terminal=TERMINAL_OF_CODE.get(code), berth_zone=zone,
                     schedule={"code": code, "arrival": arrival, "departure": departure,
                               "arrival_min": self.minutes(arrival),
-                              "departure_min": self.minutes(departure) if pd.notna(departure) else None},
-                    moves=container_moves(r.teu, self.rng), cranes_wanted=cranes_for(r.teu))
+                              "departure_min": self.minutes(departure) if pd.notna(departure) else None,
+                              # when it is to berth: the schedule and its delay (the engine times its entry by it)
+                              "berth_min": self.minutes(berth_t)},
+                    stay_h=stay_h, cranes_wanted=cranes_for(r.teu))
         if zone:
-            ship.dwell_h = (r.departure - r.arrival).total_seconds() / 3600 if pd.notna(r.departure) else 24.0
+            ship.dwell_h = stay_h
         return ship
 
     def _containers_nhpp(self, t0, dt):
@@ -180,7 +298,7 @@ class Generator:
                * f["rate_factor"] * dt / 60.0)
         out = []
         for _ in range(self.rng.poisson(lam)):
-            r = self.calls.iloc[int(self.rng.integers(len(self.calls)))]
+            r = self.calls.iloc[int(self.rng_att.integers(len(self.calls)))]
             u = float(self.rng.uniform(0, dt))
             berth_t = berth + pd.Timedelta(minutes=u)
             stay = r.departure - r.arrival if pd.notna(r.departure) else None
@@ -200,8 +318,10 @@ class Generator:
         for cls in BACKGROUND_CLASSES:
             for source, rate in EP.RATE_PER_HOUR[cls].items():
                 lam = rate * EP.HOURLY_FACTOR[cls][hour] * dt / 60.0
+                if cls in INLAND_CLASSES:
+                    lam *= INLAND_TRIP_SCALE
                 for _ in range(self.rng.poisson(lam)):
-                    dest = BT.sample_destination(cls, self.rng, source)
+                    dest = BT.sample_destination(cls, self.rng_att, source)
                     a = self._fitting_attributes(cls, source, dest)
                     loa = float(a["loa"])
                     ship = Ship(id=f"B{next(self.counter):05d}", cls=cls, loa=loa,
@@ -217,7 +337,7 @@ class Generator:
         ends = [source, dest[5:] if dest.startswith("exit_") else dest]
         limits = [CANAL_LIMITS[e] for e in ends if e in CANAL_LIMITS]
         for _ in range(100):
-            a = BT.sample_attributes(cls, self.rng, dest)
+            a = BT.sample_attributes(cls, self.rng_att, dest)
             loa = float(a["loa"])
             beam = float(a["beam"] or loa / 7)
             if all(loa <= L and beam <= B for L, B in limits):
@@ -227,6 +347,8 @@ class Generator:
     def arrivals(self, t0, dt):
         """Ships entering in [t0, t0 + dt) minutes."""
         out = []
+        if self.weeks is not None:
+            self._weeks_until(t0)
         while self.pending and self.pending[0].spawn_t < t0 + dt:
             out.append(self.pending.pop(0))
         if self.nhpp is not None:
