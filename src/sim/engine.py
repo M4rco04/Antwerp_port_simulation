@@ -1837,6 +1837,16 @@ class Simulation:
         valves["total"] = int(sum(valves.values()))
         valves["per_1000_ships"] = round(1000.0 * valves["total"] / max(len(ships), 1), 1)
         out["release_valves"] = valves
+        # lock passages a day after the warm-up, inland craft and sea-going ships (to set against the AIS counts,
+        # port_infrastructure.LOCK_PASSAGES, and Rijkswaterstaat's)
+        days = max(self.t - self.warmup_min, DT_MIN) / 1440.0
+        passed = {}
+        for s in self.done + self.ships:
+            kind = "inland" if s.cls.startswith("inland") else "sea_going"
+            for e in s.log:
+                if e["event"] == "in_lock" and e["t"] >= self.warmup_min:
+                    passed[f"{e['lock']}.{kind}"] = passed.get(f"{e['lock']}.{kind}", 0) + 1
+        out["locks"] = {k: round(v / days, 1) for k, v in sorted(passed.items())}
         # container ships against their berth time (the schedule and its delay)
         c = done[(done["class"] == "container") & done.moored_min.notna() & done.planned_berth_min.notna()]
         if len(c):

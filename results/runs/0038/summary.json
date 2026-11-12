@@ -1,0 +1,30 @@
+{
+  "steps": 318,
+  "days": 1.1,
+  "stopped_early": true,
+  "stop_reason": "stopped manually",
+  "start": "2026-10-21 00:00:00+00:00",
+  "warmup_min": 10080.0,
+  "step_min": 5.0,
+  "ships_generated": 304,
+  "removed_infeasible": 0,
+  "ships_finished_after_warmup": 0,
+  "still_in_area": 186,
+  "per_class": {},
+  "utilisation_mean": {
+    "tugs_busy": 0.86,
+    "pilot_boats_busy": 1.52,
+    "boatmen_busy": 0.24,
+    "pilots_busy_dock": 1.65,
+    "pilots_busy_river": 6.66,
+    "pilots_busy_sea": 7.53
+  },
+  "anchored_mean": 1.19,
+  "release_valves": {
+    "encounter_rule_overridden": 0,
+    "depth_hold_overridden": 0,
+    "squeeze_past": 9,
+    "total": 9,
+    "per_1000_ships": 29.6
+  }
+}

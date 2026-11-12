@@ -67,10 +67,13 @@ MAX_LOA_M, MAX_BEAM_M = 400.0, 61.5
 BACKGROUND_CLASSES = ("bulk_general", "tanker", "inland_cargo", "inland_tanker", "passenger")
 # Inland arrivals are scaled to Rijkswaterstaat's lock counts: commercial passages a day at Kreekrak 189 and
 # Hansweert 113 (NMCA 2017, 69,058 and 41,112 a year) and Terneuzen 126 (IVS90 2018, Deltares 2021), 428 in all,
-# where the AIS rates gave 130, 75 and 92 (297; 12-day run, seed 69). The AIS hears an inland craft in about a
-# third of its snapshots and misses trips out and back; the gap is alike at the three locks (x 1.37-1.51). The
-# inland stays are divided by the same factor (engine), so that the craft lying in port stay at the AIS number.
-INLAND_TRIP_SCALE = round(428 / 297, 2)
+# 11 of them sea-going ships in the model. The AIS rates give 311 inland passages a day there (fits of 12 Nov
+# 2026, three 21-day runs: 447 with the factor 1.44 of the fits before, 194, 116 and 137 at the three locks), so
+# the factor is (428 - 11) / 311. The AIS hears an inland craft in about a third of its snapshots and misses
+# trips out and back; the gap is alike at the three locks. The inland stays are divided by the same factor
+# (engine), so that the craft lying in port stay at the AIS number. Set again after every re-fit of the rates
+# (the run's summary gives the passages a day per lock).
+INLAND_TRIP_SCALE = round((428 - 11) / 311, 2)
 INLAND_CLASSES = ("inland_cargo", "inland_tanker")
 # canals reached only through a lock: the largest chamber's length and width (environment LOCKS):
 # a ship entering from or leaving to them must fit (Kreekrak, Hansweert, Royers)
@@ -152,7 +155,7 @@ class Generator:
             self.stays = {b: stay[(df.teu.map(cranes_for) == b) & stay.notna()].to_numpy() for b in set(df.teu.map(cranes_for))}
             self.stays_all = stay[stay.notna()].to_numpy()
             if container_mode == "replay":
-                self._schedule(df)
+                self._schedule(df, quay_m or {})
             elif container_mode == "nhpp":
                 self.calls = df.reset_index(drop=True)
                 self.nhpp = fit_container_nhpp(df)
@@ -171,9 +174,20 @@ class Generator:
         return (ts - self.start).total_seconds() / 60.0
 
     # ------------------------------------------------------------------ containers
-    def _schedule(self, df):
+    def _schedule(self, df, quay_m):
+        """Replay: every schedule line is one ship. The berth plan is made again on paper with the delays, as
+        in weeks mode (_plan_berth), where the terminal's quay is known."""
+        self.replay = {"plan": {}, "moved": 0, "moved_h": 0.0}
         for r in df.itertuples():
             berth_t = r.arrival + pd.Timedelta(hours=CC.sample_arrival_delay(self.rng) if self.delays else 0.0)
+            quay = TERMINAL_OF_CODE.get(r.terminal)
+            if quay in quay_m and pd.notna(r.departure):
+                wanted = berth_t
+                berth_t = self._plan_berth(self.replay["plan"].setdefault(quay, []), berth_t, r.departure - r.arrival,
+                                           CC.dimensions_for_teu(r.teu)["loa"] + QUAY_GAP_M, quay_m[quay])
+                if berth_t > wanted:
+                    self.replay["moved"] += 1
+                    self.replay["moved_h"] += (berth_t - wanted).total_seconds() / 3600
             ship = self._container(r, r.arrival, r.departure, berth_t)
             if ship.spawn_t < 0:             # due before the run starts: the warm-up replaces it
                 continue
@@ -231,24 +245,31 @@ class Generator:
             departure = arrival + r.stay if pd.notna(r.stay) else pd.NaT
             berth_t = arrival + pd.Timedelta(hours=CC.sample_arrival_delay(self.rng) if self.delays else 0.0)
             if pd.notna(r.quay) and pd.notna(r.stay):
-                # the berth plan on paper, made again with the ships as late as they are: a call that finds the
-                # quay full for any part of its stay is moved to when a ship there has left
                 plan = w["plan"].setdefault(r.quay, [])
                 plan[:] = [p for p in plan if p[1] > self._utc_of(old)]
                 wanted = berth_t
-                while True:
-                    over = [p for p in plan if p[0] < berth_t + r.stay and p[1] > berth_t]
-                    at = [berth_t] + [p[0] for p in over if p[0] > berth_t]
-                    if all(sum(p[2] for p in over if p[0] <= t < p[1]) + r.metres <= w["quay"][r.quay] for t in at):
-                        break
-                    berth_t = min(p[1] for p in over)
+                berth_t = self._plan_berth(plan, berth_t, r.stay, r.metres, w["quay"][r.quay])
                 if berth_t > wanted:
                     w["moved"] += 1
                     w["moved_h"] += (berth_t - wanted).total_seconds() / 3600
-                plan.append((berth_t, berth_t + r.stay, r.metres))
             ship = self._container(r, arrival, departure, berth_t)
             if ship.spawn_t >= 0:                           # due before the run starts: the warm-up replaces it
                 self.pending.append(ship)
+
+    @staticmethod
+    def _plan_berth(plan, berth_t, stay, metres, quay_m):
+        """The berth plan on paper, made again with the ships as late as they are: a call that finds the quay
+        full for any part of its stay (the lengths of the ships there, with their gaps, against the quay) is
+        moved to when a ship there has left. plan: the terminal's [(from, until, metres)], added to. Returns the
+        berth time."""
+        while True:
+            over = [p for p in plan if p[0] < berth_t + stay and p[1] > berth_t]
+            at = [berth_t] + [p[0] for p in over if p[0] > berth_t]
+            if all(sum(p[2] for p in over if p[0] <= t < p[1]) + metres <= quay_m for t in at):
+                break
+            berth_t = min(p[1] for p in over)
+        plan.append((berth_t, berth_t + stay, metres))
+        return berth_t
 
     @staticmethod
     def _utc_of(local):

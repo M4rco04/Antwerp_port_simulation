@@ -293,7 +293,9 @@ def lock_passages(df, ships):
             continue
         lock = n["lock"]
         ends = [np.mean([[graph.nodes[m]["x"], graph.nodes[m]["y"]] for m in lock.sides[s]["nodes"]], axis=0) for s in ("a", "b")]
-        width = max(c.width_m for c in lock.chambers)
+        # all the chambers side by side, 30 m of wall between two: the widest chamber alone, about the line
+        # between the two Kreekrak chambers, caught 17 or 43 passages a day as the graph's lock cells moved
+        width = sum(c.width_m for c in lock.chambers) + 30.0 * (len(lock.chambers) - 1)
         i = np.flatnonzero(shapely.distance(points, shapely.LineString(ends)) < width / 2 + 15)
         if len(i):
             first = np.r_[True, (mmsi[i][1:] != mmsi[i][:-1]) | (seconds[i][1:] - seconds[i][:-1] > 3 * 3600)]

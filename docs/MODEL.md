@@ -1,6 +1,6 @@
 # Antwerp Port Simulation — Mathematical Model and Mechanics
 
-As of 11 November 2026.
+As of 12 November 2026.
 
 ## 1. Overview
 
@@ -20,7 +20,7 @@ The model is built from seventeen datasets. Each one supplies either geometry, w
 
 | Dataset | Source | What is taken from it | How |
 | --- | --- | --- | --- |
-| AIS snapshots | Every 5 min, the whole area; 3,014 snapshots from 26 Oct to 6 Nov 2026 | Arrival rates, entry points, ship sizes, destinations, berth and anchorage times, berth use, tug and pilot-boat bases, mooring times, dock speeds, pilot demand, fairway centrelines, the area sea traffic uses, current calibration | The pipeline of §2.1 |
+| AIS snapshots | Every 5 min, the whole area; 4,581 snapshots from 26 Oct to 12 Nov 2026 | Arrival rates, entry points, ship sizes, destinations, berth and anchorage times, berth use, tug and pilot-boat bases, mooring times, dock speeds, pilot demand, fairway centrelines, the area sea traffic uses, current calibration | The pipeline of §2.1 |
 | Container schedule | Liner calls 20 Oct–9 Dec 2026, two files read together: vessel, TEU, scheduled berth arrival and departure, terminal code (466 calls, 7 whole weeks) | Container arrivals (replayed, drawn as whole weeks, or fitted), TEU per call, terminal, time at the berth | §6.1 |
 | Depth chart | Rijkswaterstaat 20 m bed levels (surveys to 2024) converted to LAT with the NLLAT2018 separation; EMODnet bathymetry (\~115 m) elsewhere; blended over 200 m | Depth below LAT of every sea, Western Scheldt and Dutch port cell | Cell value = chart value at the cell (§3.2) |
 | Port soundings | Port of Antwerp-Bruges sounded bed levels (TAW), 5 m raster | Depths of the Zeeschelde and the Antwerp docks | Median of the raster within 25 m of the cell, TAW converted to LAT (§3.2) |
@@ -45,7 +45,7 @@ The model is built from seventeen datasets. Each one supplies either geometry, w
 3. **Classes.** Container: the name is in the schedule, is a container line's name, or the ship is cargo of 250 m or more. Sea-going bulk/general cargo and tankers: a valid IMO number. Inland cargo and inland tankers: no valid IMO number and LOA ≥ 50 m. Passenger ships. Service craft and unknown types are dropped.
 4. **Scheldt only.** A visit is kept if the ship gets east of the Vlissingen–Breskens line, enters a Scheldt port or canal, or waits with a Scheldt destination. North Sea through traffic and Zeebrugge-only calls are dropped.
 5. **Entry point.** Each visit is assigned the place it entered by: a sea gate (west, north or south-west edge of the area), an anchorage (widened by 1.5 km), or a port or canal box.
-6. **Censoring.** A ship first seen within 20 minutes of a collector start was already in the area and is not an arrival. The observed exposure is the collector's uptime: T = 244.3 h for the current fits.
+6. **Censoring.** A ship first seen within 20 minutes of a collector start was already in the area and is not an arrival. The observed exposure is the collector's uptime: T = 374.9 h for the current fits (all four fitted modules are made from the same record).
 7. **Stops.** A stop is lying still (< 1 kn) for at least 30 minutes within 1 km. It is a berth stop, an anchorage stop or other. In a lock zone a stop under 3 h is a lock passage, not a berth call.
 
 From these, the fitted quantities are:
@@ -72,7 +72,7 @@ From these, the fitted quantities are:
 \begin{pmatrix}\ln \mathrm{LOA}\\ \ln B\\ \ln T\end{pmatrix} = \begin{pmatrix}3.204\\1.405\\0.788\end{pmatrix} + \begin{pmatrix}0.277\\0.259\\0.190\end{pmatrix}\ln \mathrm{TEU} + L\,z, \qquad z \sim N(0, I_3)
 ```
 
-- **Schedule delay:** actual start of the AIS berth stop minus the scheduled arrival; drawn by resampling the observed values. Lines and calls of a ship are paired one to one within ±84 h (half a week: a weekly service's call is never paired with the line of another week), and only lines scheduled at least 84 h inside the AIS period count, so that no delay within the window goes unseen: 38 calls, mean 36 h, median 37 h, standard deviation 26 h. The delay is real, not a pairing error: matched calls lie at their line's terminal, stay as long as scheduled (departure delay minus arrival delay: mean −0.4 h) and mostly keep their order at a terminal (Kendall τ 0.6 to 1.0). Nine in ten container ships sail from the sea to their berth without anchoring (median 6.3 h), so the delay is lateness at sea, not waiting in the area.
+- **Schedule delay:** actual start of the AIS berth stop minus the scheduled arrival; drawn by resampling the observed values. Lines and calls of a ship are paired one to one within ±84 h (half a week: a weekly service's call is never paired with the line of another week), and only lines scheduled at least 84 h inside the AIS period count, so that no delay within the window goes unseen: 55 calls, mean 29 h, median 30 h, standard deviation 32 h. The delay is real, not a pairing error: matched calls lie at their line's terminal, stay as long as scheduled (departure delay minus arrival delay: mean −0.4 h) and mostly keep their order at a terminal (Kendall τ 0.6 to 1.0). Nine in ten container ships sail from the sea to their berth without anchoring (median 6.3 h), so the delay is lateness at sea, not waiting in the area.
 - **Port infrastructure:** berth use per class (berth stops ≥ 0.5 h within 150 m of a berth; a tanker berth has ≥ 2 tanker calls making ≥ 50 % of its calls); tug and pilot-boat bases (600 m clusters of their stops with ≥ 50 vessel-hours from ≥ 2 vessels); mooring and unmooring times (§15.3); dock speeds (median and 95th percentile of sea-going ships under way per dock basin); the most ships needing a pilot at once per zone (§13).
 - **Geometry:** the fairway centrelines are fitted to the tracks of large ships, and the sea grid covers only where Scheldt traffic sails (§3.1). Ships' speeds over ground calibrate the Western Scheldt currents (§4.4).
 
@@ -242,11 +242,11 @@ The forecast used for the 3 h trend is the simulated weather itself: the model a
 
 Container ships come from the liner schedule, either replayed or as a Poisson process fitted to it; every other class arrives by a non-homogeneous Poisson process fitted to AIS.
 
-Inland arrivals are scaled to Rijkswaterstaat's lock counts by the factor k = 1.44. The counts are commercial passages a day at Kreekrak (189), Hansweert (113) and Terneuzen (126), 428 in all, against 297 with the AIS rates. The AIS hears an inland craft in only about a third of its snapshots and misses trips out and back, and the gap is alike at the three locks (×1.37 to ×1.51). Inland stays are divided by k, so that the number of craft lying in port stays at the AIS value (arrivals × stay is unchanged).
+Inland arrivals are scaled to Rijkswaterstaat's lock counts by the factor k = 1.34. The counts are commercial passages a day at Kreekrak (189), Hansweert (113) and Terneuzen (126), 428 in all, of which 11 are sea-going ships in the model; the AIS rates alone give 311 inland passages a day at the three locks, so k = (428 − 11) / 311. It is set again after every re-fit of the rates (it was 1.44 with the fits of 6 November; a run's summary gives the passages a day per lock). The AIS hears an inland craft in only about a third of its snapshots and misses trips out and back, and the gap is alike at the three locks. Inland stays are divided by k, so that the number of craft lying in port stays at the AIS value (arrivals × stay is unchanged).
 
 ### 6.1 Container ships
 
-**Replay mode.** Every schedule line is one ship. Its berth time is the scheduled arrival plus a delay Δ drawn from the 38 observed delays (resampled with replacement; switchable off), and it enters the area 8 h before that:
+**Replay mode.** Every schedule line is one ship. Its berth time is the scheduled arrival plus a delay Δ drawn from the 55 observed delays (resampled with replacement; switchable off); the berth plan is then made again on paper as in weeks mode (below), and the ship enters the area 8 h before its berth time:
 
 ```math
 t_{\mathrm{berth}} = t_{\mathrm{sched}} + \Delta, \qquad t_{\mathrm{enter}} = t_{\mathrm{berth}} - 8\,\mathrm{h}

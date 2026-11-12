@@ -21,8 +21,8 @@ Things set aside on 10 November 2026, with what each one waits for.
 
 ## Schedule delay
 
-- **Delay sample.** Re-fitted on 11 November 2026 with a one-to-one match within ±84 h: 38 calls, mean 36 h,
-  standard deviation 26 h. The delay is real (MODEL.md §3), but the sample is small, and the second schedule
+- **Delay sample.** Re-fitted on 12 November 2026 with a one-to-one match within ±84 h: 55 calls, mean 29 h,
+  standard deviation 32 h (38 calls, 36 h and 26 h three days of AIS earlier: it still moves). The delay is real (MODEL.md §3), but the sample is small, and the second schedule
   file lies after the AIS record so far. Re-fit when the AIS record covers it. Still open: whether delays at a
   terminal go together (too few calls per terminal to tell), and why the schedule runs a day and a half early.
 

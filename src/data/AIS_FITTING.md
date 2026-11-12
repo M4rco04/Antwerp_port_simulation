@@ -89,8 +89,13 @@ Rerun: `py src/data/fit_port_infrastructure.py`, then rebuild the graph (`py src
 
 ## Data used by the current fits
 
-Refitted 2026-11-06 on 3,014 snapshots (2026-10-26 to 2026-11-06): 1,977,944 positions of 4,354 ships, with 244
-observed hours of entries (123 h in the fits before).
+Refitted 2026-11-12 on 4,581 snapshots (2026-10-26 to 2026-11-12): 2,988,514 positions of 5,003 ships, with 375
+observed hours of entries (244 h in the fits before). All four fitted modules are made from this record; the graph
+cache was rebuilt after it (berth use and dock speeds are read when the graph is built).
+
+Lock passages a day (LOCK_PASSAGES) are counted across all the chambers of a lock. Counting within the widest
+chamber's width of one line missed a chamber of the twin locks: Kreekrak 71 inland passages a day, not 17 or 43;
+Hansweert 48, not 17.
 
 A few things to know when reading the fits:
 - **Inland visits are split where a craft left the area.** An inland craft under way on one side of a silence of
