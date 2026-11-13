@@ -1,0 +1,16 @@
+{
+  "label": "baseline",
+  "reps": 5,
+  "seed": 401,
+  "start": "2026-10-21 00:00",
+  "days": 24.0,
+  "warmup": 11.0,
+  "delays": true,
+  "background": true,
+  "weather": "bootstrap",
+  "containers": "replay",
+  "container_rate": 1.0,
+  "bunching": true,
+  "routing": "lanes",
+  "checks": false
+}

@@ -37,7 +37,8 @@ Things set aside on 10 November 2026, with what each one waits for.
 
 - **Lock outages and maintenance.** Not modelled. A natural scenario later.
 - **Lock times.** The Antwerp locks use data/equipment/locks.csv with the operating time set half-way between its
-  two readings (operation time, passage time), on the AIS passage times (MODEL.md §14, §19). Open: confirm at the
+  two readings (operation time, passage time), on the AIS passage times (MODEL.md §14, §19); at Boudewijn and Van
+  Cauwelaert the AIS reads it as the passage time. Open: confirm at the
   source which it is; Kattendijk's 45 min is long for so small a lock; a sea-going ship's entry and exit times
   (12 and 8 min) are still assumed; the Terneuzen new lock is still assumed (ask North Sea Port).
 
@@ -51,8 +52,9 @@ Things set aside on 10 November 2026, with what each one waits for.
 
 ## Validation gaps (MODEL.md §19)
 
-- **Lock queues.** Time to pass Terneuzen, Hansweert and Boudewijn–Van Cauwelaert is 30 to 90 % above the AIS, all
-  of it waiting in the queue. Needs the chamber assignment rules (Terneuzen: which ships use which of the three
+- **Lock queues.** Inland craft take 21 to 34 % longer than the AIS to pass Terneuzen, Hansweert,
+  Boudewijn–Van Cauwelaert and Zandvliet–Berendrecht (sea-going ships agree): the locks answer ships only once
+  they are there, where a lock master times the chamber to the barges coming. Needs the chamber assignment rules (Terneuzen: which ships use which of the three
   chambers) and the cycle of the Boudewijn and Van Cauwelaert chambers; ask Rijkswaterstaat / North Sea Port and
   the harbour master.
 - **Sea-going voyages into and between the docks** are short (Kallo, Boudewijn–Van Cauwelaert, river beyond

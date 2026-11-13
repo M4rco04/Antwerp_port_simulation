@@ -75,7 +75,10 @@ def _antwerp_operating_min(path=Path(__file__).resolve().parents[2] / "data" / "
     Berendrecht to 1 km beyond, 1.4 h at Kieldrecht and 1.3 h at Boudewijn and Van Cauwelaert; the first
     reading gave 1.35, 1.0 and 1.3 h, the second would give a third of an hour more at each. The operating
     time is set half-way: the figure less half the entry and exit of the ships the lock takes (LockTimes:
-    12 + 8 min sea-going; 2 + 1.5 min at Royers and Kattendijk, which take inland craft)."""
+    12 + 8 min sea-going; 2 + 1.5 min at Royers and Kattendijk, which take inland craft).
+    At Boudewijn and Van Cauwelaert (PASSAGE_TIME_LOCKS) the AIS decides for the passage time: half-way
+    (30 and 35 min) inland craft took 2.1 h to pass where the AIS has 1.1 h, sea-going ships 1.9 h against
+    1.3 h, Van Cauwelaert working all day. There the figure less the whole entry and exit is the operating time."""
     t, out = LockTimes(), {}
     if not path.exists():
         return out
@@ -83,11 +86,15 @@ def _antwerp_operating_min(path=Path(__file__).resolve().parents[2] / "data" / "
         cells = [c.strip() for c in line.split(";")]
         if len(cells) >= 2 and cells[0] and cells[1]:
             ship = t.small_entry_min + t.small_exit_min if cells[0] in BARGE_LOCKS else t.entry_min + t.exit_min
-            out[cells[0]] = max(float(cells[1]) - ship / 2, 4.0)
+            share = 1.0 if cells[0] in PASSAGE_TIME_LOCKS else 0.5
+            out[cells[0]] = max(float(cells[1]) - ship * share, 4.0)
     return out
 
 
 BARGE_LOCKS = ("Royers", "Kattendijk")
+# the locks whose figure in data/equipment/locks.csv the AIS reads as the time of a whole passage (calibrated,
+# MODEL.md §19)
+PASSAGE_TIME_LOCKS = ("Boudewijn", "Van Cauwelaert")
 OPERATING_MIN.update(_antwerp_operating_min())
 
 
@@ -215,19 +222,25 @@ class Lock:
         return best
 
     def _chamber_order(self, c, ship):
-        """Fill a chamber before starting another, as a lock master does: first a chamber whose group on the
-        ship's side (waiting, or in it and loading) it still packs into, the biggest group first; else the fewest
-        waiting, preferably at its level. Taking the chamber with the fewest waiting spread the traffic over the
-        chambers: Terneuzen's three carried 1.2 ships a lockage where Rijkswaterstaat counted about 1.8 of the
-        classes modelled (IVS90, 2014 and 2018)."""
+        """First a chamber open at the ship's side and not taking ships out the other way, that it packs into with
+        those in it and waiting there (it can go in at once); then fill a chamber before starting another, as a
+        lock master does: a chamber whose group on the ship's side (waiting, or in it and loading) it still packs
+        into, the biggest group first; else the fewest waiting, preferably at its level. Taking the chamber with
+        the fewest waiting spread the traffic over the chambers: Terneuzen's three carried 1.2 ships a lockage
+        where Rijkswaterstaat counted about 1.8 of the classes modelled (IVS90, 2014 and 2018). Filling first
+        without the first rule sent a barge to wait for a chamber across the canal while another stood open at its
+        side: inland craft took 1.4 h to pass Terneuzen and 1.05 h Hansweert where the AIS has 0.9 and 0.7 h
+        (validation, MODEL.md §19)."""
         side = ship.from_side
         group = list(c.queue[side])
         if c.side == side and c.state == "open":
             group += [p.ship for p in c.ships if p.ship.from_side == side]
-        joins = (bool(group) and not ship.exclusive and not any(s.exclusive for s in group)
-                 and not (c.reserved_for and c.reserved_for != ship.ship_id)
-                 and pack(c.length_m, c.width_m, group + [ship], self.times.gap_long_m, self.times.gap_side_m) is not None)
-        return (not joins, -len(group) if joins else len(c.queue[side]) + (c.side != side), c.width_m)
+        free = not ship.exclusive and not any(s.exclusive for s in group) and not (c.reserved_for and c.reserved_for != ship.ship_id)
+        joins = bool(group) and free and pack(c.length_m, c.width_m, group + [ship], self.times.gap_long_m,
+                                              self.times.gap_side_m) is not None
+        ready = (free and c.side == side and c.state == "open" and not any(p.ship.from_side != side for p in c.ships)
+                 and (joins or not group))
+        return (not ready, not joins, -len(group) if joins else len(c.queue[side]) + (c.side != side), c.width_m)
 
     def reserve(self, ship_id, from_min, chamber_name=None):
         """Keep a chamber for one ship only, from a given time (ULCV, regs §8.9)."""

@@ -103,7 +103,8 @@ SEA_CALL_PLACES = ("ghent_terneuzen_canal",)
 # (6 km added gave 21 % and 28 %, and 2.5 km 30 % with Boudewijn and Van Cauwelaert overrun: 141 passages a day
 # against 94, 2.7 h to pass). As metres of route added to those locks for an inland craft (calibrated,
 # MODEL.md §19)
-INLAND_SEA_LOCK_COST_M = {"Zandvliet": 1200.0, "Berendrecht": 1200.0, "Kieldrecht": 1000.0}
+# (Kieldrecht 1000 and 1500 m: 59 % of the left bank's at Kieldrecht, 38 a day against 25, Kallo 27 against 23)
+INLAND_SEA_LOCK_COST_M = {"Zandvliet": 1200.0, "Berendrecht": 1200.0, "Kieldrecht": 2000.0}
 # locks side by side: which one a ship takes is a matter of which is free, not of 500 m of route, so each
 # ship draws one by the AIS shares (LOCK_PASSAGES); the nearer one used to get them all
 TWIN_LOCKS = (("Zandvliet", "Berendrecht"), ("Boudewijn", "Van Cauwelaert"))
@@ -113,6 +114,11 @@ TWIN_LOCKS = (("Zandvliet", "Berendrecht"), ("Boudewijn", "Van Cauwelaert"))
 # docks: lanes and keep-right); the AIS has one in three and one in five (validation, MODEL.md §19). Each
 # sea-going ship draws a complex per dock system by the AIS shares (LOCK_PASSAGES), as for the twins
 LOCK_COMPLEXES = ((("Zandvliet", "Berendrecht"), ("Boudewijn", "Van Cauwelaert")), (("Kieldrecht",), ("Kallo",)))
+# ... times a factor on the second complex of each system: drawn by the shares alone, 17 % of the right bank's
+# sea-going passages went by Boudewijn and Van Cauwelaert and 27 % of the left bank's by Kallo, where the AIS has
+# 21 % and 33 % (a ship too wide or too deep for the complex it drew takes the other one, and those are all ships
+# that drew the smaller locks). Calibrated (MODEL.md §19)
+LOCK_COMPLEX_FACTOR = {("Boudewijn", "Van Cauwelaert"): 1.32, ("Kallo",): 1.35}
 BERENDRECHT_MIN_BEAM_M = 43.0          # regs §8.9: ships this wide prefer Berendrecht
 SEA_EXITS = ("exit_sea_southwest", "exit_sea_west", "exit_sea_north")
 SEA_EXIT_STATION = {"sea_north": "pilot_station_steenbank"}        # else Wandelaar: the pilot leaves there
@@ -132,7 +138,18 @@ LOCK_RESERVE_LEAD_MIN = 60.0           # a ULCV's chamber is reserved this long 
 #   arrivals    when ships arrive (generator)        attributes  what they are (generator)
 #   weather     the weather sequence                 service     durations: stays, mooring, anchor waits, draught change
 #   choice      berths, exits, next calls, locks     movement    tie-breaks in the right of way
-STREAMS = ("arrivals", "attributes", "weather", "service", "choice", "movement")
+#   speed       each ship's own speed (SPEED_SPREAD)
+STREAMS = ("arrivals", "attributes", "weather", "service", "choice", "movement", "speed")
+# Ships of one class do not all sail at one speed: each ship's speed through the water is its class's times a
+# factor drawn once, lognormal with this standard deviation of the logarithm (median 1), kept within
+# SPEED_FACTOR_RANGE. With one speed per class the 90th percentiles of the sailing times were 12 to 17 % short of
+# the AIS (3.05 h against 3.50 h from km 8 to km 62) with the medians right. Calibrated (MODEL.md §19)
+SPEED_SPREAD = 0.10
+SPEED_FACTOR_RANGE = (0.75, 1.30)
+# The anchor stay of a ship that enters the area at anchor, as a factor on the fitted one: bulk carriers lay 3.9 at
+# anchor at once where the AIS has 5.6 (some of them stop at the river anchorages on the way, which the model does
+# not do; their time is added here). Calibrated (MODEL.md §19)
+ANCHOR_WAIT_FACTOR = {"bulk_general": 1.25}        # (1.35: 6.4 at anchor)
 # events that are release valves: a rule given up so that the model keeps moving. Their rate is a result (summary)
 RELEASE_VALVES = ("encounter_rule_overridden", "depth_hold_overridden", "squeeze_past")
 STATION_OF_SOURCE = {"sea_north": "pilot_station_steenbank", "anchorage_other": "pilot_station_steenbank"}      # else Wandelaar
@@ -347,7 +364,8 @@ class Simulation:
                     if ship.beam >= BERENDRECHT_MIN_BEAM_M and "Berendrecht" in complexes[0]:
                         avoid += list(complexes[1])        # Berendrecht only (below)
                         continue
-                    w = np.array([sum(PI.LOCK_PASSAGES.get(l, {}).get(group, 0.0) for l in c) for c in complexes], dtype=float)
+                    w = np.array([sum(PI.LOCK_PASSAGES.get(l, {}).get(group, 0.0) for l in c) * LOCK_COMPLEX_FACTOR.get(c, 1.0)
+                                  for c in complexes], dtype=float)
                     if w.sum() <= 0:
                         continue
                     pick = int(self.rng.choice(len(complexes), p=w / w.sum()))
@@ -1001,7 +1019,9 @@ class Simulation:
             b = self.tidal_route(station, nodes[len(nodes) // 2], ship) if nodes else None
             lead = None
             if a is not None and b is not None:
+                own, ship.speed_factor = ship.speed_factor, 1.0     # at its class's speed: the plan is kept per class
                 minutes = sum(float(self.vts._times(ship, np.asarray(r, dtype=np.int64))[-1]) for r in (a, b) if len(r) > 1)
+                ship.speed_factor = own
                 lead = (minutes + BOARDING_MIN + PILOT_CHANGE_MIN * max(len(self.pilot_stretches(b)) - 1, 0)
                         + PI.mooring_minutes(ship.loa, "arrival", "dock" if self.route_has_lock(b) else "tidal"))
             self.lead_min[key] = lead
@@ -1033,6 +1053,7 @@ class Simulation:
         self.n_entered += 1
         self.terminal_draught(ship)
         ship.arrival_draught = ship.draught
+        ship.speed_factor = float(np.clip(math.exp(self.streams["speed"].normal(0.0, SPEED_SPREAD)), *SPEED_FACTOR_RANGE))
         ship.set_state(State.SPAWNED, now, source=ship.source, destination=ship.destination, cls=ship.cls)
         if getattr(ship, "slowed_min", 0.0):
             ship.note(now, "virtual_arrival", minutes=ship.slowed_min)
@@ -1056,7 +1077,8 @@ class Simulation:
                 # it lay at anchor before it asks (AIS: anchor stays of a median 11-24 h; asking at once made
                 # three in four anchor stays last minutes)
                 wait = getattr(ship, "anchor_wait_h", None)
-                ship.anchor_until = now + 60.0 * (wait if wait is not None else BT.sample_anchorage_wait(ship.cls, self.rng_service))
+                ship.anchor_until = now + 60.0 * (wait if wait is not None else ANCHOR_WAIT_FACTOR.get(ship.cls, 1.0)
+                                                  * BT.sample_anchorage_wait(ship.cls, self.rng_service))
                 self.vts.request(ship, now)            # it waits at anchor for its clearance like any arrival
             else:                                      # no pilot needed: it weighs anchor and sails
                 self.anchorages[ship.anchorage].leave(ship.id, now)

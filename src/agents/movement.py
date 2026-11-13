@@ -126,6 +126,11 @@ class Mover:
             if key in inland:
                 m = (self.zone_label == zone) & ~(self.inland_limit_kn <= approach)
                 self.inland_limit_kn[m] = inland[key][NR.SPEED_PERCENTILE]
+        # ... and at the locks the inland craft's own approach speed (AIS 3.1 kn), not the sea-going ships' 2.5 kn:
+        # inland craft took 1.05 h to pass Hansweert where the AIS has 0.67 h (validation, MODEL.md §19)
+        if "lock_approach" in inland:
+            m = np.isin(self.zone_label, ("dock", "canal")) & (fg.speed_limit_kn <= approach)
+            self.inland_limit_kn[m] = inland["lock_approach"][NR.SPEED_PERCENTILE]
         self.vis_cap = None
         self.denied = set()
         self.ships = {}                                        # key -> Ship on the mesh

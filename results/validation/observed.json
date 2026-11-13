@@ -1,0 +1,577 @@
+{
+ "meta": {
+  "first": "2026-10-26 01:00:16+00:00",
+  "last": "2026-11-12 01:28:08+00:00",
+  "snapshots": 4581,
+  "days_counted": 15,
+  "ais_container_class_per_day": 11.2,
+  "ais_antwerp_calls_per_day": 40.1
+ },
+ "numbers": {
+  "flow.sea.sea_going": {
+   "value": 78.86666666666666,
+   "se": 2.4589325339157244,
+   "n": 15
+  },
+  "flow.km08.sea_going": {
+   "value": 106.06666666666666,
+   "se": 3.4880294159237257,
+   "n": 15
+  },
+  "flow.km08.inland": {
+   "value": 12.733333333333333,
+   "se": 0.7068822672005145,
+   "n": 15
+  },
+  "flow.km32.sea_going": {
+   "value": 80.86666666666666,
+   "se": 1.5912458930232916,
+   "n": 15
+  },
+  "flow.km32.inland": {
+   "value": 179.0,
+   "se": 10.533845677714513,
+   "n": 15
+  },
+  "flow.km48.sea_going": {
+   "value": 80.46666666666667,
+   "se": 1.7261756978020926,
+   "n": 15
+  },
+  "flow.km48.inland": {
+   "value": 92.0,
+   "se": 5.881366864129135,
+   "n": 15
+  },
+  "flow.km62.sea_going": {
+   "value": 80.8,
+   "se": 1.46774851874758,
+   "n": 15
+  },
+  "flow.km62.inland": {
+   "value": 91.4,
+   "se": 5.577847340361776,
+   "n": 15
+  },
+  "flow.km68.sea_going": {
+   "value": 46.06666666666667,
+   "se": 1.7250718871609432,
+   "n": 15
+  },
+  "flow.km68.inland": {
+   "value": 132.06666666666666,
+   "se": 6.568660562649098,
+   "n": 15
+  },
+  "flow.km72.sea_going": {
+   "value": 22.933333333333334,
+   "se": 1.9891770652270742,
+   "n": 15
+  },
+  "flow.km72.inland": {
+   "value": 103.26666666666667,
+   "se": 4.535013694174386,
+   "n": 15
+  },
+  "flow.km80.sea_going": {
+   "value": 5.2,
+   "se": 0.7508725083591247,
+   "n": 15
+  },
+  "flow.km80.inland": {
+   "value": 51.733333333333334,
+   "se": 4.651130601586658,
+   "n": 15
+  },
+  "flow.km88.sea_going": {
+   "value": 2.7333333333333334,
+   "se": 0.6652365613371551,
+   "n": 15
+  },
+  "flow.km88.inland": {
+   "value": 46.4,
+   "se": 4.63506305499823,
+   "n": 15
+  },
+  "port.antwerp_calls": {
+   "value": 38.099999999999994,
+   "se": 0.8000000000000007,
+   "n": null
+  },
+  "lockpass.Zandvliet-Berendrecht.sea_going": {
+   "value": 40.06666666666667,
+   "se": 1.262901672704821,
+   "n": 15
+  },
+  "lockpass.Zandvliet-Berendrecht.inland": {
+   "value": 71.13333333333334,
+   "se": 5.107293260078614,
+   "n": 15
+  },
+  "lockpass.Boudewijn-Van Cauwelaert.sea_going": {
+   "value": 10.8,
+   "se": 1.1347330292271605,
+   "n": 15
+  },
+  "lockpass.Boudewijn-Van Cauwelaert.inland": {
+   "value": 93.46666666666667,
+   "se": 3.448763293409428,
+   "n": 15
+  },
+  "lockpass.Royers-Kattendijk.sea_going": {
+   "value": 0.0,
+   "se": 0.0,
+   "n": 15
+  },
+  "lockpass.Royers-Kattendijk.inland": {
+   "value": 0.4,
+   "se": 0.2894987457822984,
+   "n": 15
+  },
+  "lockpass.Kieldrecht.sea_going": {
+   "value": 11.0,
+   "se": 0.5345224838248488,
+   "n": 15
+  },
+  "lockpass.Kieldrecht.inland": {
+   "value": 25.4,
+   "se": 2.137644453487017,
+   "n": 15
+  },
+  "lockpass.Kallo.sea_going": {
+   "value": 5.533333333333333,
+   "se": 0.69602043392737,
+   "n": 15
+  },
+  "lockpass.Kallo.inland": {
+   "value": 23.333333333333332,
+   "se": 1.128280050792299,
+   "n": 15
+  },
+  "lockpass.Terneuzen.sea_going": {
+   "value": 26.933333333333334,
+   "se": 2.107733304414883,
+   "n": 15
+  },
+  "lockpass.Terneuzen.inland": {
+   "value": 133.0,
+   "se": 8.38479349207611,
+   "n": 15
+  },
+  "lockpass.Hansweert.sea_going": {
+   "value": 0.4666666666666667,
+   "se": 0.16523191974188067,
+   "n": 15
+  },
+  "lockpass.Hansweert.inland": {
+   "value": 103.06666666666666,
+   "se": 4.64703353064303,
+   "n": 15
+  },
+  "lockpass.Kreekrak.sea_going": {
+   "value": 0.4,
+   "se": 0.2138089935299395,
+   "n": 15
+  },
+  "lockpass.Kreekrak.inland": {
+   "value": 186.2,
+   "se": 6.6584711529928615,
+   "n": 15
+  },
+  "underway.dock.inland": {
+   "value": 27.02445919984155,
+   "se": 1.1003832232263924,
+   "n": 15
+  },
+  "underway.dock.sea_going": {
+   "value": 2.8449476629035453,
+   "se": 0.09150076155485451,
+   "n": 15
+  },
+  "underway.river.inland": {
+   "value": 25.549577837195482,
+   "se": 1.4646915982320967,
+   "n": 15
+  },
+  "underway.river.sea_going": {
+   "value": 13.196417458902753,
+   "se": 0.25825643056355957,
+   "n": 15
+  },
+  "underway.sea.inland": {
+   "value": 0.6547722321251733,
+   "se": 0.04220952815234684,
+   "n": 15
+  },
+  "underway.sea.sea_going": {
+   "value": 10.11876440879382,
+   "se": 0.30251158036624565,
+   "n": 15
+  },
+  "pilots.dock.mean": {
+   "value": 3.1955620915032674,
+   "se": 0.11090264728593419,
+   "n": 15
+  },
+  "pilots.dock.p95": {
+   "value": 6.933333333333334,
+   "se": 0.2481678899199121,
+   "n": 15
+  },
+  "pilots.river.mean": {
+   "value": 13.375261685482275,
+   "se": 0.28496562782824814,
+   "n": 15
+  },
+  "pilots.river.p95": {
+   "value": 19.893333333333327,
+   "se": 0.5520495721932319,
+   "n": 15
+  },
+  "pilots.sea.mean": {
+   "value": 11.200753367003369,
+   "se": 0.30838297470442266,
+   "n": 15
+  },
+  "pilots.sea.p95": {
+   "value": 16.666666666666668,
+   "se": 0.44365008376579484,
+   "n": 15
+  },
+  "transit.km08_to_km62.in.median": {
+   "value": 2.666388888888893,
+   "se": 0.038567668906437015,
+   "n": 481
+  },
+  "transit.km08_to_km62.in.p90": {
+   "value": 3.499444444444392,
+   "se": 0.07546853296303326,
+   "n": 481
+  },
+  "transit.km08_to_km62.out.median": {
+   "value": 2.499722222222226,
+   "se": 0.042136750476758675,
+   "n": 493
+  },
+  "transit.km08_to_km62.out.p90": {
+   "value": 3.25,
+   "se": 0.04051904325737366,
+   "n": 493
+  },
+  "transit.km32_to_km48.in.median": {
+   "value": 1.1666666666666667,
+   "se": 0.004651095661417839,
+   "n": 542
+  },
+  "transit.km32_to_km48.in.p90": {
+   "value": 1.6666666666666667,
+   "se": 0.042214795649343946,
+   "n": 542
+  },
+  "transit.km32_to_km48.out.median": {
+   "value": 1.1666666666666667,
+   "se": 0.017226655735342645,
+   "n": 459
+  },
+  "transit.km32_to_km48.out.p90": {
+   "value": 1.5833333333333333,
+   "se": 0.04198895447056155,
+   "n": 459
+  },
+  "transit.sea_to_km08.in.median": {
+   "value": 1.8333333333333333,
+   "se": 0.023733514500123808,
+   "n": 456
+  },
+  "transit.sea_to_km08.in.p90": {
+   "value": 2.4166666666666665,
+   "se": 0.05408727122743431,
+   "n": 456
+  },
+  "transit.sea_to_km08.out.median": {
+   "value": 1.6666666666666667,
+   "se": 0.012353887539005293,
+   "n": 487
+  },
+  "transit.sea_to_km08.out.p90": {
+   "value": 2.1997777777778023,
+   "se": 0.04586045811815945,
+   "n": 487
+  },
+  "locktime.Boudewijn-Van Cauwelaert.inland.median": {
+   "value": 1.0833333333333333,
+   "se": 0.03937809048718139,
+   "n": 415
+  },
+  "locktime.Boudewijn-Van Cauwelaert.inland.p90": {
+   "value": 1.8831666666666709,
+   "se": 0.08015754148371082,
+   "n": 415
+  },
+  "locktime.Boudewijn-Van Cauwelaert.sea_going.median": {
+   "value": 1.3333333333333333,
+   "se": 0.07583109479805629,
+   "n": 45
+  },
+  "locktime.Boudewijn-Van Cauwelaert.sea_going.p90": {
+   "value": 1.9166666666666667,
+   "se": 0.20632001662865843,
+   "n": 45
+  },
+  "locktime.Hansweert.inland.median": {
+   "value": 0.6666666666666666,
+   "se": 0.013152488410521062,
+   "n": 464
+  },
+  "locktime.Hansweert.inland.p90": {
+   "value": 1.5833333333333333,
+   "se": 0.11028365256453272,
+   "n": 464
+  },
+  "locktime.Kallo.inland.median": {
+   "value": 0.9166666666666666,
+   "se": 0.06469339963759517,
+   "n": 104
+  },
+  "locktime.Kallo.inland.p90": {
+   "value": 2.1414722222222253,
+   "se": 0.32352261390086035,
+   "n": 104
+  },
+  "locktime.Kallo.sea_going.median": {
+   "value": 1.25,
+   "se": 0.05845100172368928,
+   "n": 44
+  },
+  "locktime.Kallo.sea_going.p90": {
+   "value": 1.9166666666666667,
+   "se": 0.5727283117889399,
+   "n": 44
+  },
+  "locktime.Kieldrecht.inland.median": {
+   "value": 1.0,
+   "se": 0.0566307415695878,
+   "n": 160
+  },
+  "locktime.Kieldrecht.inland.p90": {
+   "value": 1.8416666666666661,
+   "se": 0.19305321159496913,
+   "n": 160
+  },
+  "locktime.Kieldrecht.sea_going.median": {
+   "value": 1.4166666666666667,
+   "se": 0.03881822525912904,
+   "n": 87
+  },
+  "locktime.Kieldrecht.sea_going.p90": {
+   "value": 1.8666666666666731,
+   "se": 0.1307301938796156,
+   "n": 87
+  },
+  "locktime.Kreekrak.inland.median": {
+   "value": 0.8333333333333334,
+   "se": 0.03707889834460848,
+   "n": 819
+  },
+  "locktime.Kreekrak.inland.p90": {
+   "value": 1.5833333333333333,
+   "se": 0.05841356459623647,
+   "n": 819
+  },
+  "locktime.Terneuzen.inland.median": {
+   "value": 0.9166666666666666,
+   "se": 0.004133735241600503,
+   "n": 938
+  },
+  "locktime.Terneuzen.inland.p90": {
+   "value": 1.8333333333333333,
+   "se": 0.05484134191470394,
+   "n": 938
+  },
+  "locktime.Terneuzen.sea_going.median": {
+   "value": 1.0,
+   "se": 0.037236433710047215,
+   "n": 150
+  },
+  "locktime.Terneuzen.sea_going.p90": {
+   "value": 1.4166666666666667,
+   "se": 0.06385137100214115,
+   "n": 150
+  },
+  "locktime.Zandvliet-Berendrecht.inland.median": {
+   "value": 1.2494444444444526,
+   "se": 0.04197930587698726,
+   "n": 549
+  },
+  "locktime.Zandvliet-Berendrecht.inland.p90": {
+   "value": 2.1666666666666665,
+   "se": 0.08028201258041413,
+   "n": 549
+  },
+  "locktime.Zandvliet-Berendrecht.sea_going.median": {
+   "value": 1.75,
+   "se": 0.03063355353433869,
+   "n": 258
+  },
+  "locktime.Zandvliet-Berendrecht.sea_going.p90": {
+   "value": 2.2498055555555583,
+   "se": 0.05923983469800071,
+   "n": 258
+  },
+  "stock.container.in_area": {
+   "value": 29.678203703703698,
+   "se": 0.7395572740023093,
+   "n": 15
+  },
+  "stock.container.at_berth": {
+   "value": 20.0667762345679,
+   "se": 0.6087226455708434,
+   "n": 15
+  },
+  "stock.container.at_anchor": {
+   "value": 2.0583503086419754,
+   "se": 0.2192539129253839,
+   "n": 15
+  },
+  "stock.bulk_general.in_area": {
+   "value": 77.35094675925926,
+   "se": 2.2033195399920817,
+   "n": 15
+  },
+  "stock.bulk_general.at_berth": {
+   "value": 55.68548919753086,
+   "se": 1.9092253813975304,
+   "n": 15
+  },
+  "stock.bulk_general.at_anchor": {
+   "value": 5.619322530864197,
+   "se": 0.36836080950658945,
+   "n": 15
+  },
+  "stock.tanker.in_area": {
+   "value": 67.3731674382716,
+   "se": 1.0646643538774012,
+   "n": 15
+  },
+  "stock.tanker.at_berth": {
+   "value": 42.36960339506173,
+   "se": 0.9663189285811046,
+   "n": 15
+  },
+  "stock.tanker.at_anchor": {
+   "value": 9.64106790123457,
+   "se": 0.379171212578353,
+   "n": 15
+  },
+  "stock.inland_cargo.in_area": {
+   "value": 225.91481944444448,
+   "se": 3.2567900943525974,
+   "n": 15
+  },
+  "stock.inland_cargo.at_berth": {
+   "value": 161.02144367283952,
+   "se": 3.375071991830002,
+   "n": 15
+  },
+  "stock.inland_cargo.at_anchor": {
+   "value": 1.074882716049383,
+   "se": 0.12976647805094046,
+   "n": 15
+  },
+  "stock.inland_tanker.in_area": {
+   "value": 217.87071064814816,
+   "se": 4.4371435264842685,
+   "n": 15
+  },
+  "stock.inland_tanker.at_berth": {
+   "value": 156.32607330246915,
+   "se": 7.25417040489691,
+   "n": 15
+  },
+  "stock.inland_tanker.at_anchor": {
+   "value": 0.8681874999999999,
+   "se": 0.16138604868847528,
+   "n": 15
+  },
+  "container.at_terminals": {
+   "value": 12.422935185185189,
+   "se": 0.4119469661959206,
+   "n": 15
+  },
+  "container.stay.median": {
+   "value": 24.91583333333333,
+   "se": 1.1939775009900186,
+   "n": 143
+  },
+  "container.anchoring_share": {
+   "value": 0.12080536912751678,
+   "se": 0.026698846456930426,
+   "n": 149
+  },
+  "container.sea_to_berth.median": {
+   "value": 4.916666666666667,
+   "se": 0.06348055208283883,
+   "n": 132
+  },
+  "container.sea_to_berth.p90": {
+   "value": 5.824722222222227,
+   "se": 4.007837578813216,
+   "n": 132
+  },
+  "container.delay.mean": {
+   "value": 28.856363636363636,
+   "se": 4.371146413384964,
+   "n": 55
+  },
+  "container.delay.sd": {
+   "value": 32.417289417819205,
+   "se": 3.866103365999829,
+   "n": 55
+  },
+  "arrivals.bulk_general": {
+   "value": 29.83416,
+   "se": 1.3819897052723638,
+   "n": 466
+  },
+  "arrivals.tanker": {
+   "value": 18.50304,
+   "se": 1.0883521624216368,
+   "n": 289
+  },
+  "arrivals.inland_cargo": {
+   "value": 145.2668088,
+   "se": 3.405723195089963,
+   "n": 1819
+  },
+  "arrivals.inland_tanker": {
+   "value": 95.31353520000002,
+   "se": 2.8091663405767333,
+   "n": 1151
+  },
+  "arrivals.passenger": {
+   "value": 5.058,
+   "se": 0.5690328164751662,
+   "n": 79
+  },
+  "arrivals.container": {
+   "value": 11.842306415899113,
+   "se": 0.8341547720297381,
+   "n": 201
+  },
+  "rws.Kreekrak": {
+   "value": 189.0,
+   "se": null,
+   "n": null
+  },
+  "rws.Hansweert": {
+   "value": 113.0,
+   "se": null,
+   "n": null
+  },
+  "rws.Terneuzen": {
+   "value": 126.0,
+   "se": null,
+   "n": null
+  }
+ }
+}

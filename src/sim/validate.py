@@ -69,6 +69,11 @@ TRANSIT_MAX_H = 12.0
 # a ship being moored or unmoored, or taking or changing its pilot, lies at a node while a timer runs in the
 # model; a real one is moving then (the AIS mooring times run from 1 km off the berth): under way on both sides
 MANOEUVRING = ("mooring", "unmooring", "boarding", "pilot_change")
+# a ship lying at a berth or in a port is heard by the AIS where it lies; in the model it gets a fix there too, lying
+# still. Without one, a craft that called within 2 km of a lock and then passed it was timed from its last fix
+# before the call: a sixth of the inland passages of Terneuzen took over 2.5 h, their 90th percentile 3.4 h
+# where the AIS has 1.8 h
+LYING = ("at_berth", "dwell_port")
 # sea-going ships calling at Antwerp a day, from the port's own statistics: 13,655 in 2020, 10,608 from January
 # to September 2021 (Port of Antwerp press releases): 37.3 and 38.9 a day. In the fixes: sea-going ships passing
 # km 48 up-river (nothing but Antwerp lies beyond for them)
@@ -263,10 +268,10 @@ def model_frame(sim, geo):
     # the ships manoeuvring (MANOEUVRING): a fix at their node every step until their next record
     p = p.sort_values(["ship", "step"], kind="stable")
     until = p.step.shift(-1).where(p.ship.eq(p.ship.shift(-1)), sim.k + 1)
-    still = p[(p.route < 0) & p.state.isin(MANOEUVRING)].assign(until=until)
+    still = p[(p.route < 0) & p.state.isin(MANOEUVRING + LYING)].assign(until=until)
     # (a pilot changed at a lock boards in the chamber, where a real ship lies still: only at sea and on the river)
     z = geo.zone[still.value.to_numpy().astype(np.int64)]
-    still = still[still.state.isin(("mooring", "unmooring")) | np.isin(z, ("sea", "river"))]
+    still = still[still.state.isin(("mooring", "unmooring") + LYING) | np.isin(z, ("sea", "river"))]
     reps = (still.until - still.step).clip(lower=1).astype(int).to_numpy()
     s_ship = np.repeat(still.ship.to_numpy(), reps)
     s_step = np.repeat(still.step.to_numpy(), reps) + np.concatenate([np.arange(r) for r in reps]) if len(reps) else np.array([], dtype=int)
@@ -274,7 +279,7 @@ def model_frame(sim, geo):
     ship = np.r_[m.ship.to_numpy(), s_ship]
     step = np.r_[m.step.to_numpy(), s_step]
     node = np.r_[node, s_node]
-    kn = np.r_[np.nan_to_num(kn), np.full(len(s_node), UNDER_WAY_KN)]
+    kn = np.r_[np.nan_to_num(kn), np.repeat(np.where(still.state.isin(LYING), 0.0, UNDER_WAY_KN), reps)]
     by = sim.by_id
     cls = pd.Series(ship).map(lambda i: by[i].cls)
     f = pd.DataFrame({"id": ship, "t": step * STEP_MIN, "cls": cls.to_numpy(),

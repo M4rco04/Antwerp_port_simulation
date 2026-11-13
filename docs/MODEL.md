@@ -331,7 +331,7 @@ Every rule in the model keys on a handful of flags derived from a ship's class, 
 | Gas tanker (IMO2) | Sea-going tanker in hazard category A |
 | Under-keel clearance | 10 % of T for sea-going ships (at most 0.6 m behind the locks), 0.3 m for inland craft |
 
-**Speed through the water.** Container ships, bulk carriers and tankers sail at the planning speeds of the joint nautical rules, by leg and direction, times a sailing factor; other classes at a class speed.
+**Speed through the water.** Container ships, bulk carriers and tankers sail at the planning speeds of the joint nautical rules, by leg and direction, times a sailing factor; other classes at a class speed. Each ship's speed is its class's times a factor of its own, drawn once, lognormal with median 1 and a standard deviation of the logarithm of 0.10, kept within 0.75 to 1.30 (calibrated, §19): with one speed for a whole class the 90th percentiles of the sailing times were 12 to 17 % short. Planned voyage times (the berth time, §6.1) use the class speed.
 
 | Class | Arriving, sea | Arriving, river | Leaving, sea | Leaving, river |
 | --- | --- | --- | --- | --- |
@@ -510,7 +510,7 @@ h_{\min}(n) \;\ge\; \sum_g A_{ng}\, \min_t L_g(t) + c_n
 
 **Cache.** Routes are cached by (start, target, depth need on tidal water and in the docks in 0.5 m classes, LOA in 25 m classes, beam in 5 m classes, lane profile, locks avoided). A detour search that failed is not repeated within the same hour.
 
-**Locks.** Royers and Kattendijk, which AIS shows almost nobody using, are taken only when there is no other way. A sea-going ship draws first the lock complex into each dock system by the AIS shares of sea-going passages: Zandvliet–Berendrecht or Boudewijn–Van Cauwelaert for the right bank (four in five, one in five), Kieldrecht or Kallo for the left bank (two in three, one in three). Which complex a ship takes is the lock planners' choice, not the shortest route: by route Kallo is 3 to 6 km longer to every left-bank berth and no ship took it, and the river beyond Zandvliet (lanes, keep-right) cost more than the docks, so one in six took Boudewijn or Van Cauwelaert (§19). Then of the locks side by side (Zandvliet and Berendrecht, Boudewijn and Van Cauwelaert) each ship draws one by the AIS shares of sea-going or inland passages. A ship takes a lock it did not draw only if its choice will not do (size, sill); ships at least 43 m wide prefer Berendrecht (regs §8).
+**Locks.** Royers and Kattendijk, which AIS shows almost nobody using, are taken only when there is no other way. A sea-going ship draws first the lock complex into each dock system by the AIS shares of sea-going passages: Zandvliet–Berendrecht or Boudewijn–Van Cauwelaert for the right bank (four in five, one in five), Kieldrecht or Kallo for the left bank (two in three, one in three). The share of the second complex is weighted up (Boudewijn–Van Cauwelaert × 1.32, Kallo × 1.35, calibrated, §19): a ship too wide or too deep for the complex it drew takes the other one, and those are all ships that drew the smaller locks, so by the shares alone 17 % of the right bank's sea-going passages went by Boudewijn–Van Cauwelaert and 27 % of the left bank's by Kallo, where the AIS has 21 % and 33 %. Which complex a ship takes is the lock planners' choice, not the shortest route: by route Kallo is 3 to 6 km longer to every left-bank berth and no ship took it, and the river beyond Zandvliet (lanes, keep-right) cost more than the docks, so one in six took Boudewijn or Van Cauwelaert (§19). Then of the locks side by side (Zandvliet and Berendrecht, Boudewijn and Van Cauwelaert) each ship draws one by the AIS shares of sea-going or inland passages. Inland craft take the sea locks at the head of the big docks only when they save that much route: 1.2 km is added to a passage of Zandvliet or Berendrecht and 2 km to one of Kieldrecht (calibrated, §19). A ship takes a lock it did not draw only if its choice will not do (size, sill); ships at least 43 m wide prefer Berendrecht (regs §8).
 
 **Feasibility.** Whether a ship can ever reach a target is tested once per ship size with one search from the source to all cells at the usual high water. A voyage that fails it is removed rather than left waiting forever.
 
@@ -608,7 +608,7 @@ v_{\mathrm{SOG}} = \min\Big( v_{\mathrm{STW}} + r\,u\cos\alpha,\; v_{\mathrm{lim
 ```
 
 - v\_STW is the sailing speed of the ship's class, leg and direction (§7: the planning speed times its sailing factor); the current term is §4.4.
-- v\_limit is the cell's limit (AIS dock speed in the docks and lock approaches; none on the river), and within 1,500 m of a lock at most the dock speed. Not before a berth: the mooring time (§15.3), fitted on the AIS from 1 km off the berth to lying still, holds that approach, and slowing as well counted it twice (sea-going ships under way in the docks 3.9 at once against 2.8 in the AIS, §19).
+- v\_limit is the cell's limit (AIS dock speed in the docks and lock approaches, inland craft their own: 7.0 kn in the docks, 7.2 kn in the canals, 3.1 kn in the lock approaches where sea-going ships keep 2.5 kn; none on the river), and within 1,500 m of a lock at most the dock speed. Not before a berth: the mooring time (§15.3), fitted on the AIS from 1 km off the berth to lying still, holds that approach, and slowing as well counted it twice (sea-going ships under way in the docks 3.9 at once against 2.8 in the AIS, §19).
 - In restricted visibility (assumed values): at most 8 kn below 1,000 m and 5 kn below 500 m.
 
 ## 12. Anchorages
@@ -625,7 +625,7 @@ An arriving ship that the VTS cannot clear goes to the nearest anchorage it is a
 
 Among the allowed ones with room, the ship takes the sea anchorages first, which lie outside the pilotage area, then the nearest one, if its route (at the run's lowest water, else the deep channel) passes the tide check. To any but a sea anchorage it takes a sea pilot, who leaves at the anchorage. If none can be reached, or no pilot is free, it waits where it is and the VTS sends it at its next round.
 
-A ship that enters the area at an anchorage lies there for a draw from the fitted anchor stay (§2.1) before it asks the VTS. That stay is fitted on the sea anchorages only (Westhinder, Oostdyck, Schouwenbank), where these ships lie, and scaled so that arrivals × mean stay gives the number of bulk carriers, tankers and container ships at anchor there (Little's law, as for the inland stays). The arrivals are the entries from those anchorages; the anchor stops also hold departing ships and ships anchoring again, and with them the stays came out too short. The scaling may lengthen a stay by a quarter at most (the tail is an extrapolation): tankers 69 h against 61 h fitted, bulk carriers 46 h, container ships 37 h. One container ship in nine (the AIS share of their entries) comes in at anchor: it enters its anchor stay earlier than it would and lies at Westhinder (or the anchorage drawn) before it asks for clearance, so that it still berths at its berth time; slowed at sea instead, as all of them were, the model had 0.4 container ships at anchor against 2.1. The ships at anchor are the hours of their anchor stops over the length of the record: 4.1 bulk carriers and 8.6 tankers at Westhinder. Counted by the fixes heard lying at anchor they were 1.5 and 3.1, because an anchored ship that far out is heard in two snapshots of five, and the stays were scaled to 14 and 21 h where the stops give 40 and 58 h (validation, §19).
+A ship that enters the area at an anchorage lies there for a draw from the fitted anchor stay (§2.1) before it asks the VTS. That stay is fitted on the sea anchorages only (Westhinder, Oostdyck, Schouwenbank), where these ships lie, and scaled so that arrivals × mean stay gives the number of bulk carriers, tankers and container ships at anchor there (Little's law, as for the inland stays). The arrivals are the entries from those anchorages; the anchor stops also hold departing ships and ships anchoring again, and with them the stays came out too short. The scaling may lengthen a stay by a quarter at most (the tail is an extrapolation): tankers 69 h against 61 h fitted, bulk carriers 46 h, container ships 37 h. A bulk carrier's drawn stay is then multiplied by 1.25 (calibrated, §19): about 1.2 of the 5.6 bulk carriers at anchor in the AIS lie at the river anchorages (Everingen, Rede Vlissingen), stopping on the way in, which the model does not do; their time is added to the stay at sea. One container ship in nine (the AIS share of their entries) comes in at anchor: it enters its anchor stay earlier than it would and lies at Westhinder (or the anchorage drawn) before it asks for clearance, so that it still berths at its berth time; slowed at sea instead, as all of them were, the model had 0.4 container ships at anchor against 2.1. The ships at anchor are the hours of their anchor stops over the length of the record: 4.1 bulk carriers and 8.6 tankers at Westhinder. Counted by the fixes heard lying at anchor they were 1.5 and 3.1, because an anchored ship that far out is heard in two snapshots of five, and the stays were scaled to 14 and 21 h where the stops give 40 and 58 h (validation, §19).
 
 **Room.** Anchorage areas are official polygons, official circles, or the hull of their boundary buoys where only those are published. A ship at anchor swings round its anchor on a circle of radius
 
@@ -702,7 +702,7 @@ Each lock is a resource of one or more chambers, each running its own cycle of c
 
 **Waiting berths.** A ship bound into a lock joins its queue when it is 800 m from the gate: it waits at the lock's waiting berths in the outer harbour, off the approach channel, so ships coming out of the lock find the approach free. A ship leaving a lock is put back on the mesh at the gate only when there is room; until then it waits in the chamber.
 
-**Choosing a chamber.** A ship queues at a chamber that is big enough (LOA ≤ length, B ≤ width) and deep enough (T + UKC ≤ sill depth + level). Like a lock master, it fills one chamber before starting another: it joins the chamber whose group on its side (waiting, or inside and still loading) it still packs into, the biggest group first. Only when there is no such group does it take the chamber with the fewest ships waiting on its side, preferring one already at its level, then the narrowest. (Taking the fewest-waiting chamber every time spread the traffic over Terneuzen's three chambers, giving 1.2 ships per lockage where Rijkswaterstaat's registrations give about 1.8 of the modelled classes, §2.) Each ship receives a turn number; a chamber's queue on each side is sorted by (VTS priority class, turn).
+**Choosing a chamber.** A ship queues at a chamber that is big enough (LOA ≤ length, B ≤ width) and deep enough (T + UKC ≤ sill depth + level). First it takes a chamber that lies open at its side, is not letting ships out the other way, and has room for it with those inside and waiting there: it can go in at once. (Without this rule a barge joined a group waiting for a chamber across the canal while another stood open at its side; inland craft took 1.4 h to pass Terneuzen and 1.05 h Hansweert where the AIS has 0.92 and 0.67 h, §19. Terneuzen now carries about 1.5 ships a lockage.) Otherwise, like a lock master, it fills one chamber before starting another: it joins the chamber whose group on its side (waiting, or inside and still loading) it still packs into, the biggest group first. Only when there is no such group does it take the chamber with the fewest ships waiting on its side, preferring one already at its level, then the narrowest. (Taking the fewest-waiting chamber every time spread the traffic over Terneuzen's three chambers, giving 1.2 ships per lockage where Rijkswaterstaat's registrations give about 1.8 of the modelled classes, §2.) Each ship receives a turn number; a chamber's queue on each side is sorted by (VTS priority class, turn).
 
 **Packing.** Ships in a chamber are placed by greedy first fit in two dimensions: ships sorted by (LOA descending, beam descending, turn), each placed at the first free corner, sorted by distance along then across the chamber, where its rectangle (LOA × B) fits inside the chamber and keeps 10 m lengthwise and 2 m sideways from every ship already placed. Every placement adds two new corners (behind it and beside it). The biggest ship thus goes at the front, and a later, smaller ship may fill a gap.
 
@@ -723,7 +723,7 @@ The gates wait so that a lockage carries more than one ship: up to 5 minutes fro
 
 The levels are the tide on the tidal side and the basin's fixed level on the other.
 
-Where Rijkswaterstaat gives a lock's operating time (closing, levelling and opening: "bedieningstijd schutproces", Capaciteit Zeeuwse sluizen, 2001), that time replaces steps 3 to 5, with half of it levelling and a quarter for each gate movement: Kreekrak 11 min, Hansweert 15 min, Terneuzen east chamber 20.5 min, Terneuzen west lock 26.5 min. The Antwerp locks take theirs from data/equipment/locks.csv: Zandvliet 40 min, Berendrecht 35, Kieldrecht 30, Kallo 30, Boudewijn 40, Van Cauwelaert 45, Royers 15, Kattendijk 45. Its source calls the figure operation time and passage time. As the time of one whole passage (the ship sails in, the gates close, the level is made, they open, it sails out) the operating time would be the figure less a ship's entry and exit; as the operating time alone it would be the figure itself. The AIS decides between the two as far as it can (§19): a sea-going ship takes 1.75 h from 1 km before Zandvliet or Berendrecht to 1 km beyond, 1.4 h at Kieldrecht and 1.3 h at Boudewijn and Van Cauwelaert, where the first reading gave 1.35, 1.0 and 1.3 h and the second would give a third of an hour more at each. The operating time is set half-way: the figure less half the entry and exit of the ships the lock takes (12 + 8 min sea-going; 2 + 1.5 min at Royers and Kattendijk, which take inland craft): 30, 25, 20, 20, 30, 35, 13 and 43 min. The new Terneuzen lock keeps the formula above. Entry and exit times are first estimates.
+Where Rijkswaterstaat gives a lock's operating time (closing, levelling and opening: "bedieningstijd schutproces", Capaciteit Zeeuwse sluizen, 2001), that time replaces steps 3 to 5, with half of it levelling and a quarter for each gate movement: Kreekrak 11 min, Hansweert 15 min, Terneuzen east chamber 20.5 min, Terneuzen west lock 26.5 min. The Antwerp locks take theirs from data/equipment/locks.csv: Zandvliet 40 min, Berendrecht 35, Kieldrecht 30, Kallo 30, Boudewijn 40, Van Cauwelaert 45, Royers 15, Kattendijk 45. Its source calls the figure operation time and passage time. As the time of one whole passage (the ship sails in, the gates close, the level is made, they open, it sails out) the operating time would be the figure less a ship's entry and exit; as the operating time alone it would be the figure itself. The AIS decides between the two as far as it can (§19): a sea-going ship takes 1.75 h from 1 km before Zandvliet or Berendrecht to 1 km beyond, 1.4 h at Kieldrecht and 1.3 h at Boudewijn and Van Cauwelaert, where the first reading gave 1.35, 1.0 and 1.3 h and the second would give a third of an hour more at each. The operating time is set half-way: the figure less half the entry and exit of the ships the lock takes (12 + 8 min sea-going; 2 + 1.5 min at Royers and Kattendijk, which take inland craft): 30, 25, 20, 20, 13 and 43 min at Zandvliet, Berendrecht, Kieldrecht, Kallo, Royers and Kattendijk. At Boudewijn and Van Cauwelaert the AIS reads the figure as the passage time (half-way, inland craft took 2.1 h to pass where the AIS has 1.1 h, sea-going ships 1.9 h against 1.3 h, and Van Cauwelaert was at work all day): the figure less the whole entry and exit, 20 and 25 min. The new Terneuzen lock keeps the formula above. Entry and exit times are first estimates.
 
 **Tidal gate.** A lock of the tidal-gate type lets ships pass straight through (10 min each) while the two levels differ by less than 0.10 m, and works as above otherwise.
 
@@ -881,7 +881,7 @@ The largest gaps are the simple VTS, the short AIS record, and a set of duration
 
 ## 19. Validation and calibration
 
-**Method.** `src/sim/validate.py` measures the model and the AIS record the same way. Both are a list of fixes every 5 minutes (who, when, where, how fast): the model's positions are turned into fixes at the mesh node of the bow, with a ship being moored, unmoored or taking a pilot at sea or on the river counted as moving, as a real one is. From those fixes it counts ships passing eight sections of the river and a line across the western approach (3.10° E), times passages between two sections, counts ships under way per zone and piloted ships under way, and finds lock passages as a ship changing basin (with the locks taken out the water falls apart into basins; the passage is timed from 1 km before the lock to 1 km beyond). What a list of fixes cannot give, because a ship lying still is heard in half the snapshots or fewer, comes from the stops of the AIS pipeline (hours of stops over the length of the record) and from the ships' states in the model: ships in the area, at a berth, at anchor. The record's uncertainty is its day-to-day spread over its 15 whole days (a bootstrap for medians); the model's is the spread of its replications. A number agrees when the difference is within twice the combined standard error or within a tolerance (15 % for most counts, 10 % for times, 25 % for inland counts).
+**Method.** `src/sim/validate.py` measures the model and the AIS record the same way. Both are a list of fixes every 5 minutes (who, when, where, how fast): the model's positions are turned into fixes at the mesh node of the bow, with a ship being moored, unmoored or taking a pilot at sea or on the river counted as moving, as a real one is, and a ship lying at a berth or in a port given a fix there, lying still, as the AIS hears it (without it a barge that called within 2 km of a lock and then passed it was timed from its last fix before the call: Kieldrecht's inland 90th percentile came out at 2.8 h against 1.8 h). From those fixes it counts ships passing eight sections of the river and a line across the western approach (3.10° E), times passages between two sections, counts ships under way per zone and piloted ships under way, and finds lock passages as a ship changing basin (with the locks taken out the water falls apart into basins; the passage is timed from 1 km before the lock to 1 km beyond). What a list of fixes cannot give, because a ship lying still is heard in half the snapshots or fewer, comes from the stops of the AIS pipeline (hours of stops over the length of the record) and from the ships' states in the model: ships in the area, at a berth, at anchor. The record's uncertainty is its day-to-day spread over its 15 whole days (a bootstrap for medians); the model's is the spread of its replications. A number agrees when the difference is within twice the combined standard error or within a tolerance (15 % for most counts, 10 % for times, 25 % for inland counts).
 
 Every number is labelled by what it can show: **I** input (the model draws it from that very number: a check of the generator), **C** calibrated (a parameter was set to fit it), **E** emergent (nothing was set to it). There is one AIS record (26 Oct to 12 Nov 2026) and the model was fitted on it (docs/PINNED.md: hold-out split), so the emergent numbers are the validation proper. Sailing times and lock passage times are calibrated numbers. Two numbers come from outside the AIS: Rijkswaterstaat's lock counts (2017, 2018) and the port's own count of sea-going calls (13,655 in 2020, 10,608 from January to September 2021: 37 to 39 a day).
 
@@ -907,6 +907,13 @@ py src/sim/validate.py compare results/replications/<id>_validation
 | Container ships at anchor 0.4 against 2.1 | All early ships slowed at sea | One in nine comes in at anchor (§12) |
 | Sea-going ships under way in the docks 3.9 against 2.8 | The last 1.5 km to a berth was sailed slowly and counted again in the mooring time | Slow approach only before locks (§11.6) |
 | Sea-going ships calling on the Ghent canal never came back out through Terneuzen | They left the model at the canal | They lie there and come back (§10.1) |
+| Inland craft took 2.1 h through Boudewijn–Van Cauwelaert against 1.1 h, sea-going ships 1.9 against 1.3 h | Van Cauwelaert, with four in five inland craft of the complex, locked all day (about 52 min a lockage, 28 a day); the lockage was 30 and 35 min half-way between the two readings of data/equipment/locks.csv | Its figure read as the passage time there: 20 and 25 min (§14); inland 1.4 h, sea-going 1.4 h |
+| Sea-going passages of Boudewijn–Van Cauwelaert 7.4 against 10.8 a day, of Kallo 3.6 against 5.5 | A ship that does not fit the complex it drew takes the other one: all of them ships that drew the smaller locks | The second complex's share weighted up, × 1.32 and × 1.35 (§10.2): 8.8 and 4.6 |
+| Inland craft through Kieldrecht 38 a day against 25 | 1 km added to its route did not keep them off it | 2 km (§10.2): 37 a day; the left bank's inland count is set by the canal scaling (below) |
+| Sailing-time 90th percentiles 12 to 17 % short | Every ship of a class sailed at one speed | A speed factor per ship (§7): 3 to 10 % short |
+| Bulk carriers at anchor 3.9 against 5.6 | Their stops at the river anchorages on the way are not modelled | Anchor stay × 1.25 (§12): 5.2 |
+| Kieldrecht inland 90th percentile 2.8 h against 1.8 h | The model gave no fix to a ship lying at a berth, so a call near a lock counted as time to pass it | A fix where it lies, as the AIS has (validation): 1.65 h |
+| Inland craft took 1.38 h through Terneuzen against 0.92 h, 1.05 h through Hansweert against 0.67 h; sea-going ships 1.31 h through Terneuzen against 1.0 h | A barge joined the group waiting for a chamber on the far side while another chamber stood open at its own side (median wait 29 min at Terneuzen); inland craft approached the locks at the sea-going ships' 2.5 kn | A chamber open at the ship's side with room comes first (§14); inland craft at their own AIS lock-approach speed, 3.1 kn (§11.6). Terneuzen 1.23 h inland, 1.12 h sea-going; Hansweert 0.84 h; Kreekrak 0.80 h (1.02 before) |
 
 **Result** (five 24-day replications on seeds not used while calibrating, warm-up 11 days; record ± a 95 % interval). "Model before" is the first comparison, left empty where the number's definition changed since.
 
@@ -925,128 +932,130 @@ py src/sim/validate.py compare results/replications/<id>_validation
 
 | | Kind | Record | Model before | Model | Difference | |
 | --- | --- | --- | --- | --- | --- | --- |
-| km 8, off Vlissingen: inland, passages a day | E | 12.7 ± 1.4 | 73.7 | 10.5 ± 0.3 | -17 % | agrees |
-| km 8, off Vlissingen: sea-going, passages a day | E | 106 ± 7 | 59.6 | 101 ± 2 | -5 % | agrees |
-| km 32, Terneuzen to Hansweert: inland, passages a day | E | 179 ± 21 | 174 | 173 ± 6 | -4 % | agrees |
-| km 32, Terneuzen to Hansweert: sea-going, passages a day | E | 80.9 ± 3.1 | 73.6 | 72.9 ± 2.3 | -10 % | agrees |
-| km 48, Hansweert to Bath: inland, passages a day | E | 92.0 ± 11.5 | 107 | 104 ± 4 | +13 % | agrees |
-| km 48, Hansweert to Bath: sea-going, passages a day | E | 80.5 ± 3.4 | 73.2 | 73.0 ± 2.3 | -9 % | agrees |
-| km 62, Bath to the Zandvliet locks: inland, passages a day | E | 91.4 ± 10.9 | 107 | 104 ± 4 | +13 % | agrees |
-| km 62, Bath to the Zandvliet locks: sea-going, passages a day | E | 80.8 ± 2.9 | 73.2 | 72.9 ± 2.4 | -10 % | agrees |
-| km 68, Zandvliet to Deurganckdok: inland, passages a day | E | 132 ± 13 | 111 | 124 ± 5 | -6 % | agrees |
-| km 68, Zandvliet to Deurganckdok: sea-going, passages a day | E | 46.1 ± 3.4 | 35.2 | 38.6 ± 2.3 | -16 % | differs |
-| km 72, Deurganckdok to Boudewijn: inland, passages a day | E | 103 ± 9 | 109 | 119 ± 3 | +16 % | agrees |
-| km 72, Deurganckdok to Boudewijn: sea-going, passages a day | E | 22.9 ± 3.9 | 4.23 | 15.9 ± 0.9 | -31 % | differs |
-| km 80, Kallo to Antwerp: inland, passages a day | E | 51.7 ± 9.1 | 75.9 | 64.4 ± 1.6 | +25 % | agrees |
-| km 80, Kallo to Antwerp: sea-going, passages a day | E | 5.20 ± 1.47 | 0.99 | 2.62 ± 0.76 | -50 % | differs |
-| km 88, above Antwerp: inland, passages a day | E | 46.4 ± 9.1 | 62.9 | 54.0 ± 1.3 | +16 % | agrees |
-| km 88, above Antwerp: sea-going, passages a day | E | 2.73 ± 1.30 | 0.46 | 1.15 ± 0.38 | -58 % | differs |
-| sea, 3.10°E (Wandelaar to Wielingen): sea-going, passages a day | E | 78.9 ± 4.8 | 66.5 | 71.5 ± 2.4 | -9 % | agrees |
-| sea-going ships calling at Antwerp (the port's statistics, 2020 and 2021), a day | E | 38.1 ± 1.6 |  | 36.8 ± 1.2 | -3 % | agrees |
+| km 8, off Vlissingen: inland, passages a day | E | 12.7 ± 1.4 | 73.7 | 10.5 ± 0.3 | -18 % | agrees |
+| km 8, off Vlissingen: sea-going, passages a day | E | 106 ± 7 | 59.6 | 101 ± 3 | -5 % | agrees |
+| km 32, Terneuzen to Hansweert: inland, passages a day | E | 179 ± 21 | 174 | 171 ± 6 | -4 % | agrees |
+| km 32, Terneuzen to Hansweert: sea-going, passages a day | E | 80.9 ± 3.1 | 73.6 | 73.0 ± 2.4 | -10 % | agrees |
+| km 48, Hansweert to Bath: inland, passages a day | E | 92.0 ± 11.5 | 107 | 102 ± 4 | +11 % | agrees |
+| km 48, Hansweert to Bath: sea-going, passages a day | E | 80.5 ± 3.4 | 73.2 | 73.0 ± 2.4 | -9 % | agrees |
+| km 62, Bath to the Zandvliet locks: inland, passages a day | E | 91.4 ± 10.9 | 107 | 102 ± 4 | +11 % | agrees |
+| km 62, Bath to the Zandvliet locks: sea-going, passages a day | E | 80.8 ± 2.9 | 73.2 | 73.0 ± 2.4 | -10 % | agrees |
+| km 68, Zandvliet to Deurganckdok: inland, passages a day | E | 132 ± 13 | 111 | 125 ± 4 | -5 % | agrees |
+| km 68, Zandvliet to Deurganckdok: sea-going, passages a day | E | 46.1 ± 3.4 | 35.2 | 39.4 ± 0.8 | -15 % | agrees |
+| km 72, Deurganckdok to Boudewijn: inland, passages a day | E | 103 ± 9 | 109 | 121 ± 4 | +18 % | agrees |
+| km 72, Deurganckdok to Boudewijn: sea-going, passages a day | E | 22.9 ± 3.9 | 4.23 | 17.2 ± 0.7 | -25 % | differs |
+| km 80, Kallo to Antwerp: inland, passages a day | E | 51.7 ± 9.1 | 75.9 | 63.2 ± 1.9 | +22 % | agrees |
+| km 80, Kallo to Antwerp: sea-going, passages a day | E | 5.20 ± 1.47 | 0.99 | 2.54 ± 0.39 | -51 % | differs |
+| km 88, above Antwerp: inland, passages a day | E | 46.4 ± 9.1 | 62.9 | 52.0 ± 2.4 | +12 % | agrees |
+| km 88, above Antwerp: sea-going, passages a day | E | 2.73 ± 1.30 | 0.46 | 1.28 ± 0.41 | -53 % | differs |
+| sea, 3.10°E (Wandelaar to Wielingen): sea-going, passages a day | E | 78.9 ± 4.8 | 66.5 | 72.1 ± 2.5 | -9 % | agrees |
+| sea-going ships calling at Antwerp (the port's statistics, 2020 and 2021), a day | E | 38.1 ± 1.6 |  | 36.8 ± 1.5 | -3 % | agrees |
 
 **Sailing times**
 
 | | Kind | Record | Model before | Model | Difference | |
 | --- | --- | --- | --- | --- | --- | --- |
 | sea-going, km 8 to km 62, median, h | C | 2.67 ± 0.08 | 2.95 | 2.68 ± 0.03 | +1 % | agrees |
-| sea-going, km 62 to km 8, median, h | C | 2.50 ± 0.08 | 3.32 | 2.58 | +3 % | agrees |
-| inland, km 32 to km 48, median, h | E | 1.17 ± 0.01 |  | 1.20 ± 0.04 | +3 % | agrees |
-| inland, km 48 to km 32, median, h | E | 1.17 ± 0.03 |  | 1.27 ± 0.03 | +9 % | agrees |
-| sea-going, sea to km 8, median, h | C | 1.83 ± 0.05 | 1.92 | 1.92 | +5 % | agrees |
-| sea-going, km 8 to sea, median, h | C | 1.67 ± 0.02 | 1.83 | 1.73 ± 0.03 | +4 % | agrees |
+| sea-going, km 62 to km 8, median, h | C | 2.50 ± 0.08 | 3.32 | 2.65 ± 0.03 | +6 % | agrees |
+| inland, km 32 to km 48, median, h | E | 1.17 ± 0.01 |  | 1.17 | +0 % | agrees |
+| inland, km 48 to km 32, median, h | E | 1.17 ± 0.03 |  | 1.28 ± 0.04 | +10 % | agrees |
+| sea-going, sea to km 8, median, h | C | 1.83 ± 0.05 | 1.92 | 1.87 ± 0.04 | +2 % | agrees |
+| sea-going, km 8 to sea, median, h | C | 1.67 ± 0.02 | 1.83 | 1.68 ± 0.03 | +1 % | agrees |
 
 **Ships under way**
 
 | | Kind | Record | Model before | Model | Difference | |
 | --- | --- | --- | --- | --- | --- | --- |
-| dock: inland, ships | E | 27.0 ± 2.2 |  | 34.7 ± 2.3 | +29 % | differs |
-| dock: sea-going, ships | E | 2.84 ± 0.18 |  | 5.10 ± 1.32 | +79 % | differs |
-| river: inland, ships | E | 25.5 ± 2.9 |  | 29.7 ± 1.0 | +16 % | agrees |
-| river: sea-going, ships | E | 13.2 ± 0.5 |  | 11.3 ± 0.4 | -14 % | agrees |
-| sea: sea-going, ships | E | 10.1 ± 0.6 |  | 9.93 ± 0.35 | -2 % | agrees |
+| dock: inland, ships | E | 27.0 ± 2.2 |  | 37.3 ± 3.4 | +38 % | differs |
+| dock: sea-going, ships | E | 2.84 ± 0.18 |  | 4.08 ± 0.70 | +43 % | differs |
+| river: inland, ships | E | 25.5 ± 2.9 |  | 28.7 ± 1.5 | +12 % | agrees |
+| river: sea-going, ships | E | 13.2 ± 0.5 |  | 11.6 ± 0.5 | -12 % | agrees |
+| sea: sea-going, ships | E | 10.1 ± 0.6 |  | 10.00 ± 0.37 | -1 % | agrees |
 
 **Piloted ships under way**
 
 | | Kind | Record | Model before | Model | Difference | |
 | --- | --- | --- | --- | --- | --- | --- |
-| dock, mean, ships | E | 3.20 ± 0.22 |  | 5.06 ± 1.32 | +58 % | differs |
-| dock, 95th percentile, ships | E | 6.93 ± 0.49 |  | 8.20 ± 1.57 | +18 % | agrees |
-| river, mean, ships | E | 13.4 ± 0.6 |  | 11.2 ± 0.4 | -16 % | differs |
-| river, 95th percentile, ships | E | 19.9 ± 1.1 |  | 17.2 ± 0.7 | -14 % | agrees |
-| sea, mean, ships | E | 11.2 ± 0.6 |  | 11.5 ± 0.4 | +3 % | agrees |
-| sea, 95th percentile, ships | E | 16.7 ± 0.9 |  | 17.2 ± 1.0 | +3 % | agrees |
+| dock, mean, ships | E | 3.20 ± 0.22 |  | 4.04 ± 0.71 | +26 % | differs |
+| dock, 95th percentile, ships | E | 6.93 ± 0.49 |  | 7.20 ± 0.73 | +4 % | agrees |
+| river, mean, ships | E | 13.4 ± 0.6 |  | 11.5 ± 0.5 | -14 % | agrees |
+| river, 95th percentile, ships | E | 19.9 ± 1.1 |  | 17.6 ± 0.8 | -12 % | agrees |
+| sea, mean, ships | E | 11.2 ± 0.6 |  | 11.6 ± 0.4 | +3 % | agrees |
+| sea, 95th percentile, ships | E | 16.7 ± 0.9 |  | 18.2 ± 0.4 | +9 % | agrees |
 
 **Locks**
 
 | | Kind | Record | Model before | Model | Difference | |
 | --- | --- | --- | --- | --- | --- | --- |
-| Boudewijn-Van Cauwelaert: inland passing, a day | E | 93.5 ± 6.8 | 91.6 | 112 ± 3 | +20 % | agrees |
-| Boudewijn-Van Cauwelaert: sea-going passing, a day | E | 10.8 ± 2.2 | 6.29 | 7.95 ± 1.34 | -26 % | differs |
-| Hansweert: inland passing, a day | E | 103 ± 9 | 110 | 110 ± 3 | +6 % | agrees |
-| Kallo: inland passing, a day | E | 23.3 ± 2.2 | 27.6 | 26.1 ± 1.7 | +12 % | agrees |
-| Kallo: sea-going passing, a day | E | 5.53 ± 1.36 | 0.21 | 3.42 ± 0.25 | -38 % | differs |
-| Kieldrecht: inland passing, a day | E | 25.4 ± 4.2 | 37.9 | 37.7 ± 1.2 | +49 % | differs |
-| Kieldrecht: sea-going passing, a day | E | 11.0 ± 1.0 | 10.9 | 10.4 ± 1.3 | -6 % | agrees |
-| Kreekrak: inland passing, a day | E | 186 ± 13 | 180 | 174 ± 4 | -6 % | agrees |
-| Terneuzen: inland passing, a day | E | 133 ± 16 | 131 | 130 ± 4 | -2 % | agrees |
-| Terneuzen: sea-going passing, a day | E | 26.9 ± 4.1 | 6.74 | 18.4 ± 1.3 | -32 % | differs |
-| Zandvliet-Berendrecht: inland passing, a day | E | 71.1 ± 10.0 | 121 | 89.0 ± 2.5 | +25 % | differs |
-| Zandvliet-Berendrecht: sea-going passing, a day | E | 40.1 ± 2.5 | 34.7 | 34.7 ± 1.7 | -13 % | agrees |
-| Boudewijn-Van Cauwelaert: inland, time to pass, median, h | C | 1.08 ± 0.08 | 1.77 | 2.12 ± 0.12 | +95 % | differs |
-| Boudewijn-Van Cauwelaert: sea-going, time to pass, median, h | C | 1.33 ± 0.15 | 1.38 | 1.88 ± 0.15 | +41 % | differs |
-| Hansweert: inland, time to pass, median, h | C | 0.67 ± 0.03 | 1.28 | 1.07 ± 0.02 | +61 % | differs |
-| Kallo: inland, time to pass, median, h | C | 0.92 ± 0.13 | 0.90 | 1.07 ± 0.06 | +16 % | agrees |
-| Kallo: sea-going, time to pass, median, h | C | 1.25 ± 0.11 |  | 1.17 ± 0.10 | -7 % | agrees |
-| Kieldrecht: inland, time to pass, median, h | C | 1.00 ± 0.11 | 1.07 | 1.20 ± 0.04 | +20 % | differs |
-| Kieldrecht: sea-going, time to pass, median, h | C | 1.42 ± 0.08 | 1.22 | 1.32 ± 0.08 | -7 % | agrees |
-| Kreekrak: inland, time to pass, median, h | C | 0.83 ± 0.07 | 1.37 | 1.02 ± 0.03 | +22 % | differs |
-| Terneuzen: inland, time to pass, median, h | C | 0.92 ± 0.01 | 1.60 | 1.37 ± 0.04 | +49 % | differs |
-| Terneuzen: sea-going, time to pass, median, h | C | 1.00 ± 0.07 | 1.66 | 1.35 ± 0.06 | +35 % | differs |
-| Zandvliet-Berendrecht: inland, time to pass, median, h | C | 1.25 ± 0.08 | 1.50 | 1.57 ± 0.03 | +25 % | differs |
-| Zandvliet-Berendrecht: sea-going, time to pass, median, h | C | 1.75 ± 0.06 | 1.58 | 1.69 ± 0.05 | -3 % | agrees |
-| Hansweert: commercial passages, Rijkswaterstaat's count, a day | C | 113 | 111 | 110 ± 3 | -2 % | agrees |
-| Kreekrak: commercial passages, Rijkswaterstaat's count, a day | C | 189 | 183 | 178 ± 3 | -6 % | agrees |
-| Terneuzen: commercial passages, Rijkswaterstaat's count, a day | C | 126 | 138 | 150 ± 4 | +19 % | differs |
+| Boudewijn-Van Cauwelaert: inland passing, a day | E | 93.5 ± 6.8 | 91.6 | 114 ± 3 | +22 % | agrees |
+| Boudewijn-Van Cauwelaert: sea-going passing, a day | E | 10.8 ± 2.2 | 6.29 | 8.77 ± 0.62 | -19 % | agrees |
+| Hansweert: inland passing, a day | E | 103 ± 9 | 110 | 109 ± 4 | +6 % | agrees |
+| Kallo: inland passing, a day | E | 23.3 ± 2.2 | 27.6 | 28.1 ± 1.8 | +21 % | agrees |
+| Kallo: sea-going passing, a day | E | 5.53 ± 1.36 | 0.21 | 4.62 ± 0.67 | -17 % | agrees |
+| Kieldrecht: inland passing, a day | E | 25.4 ± 4.2 | 37.9 | 37.3 ± 1.3 | +47 % | differs |
+| Kieldrecht: sea-going passing, a day | E | 11.0 ± 1.0 | 10.9 | 8.95 ± 0.93 | -19 % | differs |
+| Kreekrak: inland passing, a day | E | 186 ± 13 | 180 | 173 ± 4 | -7 % | agrees |
+| Terneuzen: inland passing, a day | E | 133 ± 16 | 131 | 129 ± 5 | -3 % | agrees |
+| Terneuzen: sea-going passing, a day | E | 26.9 ± 4.1 | 6.74 | 18.4 ± 1.6 | -32 % | differs |
+| Zandvliet-Berendrecht: inland passing, a day | E | 71.1 ± 10.0 | 121 | 86.8 ± 4.0 | +22 % | agrees |
+| Zandvliet-Berendrecht: sea-going passing, a day | E | 40.1 ± 2.5 | 34.7 | 33.3 ± 1.9 | -17 % | differs |
+| Boudewijn-Van Cauwelaert: inland, time to pass, median, h | C | 1.08 ± 0.08 | 1.77 | 1.38 ± 0.04 | +28 % | differs |
+| Boudewijn-Van Cauwelaert: sea-going, time to pass, median, h | C | 1.33 ± 0.15 | 1.38 | 1.32 ± 0.08 | -1 % | agrees |
+| Hansweert: inland, time to pass, median, h | C | 0.67 ± 0.03 | 1.28 | 0.82 ± 0.03 | +22 % | differs |
+| Kallo: inland, time to pass, median, h | C | 0.92 ± 0.13 | 0.90 | 1.07 ± 0.03 | +16 % | agrees |
+| Kallo: sea-going, time to pass, median, h | C | 1.25 ± 0.11 |  | 1.19 ± 0.09 | -5 % | agrees |
+| Kieldrecht: inland, time to pass, median, h | C | 1.00 ± 0.11 | 1.07 | 1.10 ± 0.03 | +10 % | agrees |
+| Kieldrecht: sea-going, time to pass, median, h | C | 1.42 ± 0.08 | 1.22 | 1.34 ± 0.05 | -5 % | agrees |
+| Kreekrak: inland, time to pass, median, h | C | 0.83 ± 0.07 | 1.37 | 0.82 ± 0.03 | -2 % | agrees |
+| Terneuzen: inland, time to pass, median, h | C | 0.92 ± 0.01 | 1.60 | 1.25 | +36 % | differs |
+| Terneuzen: sea-going, time to pass, median, h | C | 1.00 ± 0.07 | 1.66 | 1.12 ± 0.04 | +12 % | agrees |
+| Zandvliet-Berendrecht: inland, time to pass, median, h | C | 1.25 ± 0.08 | 1.50 | 1.52 ± 0.03 | +21 % | differs |
+| Zandvliet-Berendrecht: sea-going, time to pass, median, h | C | 1.75 ± 0.06 | 1.58 | 1.68 ± 0.02 | -4 % | agrees |
+| Hansweert: commercial passages, Rijkswaterstaat's count, a day | C | 113 | 111 | 110 ± 4 | -3 % | agrees |
+| Kreekrak: commercial passages, Rijkswaterstaat's count, a day | C | 189 | 183 | 178 ± 4 | -6 % | agrees |
+| Terneuzen: commercial passages, Rijkswaterstaat's count, a day | C | 126 | 138 | 149 ± 5 | +18 % | differs |
 
 **Ships in the area**
 
 | | Kind | Record | Model before | Model | Difference | |
 | --- | --- | --- | --- | --- | --- | --- |
-| bulk and general cargo ships at anchor, ships | C | 5.62 ± 0.72 | 1.58 | 3.88 ± 0.59 | -31 % | differs |
-| bulk and general cargo ships at a berth, ships | I | 55.7 ± 3.7 | 42.6 | 53.1 ± 2.9 | -5 % | agrees |
-| bulk and general cargo ships in the area, ships | E | 77.4 ± 4.3 | 56.7 | 71.6 ± 3.6 | -7 % | agrees |
-| container ships at anchor, ships | E | 2.06 ± 0.43 | 0.56 | 1.97 ± 0.21 | -4 % | agrees |
-| container ships at a berth, ships | I | 20.1 ± 1.2 | 11.9 | 12.9 ± 0.2 | -36 % | differs |
-| container ships in the area, ships | E | 29.7 ± 1.4 | 19.2 | 22.0 ± 0.8 | -26 % | differs |
-| inland cargo craft at a berth, ships | C | 161 ± 7 |  | 161 ± 3 | +0 % | agrees |
-| inland cargo craft in the area, ships | E | 226 ± 6 | 178 | 217 ± 4 | -4 % | agrees |
-| inland tankers at a berth, ships | C | 156 ± 14 |  | 160 ± 7 | +3 % | agrees |
-| inland tankers in the area, ships | E | 218 ± 9 | 129 | 197 ± 8 | -10 % | agrees |
-| tankers at anchor, ships | C | 9.64 ± 0.74 | 2.56 | 8.75 ± 0.89 | -9 % | agrees |
-| tankers at a berth, ships | I | 42.4 ± 1.9 | 31.8 | 42.6 ± 2.8 | +0 % | agrees |
-| tankers in the area, ships | E | 67.4 ± 2.1 | 45.6 | 63.3 ± 2.7 | -6 % | agrees |
+| bulk and general cargo ships at anchor, ships | C | 5.62 ± 0.72 | 1.58 | 6.17 ± 0.62 | +10 % | agrees |
+| bulk and general cargo ships at a berth, ships | I | 55.7 ± 3.7 | 42.6 | 53.8 ± 3.6 | -3 % | agrees |
+| bulk and general cargo ships in the area, ships | E | 77.4 ± 4.3 | 56.7 | 73.7 ± 4.7 | -5 % | agrees |
+| container ships at anchor, ships | E | 2.06 ± 0.43 | 0.56 | 1.95 ± 0.19 | -5 % | agrees |
+| container ships at a berth, ships | I | 20.1 ± 1.2 | 11.9 | 12.9 ± 0.3 | -36 % | differs |
+| container ships in the area, ships | E | 29.7 ± 1.4 | 19.2 | 21.9 ± 0.6 | -26 % | differs |
+| inland cargo craft at a berth, ships | C | 161 ± 7 |  | 161 ± 7 | +0 % | agrees |
+| inland cargo craft in the area, ships | E | 226 ± 6 | 178 | 212 ± 9 | -6 % | agrees |
+| inland tankers at a berth, ships | C | 156 ± 14 |  | 166 ± 9 | +6 % | agrees |
+| inland tankers in the area, ships | E | 218 ± 9 | 129 | 200 ± 10 | -8 % | agrees |
+| tankers at anchor, ships | C | 9.64 ± 0.74 | 2.56 | 9.17 ± 1.25 | -5 % | agrees |
+| tankers at a berth, ships | I | 42.4 ± 1.9 | 31.8 | 41.3 ± 2.5 | -3 % | agrees |
+| tankers in the area, ships | E | 67.4 ± 2.1 | 45.6 | 62.3 ± 2.6 | -7 % | agrees |
 
 **Container ships**
 
 | | Kind | Record | Model before | Model | Difference | |
 | --- | --- | --- | --- | --- | --- | --- |
-| share that anchors before berthing | E | 0.12 ± 0.05 | 0.17 | 0.18 ± 0.02 | +51 % | differs |
-| at the four terminals, ships | E | 12.4 ± 0.8 | 10.7 | 11.1 ± 0.5 | -11 % | agrees |
-| berthing against the schedule, mean, h | I | 28.9 ± 8.6 | 33.3 | 34.2 ± 1.8 | +18 % | agrees |
-| 3.10°E to the berth, median, h | E | 4.92 ± 0.12 | 5.19 | 4.97 ± 0.03 | +1 % | agrees |
+| share that anchors before berthing | E | 0.12 ± 0.05 | 0.17 | 0.18 ± 0.01 | +49 % | agrees |
+| at the four terminals, ships | E | 12.4 ± 0.8 | 10.7 | 11.1 ± 0.6 | -11 % | agrees |
+| berthing against the schedule, mean, h | I | 28.9 ± 8.6 | 33.3 | 34.4 ± 2.0 | +19 % | agrees |
+| 3.10°E to the berth, median, h | E | 4.92 ± 0.12 | 5.19 | 5.09 ± 0.08 | +4 % | agrees |
 | time at the berth, median, h | I | 24.9 ± 2.3 | 26.4 | 27.0 ± 1.6 | +8 % | agrees |
 
-Over all 113 numbers, the 90th percentiles included: emergent 43 of 66 agree (30 of 65 before), calibrated 19 of 35 (12 of 29), input 11 of 12 (9 of 12). Runs: `results/replications/0008_val0` (before), `results/replications/0014_validation-final` (after).
+Over all 113 numbers, the 90th percentiles included: emergent 50 of 66 agree (30 of 65 before), calibrated 25 of 35 (12 of 29), input 11 of 12 (9 of 12); 32 numbers lie within 5 % of the record, 58 within 10 %, 81 within 20 %. Runs, all on the same seeds: `results/replications/0008_val0` (before), `0014_validation-final` (the first calibration; reproduced as `0001_baseline`: 43, 19 and 11 agree, 27 within 5 %), `0002_bvc-passage-time` (the Boudewijn–Van Cauwelaert lock times), `0003_lock-chamber-choice` (the chamber choice and the inland approach speed: 45, 24, 11), `0004_calibration-2` (the complex shares, the speed per ship, the anchor stay, Kieldrecht for inland craft: 50, 25, 11), `0005_calibration-3` (the fix of a ship lying at a berth, and the last values: the tables above).
 
-**What the model does not reproduce, and why.**
+**What the model does not reproduce, and why.** No set of parameter values brings every number within 5 % of the record. The record itself is not that sure: for most numbers its 95 % interval is 6 to 40 % wide (15 days of AIS), and fitting closer than it fits noise. Some AIS counts hold behaviour that is not modelled: a few service and bunker craft classed as sea-going pass one lock many times (one passed Kallo 26 times, some Terneuzen up to 10 times). The rest needs mechanisms the model does not have, below.
 
-- **Locks are the weakest part.** The time to pass is too long at Terneuzen (1.35 h against 1.0 h sea-going, 1.37 against 0.92 inland), Hansweert (inland 1.07 against 0.67) and Boudewijn–Van Cauwelaert (inland 2.1 against 1.1 h; sea-going 1.9 against 1.3). The lockage itself is near the AIS; the excess is waiting in the queue (0.3 to 0.6 h). The chamber assignment at Terneuzen (three chambers, all open to every ship) and the cycle of the Boudewijn and Van Cauwelaert chambers, shared with 90 inland craft a day, are the likely causes; neither is published (docs/PINNED.md).
-- **Sea-going traffic beyond Deurganckdok is short** (km 72: 16 against 23 a day; km 80 and 88 half the AIS), and so are sea-going passages of Boudewijn–Van Cauwelaert (8 against 11), Kallo (3.4 against 5.5) and Terneuzen (18 against 27). The complex shares are now drawn from the AIS, so what is missing is sea-going voyages into those docks and between them (the AIS has 1.99 calls a visit for bulk carriers; part of the difference is moves within one dock zone, which the fit merges into one call).
-- **Sea-going ships under way in the docks vary from 3 to 6.6 between replications** (AIS 2.8), and with them the release valves (2.8 to 14 per 1,000 ships). In some runs traffic in the docks jams near the Boudewijn and Van Cauwelaert locks, where sea-going ships drawn to that complex meet the inland craft; the jams clear by the release valves.
+- **Locks are the weakest part.** Inland craft still take too long at Terneuzen (1.25 h against 0.92 h; 90th percentile 3.3 h against 1.8 h), Hansweert (0.82 against 0.67 h), Boudewijn–Van Cauwelaert (1.38 against 1.08 h) and Zandvliet–Berendrecht (1.52 against 1.25 h); the medians of sea-going ships agree at every lock. At Hansweert a barge needs about 24 min in the chamber (entry, the hold for more ships, the published 15 min operating time, exit) and some 20 min to sail the 2 km round it at the approach speed, so 0.67 h leaves almost no wait at all: the real lock master times the chamber to the barges coming, which the model's locks, answering ships only once they are there, do not (announcing ships ahead was tried: chambers then waited for barges still on their way, and passages took longer). The chamber assignment at Terneuzen (three chambers) is not published (docs/PINNED.md). At Boudewijn–Van Cauwelaert the rest is the load: 114 inland passages a day against the AIS 93.
+- **Too many inland craft at the dock locks** (Kieldrecht 37 a day against 25, Zandvliet–Berendrecht 87 against 71, Boudewijn–Van Cauwelaert 114 against 93) and so under way in the docks (37 against 27). The craft from the canals are scaled to the canal locks' counts (§6.2, k = 1.37); a craft that calls in the docks and then makes further calls there passes the dock locks again each time. Fitting the scale per canal instead matches the canal locks but adds dock-lock passages.
+- **Sea-going traffic beyond Deurganckdok is short** (km 72: 17 against 23 a day; km 80 and 88 half the AIS), and so are sea-going passages of Boudewijn–Van Cauwelaert (8.8 against 10.8), Kallo (4.6 against 5.5), Zandvliet–Berendrecht (33 against 40) and Terneuzen (18 against 27; in the AIS 110 of 289 sea-going visits through Terneuzen pass it two to ten times). The complex shares are now drawn from the AIS (§10.2), so what is missing is sea-going voyages into those docks and between them (the AIS has 1.99 calls a visit for bulk carriers; part of the difference is moves within one dock zone, which the fit merges into one call).
+- **Sea-going ships under way in the docks vary from 3.0 to 5.0 between replications** (AIS 2.8), and with them the release valves (1.7 to 10.6 per 1,000 ships). In some runs traffic in the docks jams near the Boudewijn and Van Cauwelaert locks, where sea-going ships drawn to that complex meet the inland craft; the jams clear by the release valves.
 - **Container ships at berths: 12.9 against 20.1.** At the four terminals the model agrees (11 against 12.4). Of the rest, about 3 are five container ships lying in the AIS for 5 to 16 days (lay-up or repair: out of scope), about 1.4 at Zeebrugge and Vlissingen, and the remainder further calls of container ships between zones, which the model does not make.
 - **Container ships anchor too often (18 % against 12 %), at the right number at anchor.** One in nine comes in at anchor (the AIS share of their entries); on top, the model's own waits for a berth or the tide anchor some more, briefly. Matching the number at anchor and the share together would need those waits to be absorbed at sea, as a planned arrival does.
-- **Bulk carriers at anchor 3.9 against 5.6.** About 1.2 of the AIS number lie at the river anchorages (Everingen, Rede Vlissingen), stopping on the way, which the model does not do.
+- **Bulk carriers at anchor.** About 1.2 of the 5.6 in the AIS lie at the river anchorages (Everingen, Rede Vlissingen), stopping on the way, which the model does not do; their time is added to the anchor stay at sea (§12).
 - **Inland craft never anchor** (AIS: about 1 of each class at Everingen at once).
-- **Spread is too narrow.** The 90th percentiles of the sailing times are 12 to 17 % short: every ship of a class sails at one speed, where real ones differ.
-- **Terneuzen inland passages 150 against Rijkswaterstaat's 126** (the AIS itself has 133): the scaling factor is set on the three canal locks together.
+- **Spread of the sailing times.** With a speed of its own per ship the 90th percentiles are 3 to 10 % short (12 to 17 % with one speed per class).
+- **Terneuzen inland passages 149 against Rijkswaterstaat's 126** (the AIS itself has 133, and the model's own count of fixes 129): the scaling factor is set on the three canal locks together.
+- **Container ships planned at their class's speed.** Each ship sails at a speed of its own (§7), but the time a container ship is let in for its berth time is planned at its class's speed: a fast one can moor more than 2 h before its berth time. The short-run check in tests/test_invariants.py (no container ship more than 2 h early) fails on that since the speed per ship came in; planning at the ship's own speed was tried and did not clear it, and was not run in the replications above.
 - Sea-going ships to the Albert Canal zone pass Royers (0.4 a day; the AIS has none): the zone's place lies beyond that lock in the mesh.
