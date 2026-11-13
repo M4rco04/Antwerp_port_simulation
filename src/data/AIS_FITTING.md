@@ -25,7 +25,7 @@ Inputs: `data/ais/`, `data/schedules/2026_Oct20-Nov22.csv`, `data/charts/scheldt
 ## How it works (`ais_pipeline.py`, shared)
 
 1. **Snapshots → positions.** Snapshots written seconds apart by two collectors are counted once. Gaps longer than 12 min count as collector downtime.
-2. **Visits.** A ship's positions are split into visits; a new visit starts when the ship comes back somewhere else after more than 6 h. Gaps caused by collector downtime never start a new visit.
+2. **Visits.** A ship's positions are split into visits; a new visit starts when the ship comes back somewhere else after more than 6 h, or when it was under way on one side of a silence of 6 h or more with both ends in a zone at the edge of the area or both at sea (it has been out and come back). Gaps caused by collector downtime never start a new visit.
 3. **Censoring.** Ships first seen within 20 min of a collector (re)start were already in the area, so they don't count as arrivals. Arrival rates only use observed time, about 52 h so far.
 4. **Classes.**
    - `container`: name found in the schedule, a container line's name, or cargo ≥ 250 m.
@@ -107,8 +107,10 @@ A few things to know when reading the fits:
     a change of side afterwards.
   - Do not count at a section beside a lock mouth (Terneuzen km 24, Hansweert km 40, Zandvliet and Berendrecht km 66,
     Boudewijn and Van Cauwelaert km 74): craft manoeuvring there cross the line without going anywhere.
-  - Counts of ships seen inside a chamber are low: AIS hears an inland craft in about a third of its snapshots. The
-    AIS trips imply about 65 passages a day at Terneuzen, where the chamber count gives 30.
+  - Counts of ships seen inside a chamber are low (a craft in a chamber is heard about once). Count lock passages
+    by the basin a ship is in instead (`src/sim/validate.py`: with the locks taken out the water falls apart into
+    basins, and two fixes in a row in two basins are a passage): 133 inland passages a day at Terneuzen, 186 at
+    Kreekrak, 103 at Hansweert, close to Rijkswaterstaat's counts.
 - **Inland flows as they stand.** Trips between calls match the AIS (Antwerp - Schelde-Rijn 92 against 88 per day). Off
   the lock mouths, river passages are 0.84 of the AIS at km 45-60, 1.0 at km 78-83 and 0.70 at km 30-35. The last is
   the one real gap: about 30 of its 50 a day (counted at km 25) are craft that go out and back with no call seen in
@@ -118,9 +120,21 @@ A few things to know when reading the fits:
 - **A craft only ever seen inside one canal or edge zone** is not Scheldt traffic and is left out of the rates.
 - **Anchor stays are fitted on the sea anchorages and scaled to their stock** (`ANCHOR_STAY_SCALE`), for bulk
   carriers and tankers, the classes that arrive at anchor in the model. Little's law: the mean stay is the number
-  at anchor at Westhinder, Oostdyck and Schouwenbank divided by the anchor stops there per hour (14 h and 19 h).
-  The draws stop at the longest stay seen, so the scale is solved for, not taken as a ratio. The fitted tails (means of
-  33 h and 58 h) held twice the AIS number at anchor. Berth stays of sea-going ships are not scaled.
+  at anchor at Westhinder, Oostdyck and Schouwenbank divided by the anchor stops there per hour (40 h and 58 h).
+  The draws stop at the longest stay seen, so the scale is solved for, not taken as a ratio. Berth stays of
+  sea-going ships are not scaled.
+- **A stock is the hours of the stops over the length of the record, never the fixes heard.** A ship lying still
+  is heard in half the snapshots or fewer (two in five at anchor at Westhinder, one in two for an inland tanker at
+  a berth). The inland and anchor stays were scaled to the fixes heard until the validation (MODEL.md §19) and came
+  out 1.5 to 2.7 times too short.
+- **A ship out of the area and back is a new visit, whatever its class** (`LEFT_AREA_H`). Sea-going ships to Ghent
+  leave up the canal and come back a median of 40 h later at the same place (73 in 17 days), and 59 left by sea
+  and came back within 3 km. As one visit their way back was no arrival: bulk carriers entering rose from 25 to 30
+  a day and tankers from 16 to 18.5 when the rule was applied to every class.
+- **Bulk carriers and tankers have every call fitted**, like the inland craft (`SEA_CALL_CLASSES`): the first call
+  is the destination, each call has its own stay, `NEXT_CALL` says where they go next. They make two calls a visit.
+- **Container ships the schedule does not list** are counted in `container_calls.UNSCHEDULED_CALLS` (2.5 a day,
+  86 % in Deurganckdok) and added by the generator.
 
 Rerun all fits after the collector has added data (the infrastructure fit needs the graph), then rebuild the graph:
 

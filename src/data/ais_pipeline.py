@@ -45,10 +45,14 @@ FOLLOW_UP_H = 4
 # a ship missing this long (while the collector ran) and seen again elsewhere is a new visit
 NEW_VISIT_GAP_H = 6
 NEW_VISIT_MIN_MOVE_KM = 3
-# an inland craft under way, silent this long and heard again in the zones at the edge of the area has been out
-# of the area and come back (up a canal and back to the same lock): a new visit, however little it moved. Most
-# inland silences are this; a craft lying still at a dock with its AIS off is not
-INLAND_LEFT_AREA_H = 6
+# a ship under way, silent this long and heard again in the zones at the edge of the area, or at sea, has been
+# out of the area and come back (up a canal and back to the same lock; out to sea and back by the same lane): a
+# new visit, however little it moved. Most inland silences are this; a ship lying still at a dock with its AIS
+# off is not. It held for inland craft only until the validation: sea-going ships to Ghent leave the area up the
+# canal and come back a median of 40 h later at the same place (73 in 17 days), and 59 left by sea and came
+# back within 3 km. Kept as one visit, their way back was never an arrival: one sea-going lock passage in four at
+# Terneuzen was in the model
+LEFT_AREA_H = 6
 AREA_EDGE_ZONES = ("schelde_rijn_canal", "zuid_beveland_canal", "ghent_terneuzen_canal", "albert_canal", "upper_sea_scheldt",
                    "oosterschelde", "zeebrugge")
 # "lying still" at an anchorage, and how long (in 5-min fixes) counts as having anchored
@@ -380,10 +384,10 @@ def destination_zones():
 # visits
 
 
-def split_visits(df, restarts, inland=()):
+def split_visits(df, restarts):
     """Number the visits: a new one starts at a ship's first fix, or when it is back somewhere
-    else after NEW_VISIT_GAP_H, or (inland: the MMSIs of inland craft) when it has been out of the area
-    (INLAND_LEFT_AREA_H). A gap that spans a collector restart is never a new visit."""
+    else after NEW_VISIT_GAP_H, or when it has been out of the area (LEFT_AREA_H). A gap that spans a
+    collector restart is never a new visit."""
     df = df.sort_values(["mmsi", "t"]).reset_index(drop=True)
     same = df.mmsi.eq(df.mmsi.shift())
     gap_h = df.t.diff().dt.total_seconds().div(3600)
@@ -393,10 +397,13 @@ def split_visits(df, restarts, inland=()):
     px, py = to_km(df.lon.to_numpy(), df.lat.to_numpy())
     moved = np.hypot(np.diff(px, prepend=np.nan), np.diff(py, prepend=np.nan))
     new = ~same | ((gap_h > NEW_VISIT_GAP_H) & (moved > NEW_VISIT_MIN_MOVE_KM) & ~across_restart)
-    edge = np.isin(port_zone(df.lon.to_numpy(), df.lat.to_numpy()), AREA_EDGE_ZONES)
+    zone = port_zone(df.lon.to_numpy(), df.lat.to_numpy())
+    edge = np.isin(zone, AREA_EDGE_ZONES)
+    at_sea = (zone == "") & (df.lon.to_numpy() < OPEN_SEA_MAX_LON)
     under_way = df.sog.to_numpy() >= STATIONARY_KN
-    left = (df.mmsi.isin(inland).to_numpy() & same.to_numpy() & (gap_h.to_numpy() >= INLAND_LEFT_AREA_H) & ~across_restart
-            & edge & np.r_[False, edge[:-1]] & (under_way | np.r_[False, under_way[:-1]]))
+    left = (same.to_numpy() & (gap_h.to_numpy() >= LEFT_AREA_H) & ~across_restart
+            & ((edge & np.r_[False, edge[:-1]]) | (at_sea & np.r_[False, at_sea[:-1]]))
+            & (under_way | np.r_[False, under_way[:-1]]))
     new = new | left
     df["visit"] = np.cumsum(new.to_numpy())
     return df
@@ -575,8 +582,7 @@ def prepare(ais_dir=AIS_DIR, schedule=SCHEDULE, charts=CHARTS, berths=BERTHS):
     log.info("Ships per class: %s", ships["class"].value_counts().to_dict())
 
     zones = EntryZones(area, charts)
-    inland = ships.index[ships["class"].isin(("inland_cargo", "inland_tanker"))]
-    df = annotate(split_visits(df, restarts, inland), zones, Berths(berths))
+    df = annotate(split_visits(df, restarts), zones, Berths(berths))
     visits = summarise_visits(df, times)
     visits["class"] = visits.mmsi.map(ships["class"])
     entries = find_entries(df, windows, zones)

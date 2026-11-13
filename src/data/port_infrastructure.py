@@ -30,7 +30,7 @@ Tugs are the 42 harbour tugs of data/equipment/tugs.csv plus every other ship wi
 
 The result is written as a plain Python module (default src/data/port_infrastructure.py).
 
-Generated 2026-11-12 01:45Z by src/data/fit_port_infrastructure.py from AIS 2026-10-26 01:00 to 2026-11-12 01:28 UTC.
+Generated 2026-11-12 06:47Z by src/data/fit_port_infrastructure.py from AIS 2026-10-26 01:00 to 2026-11-12 01:28 UTC.
 """
 
 BERTH_USE = {'ANTW_10': {'calls': {'passenger': 19}, 'max_loa_m': 15.0, 'tanker_berth': False},
@@ -1427,13 +1427,13 @@ MOORING_MIN = {'arrival_dock': {'base_min': 18.39, 'per_m_loa_min': 0.0142, 'sig
 
 DOCK_SPEED_KN = {'antwerp_central_docks': {'p50': 5.9, 'p95': 9.2, 'fixes': 7878, 'ships': 437},
  'antwerp_left_bank_docks': {'p50': 3.3, 'p95': 6.9, 'fixes': 930, 'ships': 115},
- 'canal': {'p50': 6.2, 'p95': 8.9, 'fixes': 4385, 'ships': 258},
- 'ghent_terneuzen_canal': {'p50': 3.0, 'p95': 6.7, 'fixes': 107, 'ships': 73},
- 'lock_approach': {'p50': 2.5, 'p95': 7.5, 'fixes': 3899, 'ships': 708}}
+ 'canal': {'p50': 6.2, 'p95': 8.9, 'fixes': 4360, 'ships': 257},
+ 'ghent_terneuzen_canal': {'p50': 2.8, 'p95': 6.6, 'fixes': 133, 'ships': 88},
+ 'lock_approach': {'p50': 2.5, 'p95': 7.9, 'fixes': 3937, 'ships': 706}}
 
-INLAND_DOCK_SPEED_KN = {'canal': {'p50': 7.2, 'p95': 9.5, 'fixes': 40319, 'ships': 1843},
- 'dock': {'p50': 7.0, 'p95': 9.8, 'fixes': 52166, 'ships': 1600},
- 'lock_approach': {'p50': 3.1, 'p95': 7.7, 'fixes': 20721, 'ships': 1920}}
+INLAND_DOCK_SPEED_KN = {'canal': {'p50': 7.2, 'p95': 9.5, 'fixes': 40268, 'ships': 1843},
+ 'dock': {'p50': 7.0, 'p95': 9.8, 'fixes': 52207, 'ships': 1607},
+ 'lock_approach': {'p50': 3.1, 'p95': 7.7, 'fixes': 20573, 'ships': 1919}}
 
 PILOT_DEMAND = {'dock': {'p50': 3.0, 'p95': 7.0, 'p99': 9.0, 'max': 13, 'snapshots': 4581},
  'river': {'p50': 13.0, 'p95': 20.0, 'p99': 23.0, 'max': 27, 'snapshots': 4581},
@@ -1447,8 +1447,8 @@ LOCK_PASSAGES = {'Berendrecht': {'sea_going': 16.1, 'inland': 21.6},
  'Van Cauwelaert': {'sea_going': 2.8, 'inland': 33.9},
  'Royers': {'sea_going': 0.1, 'inland': 0.8},
  'Kattendijk': {'sea_going': 0.2, 'inland': 0.0},
- 'Kreekrak': {'sea_going': 2.6, 'inland': 71.0},
- 'Hansweert': {'sea_going': 1.3, 'inland': 48.5},
+ 'Kreekrak': {'sea_going': 2.5, 'inland': 66.2},
+ 'Hansweert': {'sea_going': 1.1, 'inland': 48.2},
  'Terneuzen': {'sea_going': 8.0, 'inland': 16.7},
  'Vlissingen (Kanaal door Walcheren)': {'sea_going': 0.3, 'inland': 1.8}}
 

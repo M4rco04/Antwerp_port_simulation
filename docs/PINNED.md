@@ -36,10 +36,10 @@ Things set aside on 10 November 2026, with what each one waits for.
 ## Locks
 
 - **Lock outages and maintenance.** Not modelled. A natural scenario later.
-- **Lock times.** The Antwerp locks now use data/equipment/locks.csv, read as the time of one passage. Open:
-  the source calls it operation or passage time, so confirm which; Kattendijk's 45 min is long for so small a
-  lock; entry and exit times are still assumed everywhere; the Terneuzen new lock is still assumed (ask North
-  Sea Port).
+- **Lock times.** The Antwerp locks use data/equipment/locks.csv with the operating time set half-way between its
+  two readings (operation time, passage time), on the AIS passage times (MODEL.md §14, §19). Open: confirm at the
+  source which it is; Kattendijk's 45 min is long for so small a lock; a sea-going ship's entry and exit times
+  (12 and 8 min) are still assumed; the Terneuzen new lock is still assumed (ask North Sea Port).
 
 ## Pilots
 
@@ -48,3 +48,16 @@ Things set aside on 10 November 2026, with what each one waits for.
   (Beroepsvereniging van Loodsen). No split by corps or zone, and no count of the Dutch pilots working the
   Scheldt or of the Brabo dock pilots. Ask DAB Loodswezen, the Dutch Loodswezen (region Scheldemonden) and Brabo
   for pilots on duty per zone.
+
+## Validation gaps (MODEL.md §19)
+
+- **Lock queues.** Time to pass Terneuzen, Hansweert and Boudewijn–Van Cauwelaert is 30 to 90 % above the AIS, all
+  of it waiting in the queue. Needs the chamber assignment rules (Terneuzen: which ships use which of the three
+  chambers) and the cycle of the Boudewijn and Van Cauwelaert chambers; ask Rijkswaterstaat / North Sea Port and
+  the harbour master.
+- **Sea-going voyages into and between the docks** are short (Kallo, Boudewijn–Van Cauwelaert, river beyond
+  Deurganckdok). Fit moves between berths within one dock zone (now merged into one call).
+- **Jams in the docks** in some replications near Boudewijn–Van Cauwelaert (release valves 3 to 14 per 1,000).
+- **Container ships' further calls** between zones, and stops of ships at the river anchorages, are not modelled.
+- **One speed per class**: sailing-time 90th percentiles 12 to 17 % short. A drawn speed per ship would widen them.
+

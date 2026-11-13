@@ -46,6 +46,11 @@ INLAND_MAX_DRAUGHT_M = 5.0
 # an inland call lasts at least this long; shorter stops are waits for a bridge or a lock
 INLAND_CALL_MIN_H = 1.0
 INLAND_SILENT_H = 6.0               # an inland craft not heard for this long has left (find_stops)
+# the sea-going classes whose every call is fitted (first call = destination, each call its own stay, then
+# where it goes next), like the inland craft. They make two calls a visit in the AIS (58 h at berths, 45 h of it
+# at the longest): with the longest call alone the model had three quarters of the ships at berths and of the
+# sea-going lock passages (a ship that moves from the right bank to the left passes two locks more)
+SEA_CALL_CLASSES = ("bulk_general", "tanker")
 LEAVE = "leave"
 DRAUGHT_BANDS = (7.0, 10.0, 13.0)   # arrival draught bands of DRAUGHT_CHANGE, m
 
@@ -96,10 +101,10 @@ def draught_changes(df, all_calls, visits):
     return {c: {b: sorted(v) for b, v in per.items()} for c, per in out.items() if c in SIMULATED_CLASSES}
 
 
-def inland_calls(all_calls):
-    """The calls of inland craft in order per visit: stops of INLAND_CALL_MIN_H or more, with successive
-    stops in one zone merged into a single call (shifting along the quay)."""
-    c = all_calls[all_calls["class"].isin(INLAND_CLASSES) & (all_calls.hours >= INLAND_CALL_MIN_H)]
+def inland_calls(all_calls, classes=INLAND_CLASSES):
+    """The calls of these classes (inland craft) in order per visit: stops of INLAND_CALL_MIN_H or more, with
+    successive stops in one zone merged into a single call (shifting along the quay)."""
+    c = all_calls[all_calls["class"].isin(classes) & (all_calls.hours >= INLAND_CALL_MIN_H)]
     c = c[~c.at_visit_start].sort_values(["visit", "start"])
     new = (c.visit != c.visit.shift()) | (c.zone != c.zone.shift())
     rows = []
@@ -112,19 +117,23 @@ def inland_calls(all_calls):
     return pd.DataFrame(rows)
 
 
-def scale_inland_stays(berth_dwell, by_zone, inland, data):
+def scale_inland_stays(berth_dwell, by_zone, inland, lying, data, classes=INLAND_CLASSES):
     """Scale the inland stays so that they give the stock the AIS shows (Little's law: mean stay = craft
     lying in port / calls per hour). With many stays still going on when the data ends the lognormal's tail
-    is an extrapolation, and it gave three times the craft in port. Only ever shortens."""
-    df, n_snapshots = data.df, data.times.size
-    hours = n_snapshots * 5 / 60
+    is an extrapolation, and it gave three times the craft in port. Only ever shortens.
+
+    lying: every berth stop of the inland craft (berth_calls of the stops cut at INLAND_SILENT_H). The craft
+    in port are the hours of those stops over the length of the record. Counting the fixes heard lying still
+    instead took a craft at a berth for gone whenever it was not heard: two fixes in three for the dry-cargo
+    craft, one in two for the tankers, and the stays came out that much too short (validation, MODEL.md §19)."""
+    hours = data.times.size * 5 / 60
+    span = (data.times.iloc[-1] - data.times.iloc[0]).total_seconds() / 3600
     rng = np.random.default_rng(0)
     out = {}
-    for cls in INLAND_CLASSES:
+    for cls in classes:
         calls = inland[(inland["class"] == cls) & inland.start_observed]
         rate = len(calls) / hours
-        fixes = df[(df.mmsi.map(data.ships["class"]) == cls) & df.stationary & (df.port_zone != "")]
-        target = len(fixes) / n_snapshots / rate
+        target = lying[lying["class"] == cls].hours.sum() / span / rate
         means = []
         for zone, n in calls.zone.value_counts().items():
             f = by_zone.get(cls, {}).get(zone) or berth_dwell[cls]
@@ -141,22 +150,27 @@ def scale_inland_stays(berth_dwell, by_zone, inland, data):
     return out
 
 
-ANCHOR_SCALED_CLASSES = ("bulk_general", "tanker")     # the classes that start a visit at anchor in the model
+ANCHOR_SCALED_CLASSES = ("bulk_general", "tanker", "container")   # the classes that start a visit at anchor
+# with the stock counted from the stops and the rate from the entries the target may be longer than the fitted
+# stays (tankers: 69 h against 61 h): they may be lengthened this much, no more (the tail is an extrapolation)
+ANCHOR_MAX_LENGTHEN = 1.25
 # the anchorages out at sea, where the model's ships that arrive at anchor lie (175 of 181 at Westhinder in a
 # 30-day run); the anchorages in the Scheldt hold short stops of ships already under way (Everingen: 4-7 h)
 SEA_ANCHORAGE_ZONES = ("anchorage_westhinder", "anchorage_oostdyck", "anchorage_schouwenbank")
 
 
-def scale_anchor_stays(anchorage_wait, waits, data, scheldt):
+def scale_anchor_stays(anchorage_wait, waits, anchored, data, scheldt):
     """Fit the anchor stays of the classes that arrive at anchor on the sea anchorages only, and scale them so
     that they give the stock the AIS shows there (Little's law: mean stay = ships at anchor / anchor stops per
     hour), as for the inland stays. Many anchor stays were still going on when the data
     ended (19 of 56 tankers), so the lognormal's tail is an extrapolation: with it the model held twice the
     bulk carriers and tankers at anchor that the AIS shows. Only ever shortens."""
-    df, n_snapshots = data.df, data.times.size
-    hours = n_snapshots * 5 / 60
-    cls_of = df.mmsi.map(data.ships["class"])
-    at_anchor = df.stationary & df.anchorage.isin(SEA_ANCHORAGE_ZONES) & df.visit.isin(scheldt)
+    # the ships at anchor: the hours of their anchor stops over the length of the record. Of an anchored ship
+    # at Westhinder the AIS hears two fixes in five; counted by the fixes heard, the stock, and with it the
+    # stays, came out at 40 % of what the stops show (tankers 3.1 against 8.6 at anchor there)
+    hours = data.times.size * 5 / 60
+    span = (data.times.iloc[-1] - data.times.iloc[0]).total_seconds() / 3600
+    lying = anchored[anchored.zone.isin(SEA_ANCHORAGE_ZONES) & anchored.visit.isin(scheldt)]
     waits = waits[waits.zone.isin(SEA_ANCHORAGE_ZONES)]
     rng = np.random.default_rng(0)
     out = {}
@@ -166,17 +180,22 @@ def scale_anchor_stays(anchorage_wait, waits, data, scheldt):
         if not f:
             continue
         anchorage_wait[cls] = f
-        rate = len(starts) / hours
-        target = int((at_anchor & (cls_of == cls)).sum()) / n_snapshots / rate
+        # the rate of ships that the model starts at anchor there: the entries from these anchorages (the anchor
+        # stops also hold departing ships and ships that anchored again; with them the bulk carriers at anchor
+        # came out 2.1 at Westhinder against 4.1 in the AIS, validation MODEL.md §19)
+        e = data.entries[data.entries.scheldt_bound & (data.entries["class"] == cls) & data.entries.source.isin(SEA_ANCHORAGE_ZONES)]
+        exposure = sum((b - a).total_seconds() for a, b in data.windows) / 3600
+        rate = len(e) / exposure if len(e) else len(starts) / hours
+        target = lying[lying["class"] == cls].hours.sum() / span / rate
         z = rng.standard_normal(20000)
         capped_mean = lambda mu: float(np.minimum(np.exp(mu + f["sigma"] * z), f["longest_seen_h"]).mean())
         model = capped_mean(f["mu"])
         # the draws stop at the longest stay seen, so shifting mu does not scale the mean in proportion: solve for it
-        lo, hi = f["mu"] - 5.0, f["mu"]
+        lo, hi = f["mu"] - 5.0, f["mu"] + float(np.log(ANCHOR_MAX_LENGTHEN))
         for _ in range(60):
             mid = (lo + hi) / 2
             lo, hi = (mid, hi) if capped_mean(mid) < target else (lo, mid)
-        factor = min(float(np.exp(lo - f["mu"])), 1.0)
+        factor = float(np.exp(lo - f["mu"]))
         f["mu"] = round(f["mu"] + float(np.log(factor)), 4)
         f["median_h"] = round(float(np.exp(f["mu"])), 2)
         f["mean_h"] = round(float(np.exp(f["mu"] + f["sigma"] ** 2 / 2)), 2)
@@ -250,9 +269,11 @@ def fit(data, stops, exits, inland_stops):
     # main call
     inland_stops = inland_stops[inland_stops.visit.isin(scheldt)].copy()
     inland_stops["class"] = inland_stops.visit.map(visits["class"])
-    inland = inland_calls(berth_calls(inland_stops))
-    first = inland.groupby("visit").head(1).set_index("visit")
-    calls = pd.concat([calls[~calls["class"].isin(INLAND_CLASSES)], first])
+    lying = berth_calls(inland_stops)
+    inland = inland_calls(lying)
+    several = inland_calls(all_calls, SEA_CALL_CLASSES)        # the sea-going classes with every call fitted
+    first = pd.concat([inland, several]).groupby("visit").head(1).set_index("visit")
+    calls = pd.concat([calls[~calls["class"].isin(INLAND_CLASSES + SEA_CALL_CLASSES)], first])
 
     # origin-destination
     od = entries.assign(destination=entries.visit.map(destinations(entries, calls, exits)))
@@ -274,7 +295,7 @@ def fit(data, stops, exits, inland_stops):
     p_exit_zone = {cls: conditional(g, "zone", "exit") for cls, g in left.groupby("class")}
 
     # time at berth: the berth calls whose start was seen
-    dwell = pd.concat([calls[~calls["class"].isin(INLAND_CLASSES)], inland])
+    dwell = pd.concat([calls[~calls["class"].isin(INLAND_CLASSES + SEA_CALL_CLASSES)], inland, several])
     dwell = dwell[dwell.start_observed & dwell["class"].isin(SIMULATED_CLASSES)]
     berth_dwell = {cls: fit_lognormal(g.hours, g.end_observed, g.truncated_at) for cls, g in dwell.groupby("class")}
     berth_dwell["all"] = fit_lognormal(dwell.hours, dwell.end_observed, dwell.truncated_at)
@@ -285,14 +306,18 @@ def fit(data, stops, exits, inland_stops):
             if f and not f["at_bound"]:        # at a bound the tail is not known: the class fit instead
                 by_zone.setdefault(cls, {})[zone] = f
 
-    stay_scale = scale_inland_stays(berth_dwell, by_zone, inland, data)
+    stay_scale = scale_inland_stays(berth_dwell, by_zone, inland, lying, data)
+    # the sea-going classes with every call fitted, the same way (their fitted stays held a fifth more bulk
+    # carriers at berths than the AIS: 66 against 56; validation, MODEL.md §19)
+    stay_scale.update(scale_inland_stays(berth_dwell, by_zone, several, all_calls[all_calls["class"].isin(SEA_CALL_CLASSES)],
+                                         data, SEA_CALL_CLASSES))
 
     # anchorages
     anchored = stops[(stops.kind == "anchorage") & stops["class"].isin(SIMULATED_CLASSES)]
     waits = anchored[anchored.start_observed]
     anchorage_wait = {cls: fit_lognormal(g.hours, g.end_observed) for cls, g in waits.groupby("class")}
     anchorage_wait["all"] = fit_lognormal(waits.hours, waits.end_observed)
-    anchor_scale = scale_anchor_stays(anchorage_wait, waits, data, scheldt)
+    anchor_scale = scale_anchor_stays(anchorage_wait, waits, anchored, data, scheldt)
     p_anchorage = {cls: normalise(g.zone.value_counts().to_dict()) for cls, g in anchored.groupby("class")}
 
     location = {zone: {"lat": round(float(g.lat.median()), 5), "lon": round(float(g.lon.median()), 5)}
@@ -300,7 +325,7 @@ def fit(data, stops, exits, inland_stops):
     described = {**destination_zones(),
                  **{exit_name(s): f"leaves via {s} without stopping: {d}" for s, d in SEA_GATES.items()},
                  **{exit_name(z): f"leaves via {z} without stopping: {d}" for z, (_, _, d) in PORT_ZONES.items()}}
-    p_next = next_call(inland, visits)
+    p_next = next_call(pd.concat([inland, several]), visits)
     used = set().union(*[set(p) for p in p_dest.values()], *[set(p) for p in p_exit.values()],
                        *[set(n) | {z} for per in p_next.values() for z, n in per.items()])
     attrs, attrs_dest = attributes(entries, data.df, data.ships, od.set_index("visit").destination)
@@ -347,7 +372,7 @@ ATTRIBUTES                        class -> [(LOA m, beam m, draught m or None, D
 ATTRIBUTES_BY_DESTINATION         class -> destination -> the same, from the visits to that destination
 DRAUGHT_CHANGE                    class -> arrival draught band (below 7, 10, 13 m, above) -> [departure draught /
                                   arrival draught] per visit, to bootstrap
-NEXT_CALL                         inland class -> zone -> {{next zone or "leave": P}} after a call there
+NEXT_CALL                         class (inland, bulk_general, tanker) -> zone -> {{next zone or "leave": P}} after a call there
 DG_SHARE                          class -> share of arrivals with an IMO hazard category (AIS type x1-x4)
 P_DESTINATION_GIVEN_CLASS         class -> {{destination: P}}
 P_DESTINATION_GIVEN_CLASS_SOURCE  class -> source -> {{destination: P}}
@@ -358,7 +383,7 @@ P_EXIT_GIVEN_CLASS_BERTH          class -> berth zone -> {{exit_<sink>: P}}
 BERTH_DWELL_H                     class (or "all") -> lognormal time at berth in hours:
                                   mu, sigma (of ln hours), median_h, mean_h, n_complete, n_censored
 BERTH_DWELL_H_BY_ZONE             class -> berth zone -> the same, where there are enough stays
-INLAND_STAY_SCALE                 inland class -> the factor their stays were scaled by to give the AIS stock
+INLAND_STAY_SCALE                 class (inland, bulk_general, tanker) -> the factor their stays were scaled by to give the AIS stock
 ANCHORAGE_WAIT_H                  class (or "all") -> lognormal time at anchor in hours
 ANCHOR_STAY_SCALE                 bulk_general / tanker -> the factor their anchor stays were scaled by to give the AIS stock
 P_ANCHORAGE_GIVEN_CLASS           class -> {{anchorage: P}} over the anchor stops

@@ -7,7 +7,8 @@ One run is one draw: a result is the mean over independent replications with its
 replication i runs with seed + i and is saved in results/replications/<id>_<label>/rep_<seed>/ (ships.csv,
 timeseries.csv, summary.json; no positions or viewer). The folder also gets:
 
-    replications.csv   one row per replication, one column per result
+    replications.csv   one row per replication, one column per result (v.*: the numbers validate.py sets
+                       against the AIS record: py src/sim/validate.py compare <this folder>)
     results.csv        per result: mean, standard deviation, half-width and bounds of the 95 % confidence
                        interval (Student's t, n - 1 degrees of freedom), n
     warmup.csv         ships in the area per step: every replication, their mean and its moving average
@@ -83,7 +84,12 @@ def one(job):
     series.to_csv(out / "timeseries.csv", index=False)
     summary = sim.summary(ships)
     (out / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
-    return {"seed": seed, "wall_s": round(time.time() - t0), **flatten(summary)}, series["ships"].to_numpy()
+    # the numbers that are set against the AIS record (validate.py), measured the way the record is
+    import validate
+    measured = validate.simulated(sim, ships)
+    (out / "validation.json").write_text(json.dumps(measured, indent=1))
+    return ({"seed": seed, "wall_s": round(time.time() - t0), **flatten(summary), **{f"v.{k}": v for k, v in measured.items()}},
+            series["ships"].to_numpy())
 
 
 def interval(values, level=0.95):

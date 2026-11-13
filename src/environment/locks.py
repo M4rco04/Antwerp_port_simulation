@@ -46,9 +46,9 @@ class LockTimes:
     level_min_per_m: float = 3.0      # ... plus this per metre of level difference
     entry_min: float = 12.0           # one ship entering and making fast
     exit_min: float = 8.0             # one ship leaving
-    small_loa_m: float = 135.0        # ships up to this long (inland craft) enter and leave faster:
-    small_entry_min: float = 4.0
-    small_exit_min: float = 3.0
+    small_loa_m: float = 135.0        # ships up to this long (inland craft) enter and leave faster, one behind
+    small_entry_min: float = 2.0      # the other: 4 and 3 min each made an inland craft take 1.3 to 1.6 h to
+    small_exit_min: float = 1.5       # pass Hansweert, Kreekrak and Terneuzen, where the AIS has 0.7 to 0.9 h
     free_passage_min: float = 10.0    # one ship passing an open tidal gate
     gap_long_m: float = 10.0          # clearance between ships in a chamber, lengthwise
     gap_side_m: float = 2.0           # ... and side by side
@@ -56,8 +56,8 @@ class LockTimes:
 
 # assumed: how long a lockage waits to fill up (lockages carried one ship or none in three of four cycles). Set so
 # that the time per passage stays near the AIS (0.97 h): 20 and 15 min carried more ships but took 1.5 h
-BUNDLE_HOLD_MIN = 10.0
-EMPTY_HOLD_MIN = 10.0
+BUNDLE_HOLD_MIN = 5.0               # 10 min, with 4 + 3 min to enter and leave, made an inland craft take 1.3 h
+EMPTY_HOLD_MIN = 5.0                # to pass Hansweert where the AIS has 0.7 h (validation, MODEL.md §19)
 SMALL_SHIP_LOA_M, SMALL_SHIP_BEAM_M = 80.0, 9.0
 # operating time of a lockage (closing the gates, levelling, opening them), min, where Rijkswaterstaat gives it
 # ("bedieningstijd schutproces", Capaciteit Zeeuwse sluizen, 2001, table 3). Half of it is levelling and a quarter
@@ -67,13 +67,15 @@ OPERATING_MIN = {"Kreekrak west": 11.0, "Kreekrak east": 11.0, "Hansweert west":
 
 
 def _antwerp_operating_min(path=Path(__file__).resolve().parents[2] / "data" / "equipment" / "locks.csv"):
-    """The Antwerp locks' operating times from data/equipment/locks.csv. The file gives the time of one passage
-    (the ship sails in, the gates close, the level is made, they open, it sails out): the operating time is that
-    less one ship's entry and exit as modelled here (LockTimes: 12 + 8 min for a sea-going ship; 4 + 3 min at
-    Royers and Kattendijk, which take inland craft). Read as operating time alone the file would give passages
-    of 50 to 65 min at the sea locks and 40 min of gates and levelling at Zandvliet against the 11 to 26 min
-    Rijkswaterstaat gives for the Dutch ones; read as a passage it agrees with what the assumed times gave
-    (35 to 47 min with the tide)."""
+    """The Antwerp locks' operating times from data/equipment/locks.csv. The file's figure is called operation
+    time and passage time by its source. As the time of one whole passage (the ship sails in, the gates close,
+    the level is made, they open, it sails out) the operating time would be that less a ship's entry and exit
+    as modelled here; as the operating time alone it would be the figure itself. The AIS decides between them
+    as far as it can (validation, MODEL.md §19): a sea-going ship takes 1.75 h from 1 km before Zandvliet or
+    Berendrecht to 1 km beyond, 1.4 h at Kieldrecht and 1.3 h at Boudewijn and Van Cauwelaert; the first
+    reading gave 1.35, 1.0 and 1.3 h, the second would give a third of an hour more at each. The operating
+    time is set half-way: the figure less half the entry and exit of the ships the lock takes (LockTimes:
+    12 + 8 min sea-going; 2 + 1.5 min at Royers and Kattendijk, which take inland craft)."""
     t, out = LockTimes(), {}
     if not path.exists():
         return out
@@ -81,7 +83,7 @@ def _antwerp_operating_min(path=Path(__file__).resolve().parents[2] / "data" / "
         cells = [c.strip() for c in line.split(";")]
         if len(cells) >= 2 and cells[0] and cells[1]:
             ship = t.small_entry_min + t.small_exit_min if cells[0] in BARGE_LOCKS else t.entry_min + t.exit_min
-            out[cells[0]] = max(float(cells[1]) - ship, 4.0)
+            out[cells[0]] = max(float(cells[1]) - ship / 2, 4.0)
     return out
 
 

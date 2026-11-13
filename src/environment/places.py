@@ -45,6 +45,7 @@ SEA_GATES = ("sea_west", "sea_southwest", "sea_north")
 # 9 m with 20 m of water 4 km away, and every 15 m ship from the north started on it
 SEA_GATE_MIN_DEPTH_M = 20.0
 OUTSIDE = ("zeebrugge", "oosterschelde")
+CALL_PLACES = ("vlissingen",)   # placed at the median of the AIS calls there (background_traffic.ZONE_LOCATION)
 # entry source -> what to snap it to: a node region, a canal zone, or an anchorage name
 SNAP = {
     "ghent_terneuzen_canal": {"zone": "ghent_terneuzen_canal"},
@@ -146,6 +147,14 @@ def add_places(graph):
             if name not in locations and name in anchorage_of:
                 d = graph.nodes[anchorages[anchorage_of[name]]]
                 locations[name] = {"lon": d["longitude"], "lat": d["latitude"]}
+    # a port where ships call lies where its calls are, not where ships leaving it are first heard: nine in ten
+    # calls at Vlissingen are at Vlissingen-Oost (Sloehaven), 7 km up-river of the town, where the place lay.
+    # Sea-going ships for it stopped short of the river section off Vlissingen and inland craft sailed past it
+    # (validation: 60 against 106 sea-going passages a day there, 74 against 13 inland)
+    for name in CALL_PLACES:
+        loc = (getattr(background, "ZONE_LOCATION", {}) if background else {}).get(name)
+        if loc and name in locations:
+            locations[name] = {"lon": loc["lon"], "lat": loc["lat"]}
     for name, loc in locations.items():
         lon, lat = loc["lon"], loc["lat"]
         rule = SNAP.get(name, {"region": ("sea",)} if name in SEA_GATES or name in OUTSIDE else {})

@@ -62,18 +62,33 @@ ENTRY_LEAD_H = 8.0                  # enter the area this long before the berth 
 # schedule terminal code -> Terminal (graph.graph["terminals"]); other codes berth in a dock zone
 TERMINAL_OF_CODE = {"1700": "DP World Antwerp Gateway", "K1742": "MPET", "K1718": "MPET",
                     "K913": "PSA Noordzee Terminal", "K869": "PSA Europa Terminal"}
+# Container ships call that the schedule does not list: 2.4 a day in the AIS against 8.8 that it does list,
+# nearly all with a container line's name and four in five in Deurganckdok (container_calls.UNSCHEDULED_CALLS;
+# validation: 9 container ships at the four terminals at once where the AIS has 12). They are added at that
+# rate, each a schedule line of that zone's terminals drawn at random (its size and stay), at a random time,
+# with no delay (there is no scheduled time to be late for) and through the same paper berth plan. Zone ->
+# the schedule codes its unscheduled calls are drawn from (in Deurganckdok they are MSC ships: MPET)
+UNSCHEDULED_CODES = {"antwerp_deurganckdok": ("K1742", "K1718"), "antwerp_river_quays": ("K913", "K869"),
+                     "antwerp_right_bank_docks": ("ACOT",)}
+# the berth zones of the four terminals, for a line without a terminal code
+TERMINAL_ZONES = {"antwerp_deurganckdok": ("1700", "K1742", "K1718"), "antwerp_river_quays": ("K913", "K869")}
+ANTWERP_ZONES = ("antwerp_deurganckdok", "antwerp_river_quays", "antwerp_right_bank_docks", "antwerp_left_bank_docks",
+                 "antwerp_other")
 # the TEU fit's scatter can exceed any real ship: the largest container ships are 400 x 61.5 m
 MAX_LOA_M, MAX_BEAM_M = 400.0, 61.5
 BACKGROUND_CLASSES = ("bulk_general", "tanker", "inland_cargo", "inland_tanker", "passenger")
-# Inland arrivals are scaled to Rijkswaterstaat's lock counts: commercial passages a day at Kreekrak 189 and
-# Hansweert 113 (NMCA 2017, 69,058 and 41,112 a year) and Terneuzen 126 (IVS90 2018, Deltares 2021), 428 in all,
-# 11 of them sea-going ships in the model. The AIS rates give 311 inland passages a day there (fits of 12 Nov
-# 2026, three 21-day runs: 447 with the factor 1.44 of the fits before, 194, 116 and 137 at the three locks), so
-# the factor is (428 - 11) / 311. The AIS hears an inland craft in about a third of its snapshots and misses
-# trips out and back; the gap is alike at the three locks. The inland stays are divided by the same factor
-# (engine), so that the craft lying in port stay at the AIS number. Set again after every re-fit of the rates
-# (the run's summary gives the passages a day per lock).
-INLAND_TRIP_SCALE = round((428 - 11) / 311, 2)
+# Inland craft that come in by the Schelde-Rijn canal, the Kanaal door Zuid-Beveland and the Ghent-Terneuzen
+# canal are scaled to the passages of their locks. In the AIS record itself (ships changing basin, validate.py)
+# inland craft pass Kreekrak 186, Hansweert 103 and Terneuzen 133 times a day, 423 in all; Rijkswaterstaat
+# counts 189 and 113 commercial passages at the first two (NMCA 2017) and 126 at Terneuzen (IVS90 2018). The
+# fitted trips give 315: a craft out and back by one lock with no call heard in between is one trip, and one
+# first heard inside the port has no lock on its way in. Of the 315, 26 are made by craft that came in
+# elsewhere and leave by a canal; the factor on the craft from the canals is (423 - 26) / (315 - 26).
+# The stays of those craft are divided by it (engine), so that the craft lying in port stay at the AIS number.
+# Every inland craft was scaled until the validation: that put a third too many past Antwerp on the river,
+# where the trips are all heard (63 a day at km 88 against 46). Set again after a re-fit of the rates.
+INLAND_TRIP_SCALE = round((423 - 26) / (315 - 26), 2)
+INLAND_SCALED_SOURCES = ("schelde_rijn_canal", "zuid_beveland_canal", "ghent_terneuzen_canal", "terneuzen")
 INLAND_CLASSES = ("inland_cargo", "inland_tanker")
 # canals reached only through a lock: the largest chamber's length and width (environment LOCKS):
 # a ship entering from or leaving to them must fit (Kreekrak, Hansweert, Royers)
@@ -136,7 +151,8 @@ def read_schedule(path=SCHEDULE):
 
 class Generator:
     def __init__(self, start, rng, delays=True, schedule=SCHEDULE, background=True, containers=True,
-                 container_mode="replay", rate_factor=1.0, bunching=True, rng_attributes=None, quay_m=None):
+                 container_mode="replay", rate_factor=1.0, bunching=True, rng_attributes=None, quay_m=None,
+                 unscheduled=True):
         self.start = pd.Timestamp(start)
         self.rng = rng
         self.rng_att = rng if rng_attributes is None else rng_attributes
@@ -154,6 +170,13 @@ class Generator:
             stay = (df.departure - df.arrival).dt.total_seconds() / 3600
             self.stays = {b: stay[(df.teu.map(cranes_for) == b) & stay.notna()].to_numpy() for b in set(df.teu.map(cranes_for))}
             self.stays_all = stay[stay.notna()].to_numpy()
+            # unscheduled calls: (calls a day, the schedule lines to draw from) per zone with terminals
+            off = getattr(CC, "UNSCHEDULED_CALLS", None) if unscheduled else None
+            self.unscheduled = []
+            for zone, codes in UNSCHEDULED_CODES.items():
+                pool = df[df.terminal.isin(codes) & df.departure.notna()].reset_index(drop=True)
+                if off and off["zones"].get(zone) and len(pool):
+                    self.unscheduled.append((off["per_day"] * off["zones"][zone], pool))
             if container_mode == "replay":
                 self._schedule(df, quay_m or {})
             elif container_mode == "nhpp":
@@ -192,7 +215,30 @@ class Generator:
             if ship.spawn_t < 0:             # due before the run starts: the warm-up replaces it
                 continue
             self.pending.append(ship)
+        days = (df.arrival.max() - df.arrival.min()).total_seconds() / 86400.0
+        for ship in self._unscheduled(df.arrival.min(), days, self.replay["plan"], quay_m):
+            if ship.spawn_t >= 0:
+                self.pending.append(ship)
         self.pending.sort(key=lambda s: s.spawn_t)
+
+    def _unscheduled(self, begin, days, plans, quay_m):
+        """The container calls the schedule does not list, over `days` from `begin` (UNSCHEDULED_CODES)."""
+        out = []
+        for per_day, pool in self.unscheduled:
+            for _ in range(self.rng.poisson(per_day * days)):
+                arrival = begin + pd.Timedelta(days=float(self.rng.uniform(0.0, days)))
+                r = pool.iloc[int(self.rng_att.integers(len(pool)))]
+                stay = r.departure - r.arrival
+                quay = TERMINAL_OF_CODE.get(r.terminal)
+                berth_t = arrival
+                if quay in quay_m:
+                    berth_t = self._plan_berth(plans.setdefault(quay, []), arrival, stay,
+                                               CC.dimensions_for_teu(r.teu)["loa"] + QUAY_GAP_M, quay_m[quay])
+                ship = self._container(r, arrival, arrival + stay, berth_t)
+                ship.schedule["arrival_min"] = None        # no scheduled time: nothing to be late against
+                ship.schedule["unscheduled"] = True
+                out.append(ship)
+        return out
 
     # ------------------------------------------------------------------ a schedule from whole weeks
     def _prepare_weeks(self, df, quay_m):
@@ -255,6 +301,9 @@ class Generator:
             ship = self._container(r, arrival, departure, berth_t)
             if ship.spawn_t >= 0:                           # due before the run starts: the warm-up replaces it
                 self.pending.append(ship)
+        for ship in self._unscheduled(self._utc_of(begin), 7.0, w["plan"], w["quay"]):
+            if ship.spawn_t >= 0:
+                self.pending.append(ship)
 
     @staticmethod
     def _plan_berth(plan, berth_t, stay, metres, quay_m):
@@ -278,7 +327,7 @@ class Generator:
 
     def _container(self, r, arrival, departure, berth_t):
         """A container ship for schedule line r berthing at berth_t, with its scheduled arrival / departure."""
-        code = r.terminal or self.rng_att.choice(self.codes.index, p=self.codes.to_numpy())    # missing code: drawn
+        code = r.terminal or self._code_for_line_without_one()
         spawn = self.minutes(berth_t) - ENTRY_LEAD_H * 60
         dims = CC.dimensions_for_teu(r.teu, self.rng_att)
         if pd.notna(departure):
@@ -288,12 +337,19 @@ class Generator:
             pool = pool if pool is not None and len(pool) else self.stays_all
             stay_h = float(pool[int(self.rng_att.integers(len(pool)))])
         zone = None
-        if code not in TERMINAL_OF_CODE:
+        if code.startswith("zone:"):
+            zone = code[5:]
+        elif code not in TERMINAL_OF_CODE:
             zones = CC.TERMINAL_LOCATION.get(code, {}).get("zones") or {"antwerp_right_bank_docks": 1.0}
             zone = max(zones, key=zones.get)
+        # one in nine container ships comes in at anchor (AIS, P_CATEGORY_GIVEN_CLASS) and lies there for an anchor
+        # stay of container ships before it berths at its berth time: it enters that much earlier (engine.enter).
+        # Slowed at sea instead, as all of them were, the model had 0.4 container ships at anchor against 2.1
+        anchored = self.rng_att.random() < EP.P_CATEGORY_GIVEN_CLASS.get("container", {}).get("anchorage", 0.0)
+        source = EP.sample_source("container", self.rng_att, category="anchorage" if anchored else "sea")
         ship = Ship(id=f"C{next(self.counter):04d}", cls="container", loa=round(min(dims["loa"], MAX_LOA_M), 1),
                     beam=round(min(dims["beam"], MAX_BEAM_M), 1), draught=round(min(dims["draught"], 16.0), 2), level=1,
-                    source=EP.sample_source("container", self.rng_att, category="sea"),
+                    source=source,
                     destination=zone or "antwerp_terminal", spawn_t=spawn, teu=float(r.teu), name=r.vessel,
                     terminal=TERMINAL_OF_CODE.get(code), berth_zone=zone,
                     schedule={"code": code, "arrival": arrival, "departure": departure,
@@ -304,7 +360,27 @@ class Generator:
                     stay_h=stay_h, cranes_wanted=cranes_for(r.teu))
         if zone:
             ship.dwell_h = stay_h
+        if anchored and source.startswith("anchorage_"):
+            ship.anchor_wait_h = float(BT.sample_anchorage_wait("container", self.rng_att))
+            ship.spawn_t -= 60.0 * ship.anchor_wait_h
         return ship
+
+    def _code_for_line_without_one(self):
+        """A line without a terminal code: where such lines' ships call in the AIS (CC.TERMINAL_LOCATION[""]: two
+        in three in the docks, not at a terminal). A terminal zone gets one of its terminals' codes by the
+        schedule's shares; a dock zone gets "zone:<name>". They used to draw from the codes of the other lines, so
+        nearly all went to a terminal (validation, MODEL.md §19: 7 container ships at berths in the docks short)."""
+        zones = {z: p for z, p in (CC.TERMINAL_LOCATION.get("", {}).get("zones") or {}).items() if z in ANTWERP_ZONES}
+        if not zones:
+            return self.rng_att.choice(self.codes.index, p=self.codes.to_numpy())
+        names = list(zones)
+        p = np.array([zones[z] for z in names], dtype=float)
+        zone = names[int(self.rng_att.choice(len(names), p=p / p.sum()))]
+        codes = [c for c in TERMINAL_ZONES.get(zone, ()) if c in self.codes.index]
+        if codes:
+            w = self.codes[codes].to_numpy(dtype=float)
+            return codes[int(self.rng_att.choice(len(codes), p=w / w.sum()))]
+        return "zone:" + zone
 
     def _containers_nhpp(self, t0, dt):
         """Container ships entering in [t0, t0 + dt): berth arrivals ENTRY_LEAD_H later at the fitted rate."""
@@ -339,8 +415,8 @@ class Generator:
         for cls in BACKGROUND_CLASSES:
             for source, rate in EP.RATE_PER_HOUR[cls].items():
                 lam = rate * EP.HOURLY_FACTOR[cls][hour] * dt / 60.0
-                if cls in INLAND_CLASSES:
-                    lam *= INLAND_TRIP_SCALE
+                scale = INLAND_TRIP_SCALE if cls in INLAND_CLASSES and source in INLAND_SCALED_SOURCES else 1.0
+                lam *= scale
                 for _ in range(self.rng.poisson(lam)):
                     dest = BT.sample_destination(cls, self.rng_att, source)
                     a = self._fitting_attributes(cls, source, dest)
@@ -349,6 +425,7 @@ class Generator:
                                 beam=float(a["beam"] or round(loa / 7, 1)),
                                 draught=float(a["draught"] or self.median_draught[cls]), level=2, source=source,
                                 destination=dest, spawn_t=t0 + self.rng.uniform(0, dt), dg=a["dg"])
+                    ship.trip_scale = scale
                     out.append(ship)
         return out
 

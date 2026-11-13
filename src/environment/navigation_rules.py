@@ -81,6 +81,18 @@ PLANNING_SPEED_KN = {
     ("bulk_tanker", "any"): {"arrival": {"sea": 12.0, "river": 12.0}, "departure": {"sea": 12.0, "river": 10.0}},
 }
 
+# What ships sail at, as a factor on the planning speed: (class group, direction, leg). Calibrated so that the
+# median time between two river sections (km 8 off Vlissingen and km 62 at CP) and from 3.10 deg E to km 8 is
+# the AIS one (validation, MODEL.md §19). JA22 is for planning: out of the river ships sail faster than it says
+# (a third less time than at 10 kn), and the factor also makes up for what the model loses on the way (its path
+# over the mesh is 3 % longer than a track, and a ship behind a slower one waits for room to pass)
+SAILING_FACTOR = {
+    ("container", "arrival", "river"): 1.14, ("container", "departure", "river"): 1.29,
+    ("container", "arrival", "sea"): 0.90, ("container", "departure", "sea"): 0.95,
+    ("bulk_tanker", "arrival", "river"): 1.06, ("bulk_tanker", "departure", "river"): 1.31,
+    ("bulk_tanker", "arrival", "sea"): 1.00, ("bulk_tanker", "departure", "sea"): 1.07,
+}
+
 # reference points (lon, lat): their chainage goes to graph.graph["reference_chainage_m"]
 REFERENCE_POINTS = {
     "vlissingen": ((3.600, 51.440), "pilot change sea -> river (regs §1.2); end of the 'sea' planning leg"),
@@ -163,14 +175,16 @@ def dock_priority(a, b):
 
 
 def planning_speed_kn(ship_class, draught_m, direction, leg):
-    """JA22 planning speed over the ground; None for classes JA22 does not list."""
+    """The speed a ship sails at: the JA22 planning speed times SAILING_FACTOR; None for classes JA22 does
+    not list."""
     if ship_class == "container":
         key = ("container", ">14.5" if draught_m > 14.5 else "<=14.5")
     elif ship_class in ("bulk_general", "tanker"):
         key = ("bulk_tanker", "any")
     else:
         return None
-    return PLANNING_SPEED_KN[key][direction].get(leg)
+    v = PLANNING_SPEED_KN[key][direction].get(leg)
+    return None if v is None else v * SAILING_FACTOR.get((key[0], direction, leg), 1.0)
 
 
 # ---------------------------------------------------------------------------

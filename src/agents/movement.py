@@ -407,7 +407,10 @@ class Mover:
         sog = stw + current
         if not np.isnan(limit):
             sog = min(sog, limit)
-        if ship.remaining_m < 1500:                     # last approach to a berth / lock: slow
+        if ship.remaining_m < 1500 and ship.lock_index >= 0:   # last approach to a lock: slow
+            # (not to a berth: the mooring time, fitted on the AIS from 1 km off the berth to lying still,
+            # holds that approach; slowing as well counted it twice: a sea-going ship under way in the docks
+            # 3.9 at once against 2.8 in the AIS, validation MODEL.md §19)
             sog = min(sog, sim.dock_speed_kn)
         if self.vis_cap is not None:                    # restricted visibility (COLREG 19)
             sog = min(sog, self.vis_cap)

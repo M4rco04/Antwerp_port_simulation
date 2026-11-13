@@ -25,7 +25,10 @@ INLAND = ("inland_cargo", "inland_tanker")
 TANKERS = ("tanker", "inland_tanker")
 
 # speed through the water (kn) for classes JA22 gives no planning speed for: assumed
-CLASS_SPEED_KN = {"inland_cargo": 8.0, "inland_tanker": 8.0, "passenger": 12.0}
+# inland craft: 9 kn makes the median time between two river sections (km 32 and km 48) the AIS one, 1.17 h
+# (validation, MODEL.md §19); the AIS median speed over ground there is 8.6 kn and 8 kn gave 1.4 h (the path
+# over the mesh is longer than a track, and a craft behind a slower one waits for room to pass)
+CLASS_SPEED_KN = {"inland_cargo": 9.0, "inland_tanker": 9.0, "passenger": 12.0}
 DOCK_SPEED_KN = 5.0                 # manoeuvring in docks / approaching a berth when no limit applies
 UKC_FRACTION = 0.10                 # under-keel clearance: 10 % of the draught for sea-going ships ...
 UKC_INLAND_M = 0.3                  # ... and this for inland craft

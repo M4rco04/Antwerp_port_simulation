@@ -155,6 +155,20 @@ def entry_to_berth(entries, calls, catalogue):
     return {cat: summary(hours[category == cat]) for cat in sorted(category.unique())}
 
 
+def unscheduled(data, calls):
+    """Container ships that call without a line in the schedule: container-class entries of ships whose name
+    the schedule does not have, a day, and the berth zone of their longest call. Nearly all carry a container
+    line's name (the rest are cargo ships of 250 m or more), and four in five call in Deurganckdok."""
+    names = set(data.schedule.Vessel.map(normalise_name))
+    e = data.entries[data.entries.scheldt_bound & (data.entries["class"] == "container")]
+    off = e[~e.mmsi.map(data.ships.name).map(normalise_name).isin(names)]
+    days = sum((b - a).total_seconds() for a, b in data.windows) / 86400.0
+    seen = calls[calls.visit.isin(off.visit)]
+    main = seen.loc[seen.groupby("visit").apply(lambda g: (g.end - g.start).idxmax())] if len(seen) else seen
+    return {"per_day": round(len(off) / days, 2), "n": int(len(off)), "scheduled_per_day": round((len(e) - len(off)) / days, 2),
+            "zones": normalise(main.zone.value_counts().to_dict())}
+
+
 def fit(data, stops):
     container = schedule_ships(data.schedule, data.ships)
     calls = port_calls(berth_calls(stops))
@@ -163,12 +177,18 @@ def fit(data, stops):
     for terminal, g in matched.dropna(subset=["terminal"]).groupby("terminal"):
         terminals[terminal] = {"lat": round(float(g.lat.median()), 5), "lon": round(float(g.lon.median()), 5),
                                "zones": normalise(g.zone.value_counts().to_dict()), "n": len(g)}
+    # lines without a terminal code (one in seven, small ships: median 1,300 TEU) call mostly in the docks
+    nocode = matched[matched.terminal.isna() | (matched.terminal.astype(str).str.strip() == "")]
+    if len(nocode):
+        terminals[""] = {"lat": round(float(nocode.lat.median()), 5), "lon": round(float(nocode.lon.median()), 5),
+                         "zones": normalise(nocode.zone.value_counts().to_dict()), "n": len(nocode)}
     return {
         "TEU_DIMENSIONS": fit_dimensions(container),
         "SCHEDULE_DELAY_H": {"arrival": summary(matched.arrival_delay_h),
                              "departure": summary(matched.departure_delay_h)},
         "ENTRY_TO_BERTH_H": entry_to_berth(data.entries, calls, data.zones.catalogue()),
         "TERMINAL_LOCATION": terminals,
+        "UNSCHEDULED_CALLS": unscheduled(data, calls),
     }
 
 
@@ -189,7 +209,10 @@ SCHEDULE_DELAY_H   arrival / departure -> n, mean_h, median_h, sd_h, p10_h, p90_
                    delay within the window goes unseen).
 ENTRY_TO_BERTH_H   entry category (sea / anchorage) -> the same summary: hours from entering
                    the area to berthing in Antwerp (includes any anchorage wait)
-TERMINAL_LOCATION  schedule terminal code -> median lat/lon of its berth calls, berth zones, n
+TERMINAL_LOCATION  schedule terminal code -> median lat/lon of its berth calls, berth zones, n ("" = the
+                   lines without a code)
+UNSCHEDULED_CALLS  container ships calling without a line in the schedule: per_day, n, the calls a day of the
+                   ships the schedule does have, and the berth zones of their calls
 
 Draught is the largest draught a ship reported in AIS (ships report their current draught,
 not the design maximum). Small samples: check n before relying on the tails.

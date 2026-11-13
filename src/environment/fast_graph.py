@@ -257,7 +257,7 @@ class FastGraph:
 
     def route(self, source, target, draught_m, ukc_m=0.0, loa_m=0.0, beam_m=0.0, level=None, nodes_mask=None,
               lock_penalty_m=LOCK_PENALTY_M, keep_right=False, min_clearance=None, lane_factor=None,
-              depth_penalty=None, avoid_locks=()):
+              depth_penalty=None, avoid_locks=(), lock_cost=None):
         """Shortest allowed path between two graph node ids (list of node ids); raises
         networkx.NetworkXNoPath like find_route. keep_right: prefer the starboard half of the
         river (regs §5.1), see keep_right_factor. min_clearance: only cells with at least this
@@ -266,7 +266,8 @@ class FastGraph:
         fairway); where it is nan the keep-right factor applies. depth_penalty = (level, need_m, per_m):
         a cell shallower than need_m at that level costs 1 + per_m x the metres it lacks: the route keeps
         to the deep channel wherever there is one, without forbidding the cells that need the tide.
-        avoid_locks: names of locks this ship takes only if no other will do."""
+        avoid_locks: names of locks this ship takes only if no other will do. lock_cost: {lock name: metres}
+        added to a passage of that lock (a lock this ship would rather not take)."""
         import networkx as nx
 
         s, t = self.index[int(source)], self.index[int(target)]
@@ -286,6 +287,8 @@ class FastGraph:
         w = st["weight"] + np.where(st["lock_entry"], lock_penalty_m / 2, 0.0) + st["lock_extra"]
         for name in avoid_locks:
             w = w + self._lock_entries(name) * LITTLE_USED_LOCK_PENALTY_M / 2
+        for name, metres in (lock_cost or {}).items():
+            w = w + self._lock_entries(name) * metres / 2
         if lane_factor is not None:
             w = w * np.where(np.isfinite(lane_factor), lane_factor, self.keep_right_factor() if keep_right else 1.0)
         elif keep_right:
