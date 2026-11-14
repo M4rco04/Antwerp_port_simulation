@@ -69,6 +69,11 @@ TRANSIT_MAX_H = 12.0
 # a ship being moored or unmoored, or taking or changing its pilot, lies at a node while a timer runs in the
 # model; a real one is moving then (the AIS mooring times run from 1 km off the berth): under way on both sides
 MANOEUVRING = ("mooring", "unmooring", "boarding", "pilot_change")
+# a ship lying at a berth or in a port is heard by the AIS where it lies; in the model it gets a fix there too, lying
+# still. Without one, a craft that called within 2 km of a lock and then passed it was timed from its last fix
+# before the call: a sixth of the inland passages of Terneuzen took over 2.5 h, their 90th percentile 3.4 h
+# where the AIS has 1.8 h
+LYING = ("at_berth", "dwell_port")
 # sea-going ships calling at Antwerp a day, from the port's own statistics: 13,655 in 2020, 10,608 from January
 # to September 2021 (Port of Antwerp press releases): 37.3 and 38.9 a day. In the fixes: sea-going ships passing
 # km 48 up-river (nothing but Antwerp lies beyond for them)
@@ -82,10 +87,14 @@ LOCKS = {"Zandvliet-Berendrecht": ("Zandvliet", "Berendrecht"), "Boudewijn-Van C
          "Royers-Kattendijk": ("Royers", "Kattendijk"), "Kieldrecht": ("Kieldrecht",), "Kallo": ("Kallo",),
          "Terneuzen": ("Terneuzen",), "Hansweert": ("Hansweert",), "Kreekrak": ("Kreekrak",)}
 LOCK_RING_M, LOCK_EDGE_M, LOCK_MAX_H = 1000.0, 800.0, 6.0
+LOCK_FLIP_MIN = 60.0
 AWAY_H = 6.0                        # a ship under way, then silent this long, has been out of the area
 # Rijkswaterstaat's commercial passages a day (NMCA 2017; IVS90 2018, Deltares 2021): generator.INLAND_TRIP_SCALE
 RWS_PASSAGES = {"Kreekrak": 189.0, "Hansweert": 113.0, "Terneuzen": 126.0}
 TERMINAL_ZONES = ("antwerp_deurganckdok", "antwerp_river_quays")
+# container-ship stops the model does not make (MODEL.md §18): lay-up or repair, and Zeebrugge
+CONTAINER_LAYUP_H = 96.0
+UNSIMULATED_ZONES = ("zeebrugge",)
 MIN_DAY_H = 22.0                    # a day of the record counts when this much of it was recorded
 STEP_MIN = 5.0
 
@@ -150,11 +159,37 @@ def lock_passages(f, geo):
         while hi < len(t) - 1 and ids[hi] == ids[k] and b[hi] == b[k + 1] and dist[i, hi] < LOCK_RING_M and t[hi] - t[k] < LOCK_MAX_H * 60:
             hi += 1
         ring = lambda j, basin: (ids[j] == ids[k] and b[j] == basin and LOCK_RING_M <= dist[i, j] <= LOCK_RING_M + LOCK_EDGE_M)
-        tight = ring(lo, b[k]) and ring(hi, b[k + 1]) and t[hi] - t[lo] <= LOCK_MAX_H * 60
-        rows.append((on[k + 1], names[i], (t[hi] - t[lo]) / 60.0, tight))
+
+        def crossing(out, inside, basin):
+            """When the ship crossed the ring: at its fix just outside it if that lies within LOCK_EDGE_M of the
+            ring; else between that fix and the next one inside, by the distances, when the two are close in time
+            (a ship at 9 kn sails 1,400 m between two fixes and has none in a ring of 800 m: timing only the
+            ships with a fix in it kept the slow ones, 7 % of the model's inland passages of Terneuzen)."""
+            if ring(out, basin):
+                return t[out]
+            if not (0 <= inside < len(t) and ids[out] == ids[k] == ids[inside] and b[out] == basin == b[inside]
+                    and dist[i, out] > LOCK_RING_M > dist[i, inside] and abs(t[out] - t[inside]) <= TIGHT_GAP_MIN):
+                return None
+            return t[out] + (t[inside] - t[out]) * (dist[i, out] - LOCK_RING_M) / (dist[i, out] - dist[i, inside])
+
+        t_in, t_out = crossing(lo, lo + 1, b[k]), crossing(hi, hi - 1, b[k + 1])
+        tight = t_in is not None and t_out is not None and t_out - t_in <= LOCK_MAX_H * 60
+        rows.append((on[k + 1], names[i], (t_out - t_in) / 60.0 if tight else (t[hi] - t[lo]) / 60.0, tight))
     out = f.iloc[[r[0] for r in rows]][["id", "cls", "grp", "t"]].reset_index(drop=True)
     out["lock"], out["hours"], out["tight"] = [r[1] for r in rows], [r[2] for r in rows], [r[3] for r in rows]
-    return out
+    # a ship through a lock and back within LOCK_FLIP_MIN has not passed it (a lockage and the turn take longer): it
+    # lies beside the lock and its position falls on either side. Such pairs are no passages (AIS: 5 of the 38
+    # sea-going passages a day of Zandvliet-Berendrecht, 18 of the 174 of inland craft at Kreekrak)
+    out = out.sort_values(["id", "lock", "t"], kind="stable").reset_index(drop=True)
+    i_, l_, t_ = out.id.to_numpy(), out.lock.to_numpy(), out.t.to_numpy()
+    keep, j = np.ones(len(out), dtype=bool), 0
+    while j < len(out) - 1:
+        if i_[j] == i_[j + 1] and l_[j] == l_[j + 1] and t_[j + 1] - t_[j] < LOCK_FLIP_MIN:
+            keep[j] = keep[j + 1] = False
+            j += 2
+        else:
+            j += 1
+    return out[keep].sort_values("t", kind="stable").reset_index(drop=True)
 
 
 def tracks(f, geo):
@@ -263,10 +298,15 @@ def model_frame(sim, geo):
     # the ships manoeuvring (MANOEUVRING): a fix at their node every step until their next record
     p = p.sort_values(["ship", "step"], kind="stable")
     until = p.step.shift(-1).where(p.ship.eq(p.ship.shift(-1)), sim.k + 1)
-    still = p[(p.route < 0) & p.state.isin(MANOEUVRING)].assign(until=until)
+    # ... or until the ship left the area: a ship that unmoored and was gone within the step (an exit next to its
+    # berth, a call on the Ghent canal) has no later record, and stayed "under way" there to the end of the run
+    # (sea-going ships under way in the docks 4 to 8 where the AIS has 2.8, growing with the length of the run)
+    gone = {x.id: math.ceil(e["t"] / STEP_MIN) for x in sim.done for e in x.log[-3:] if e["event"] == "exited"}
+    until = np.minimum(until, p.ship.map(gone).fillna(sim.k + 1))
+    still = p[(p.route < 0) & p.state.isin(MANOEUVRING + LYING)].assign(until=until)
     # (a pilot changed at a lock boards in the chamber, where a real ship lies still: only at sea and on the river)
     z = geo.zone[still.value.to_numpy().astype(np.int64)]
-    still = still[still.state.isin(("mooring", "unmooring")) | np.isin(z, ("sea", "river"))]
+    still = still[still.state.isin(("mooring", "unmooring") + LYING) | np.isin(z, ("sea", "river"))]
     reps = (still.until - still.step).clip(lower=1).astype(int).to_numpy()
     s_ship = np.repeat(still.ship.to_numpy(), reps)
     s_step = np.repeat(still.step.to_numpy(), reps) + np.concatenate([np.arange(r) for r in reps]) if len(reps) else np.array([], dtype=int)
@@ -274,7 +314,7 @@ def model_frame(sim, geo):
     ship = np.r_[m.ship.to_numpy(), s_ship]
     step = np.r_[m.step.to_numpy(), s_step]
     node = np.r_[node, s_node]
-    kn = np.r_[np.nan_to_num(kn), np.full(len(s_node), UNDER_WAY_KN)]
+    kn = np.r_[np.nan_to_num(kn), np.repeat(np.where(still.state.isin(LYING), 0.0, UNDER_WAY_KN), reps)]
     by = sim.by_id
     cls = pd.Series(ship).map(lambda i: by[i].cls)
     f = pd.DataFrame({"id": ship, "t": step * STEP_MIN, "cls": cls.to_numpy(),
@@ -445,9 +485,19 @@ def observed(cache=None):
     cut = np.flatnonzero((vis[1:] != vis[:-1]) | ((tm[1:] - tm[:-1] >= AWAY_H * 60) & ((sog[1:] >= UNDER_WAY_KN) | (sog[:-1] >= UNDER_WAY_KN))))
     lo, hi = np.r_[0, cut + 1], np.r_[cut, len(tm) - 1]
     there = pd.DataFrame({"cls": pd.Series(vis[lo]).map(v["class"]).to_numpy(), "start": tm[lo], "end": tm[hi]})
+    # container calls the model leaves out by design (MODEL.md §18): lay-up and repair (a stop of more than
+    # CONTAINER_LAYUP_H) and calls at Zeebrugge, which is not simulated. They are taken out of the ships at a
+    # berth and in the area alike (5 ships at once of the 20 at berths)
+    out_of_scope = (calls.cls == "container") & ((calls.hours > CONTAINER_LAYUP_H) | calls.zone.isin(UNSIMULATED_ZONES))
+    left_out = calls[out_of_scope]
+    calls = calls[~out_of_scope]
     for c in SEA + INLAND:
         g = there[there.cls == c]
-        out[f"stock.{c}.in_area"] = day_means(interval_stock(g.start, g.end, edges))
+        days_in = interval_stock(g.start, g.end, edges)
+        lo_c = left_out[left_out.cls == c]
+        if len(lo_c):
+            days_in = [a - b for a, b in zip(days_in, interval_stock(minute(lo_c.start), minute(lo_c.end), edges))]
+        out[f"stock.{c}.in_area"] = day_means(days_in)
         b = calls[calls.cls == c]
         out[f"stock.{c}.at_berth"] = day_means(interval_stock(minute(b.start), minute(b.end), edges))
         a = anchor[anchor.cls == c]
@@ -482,7 +532,11 @@ def observed(cache=None):
         out[f"arrivals.{c}"] = {"value": scaled, "se": scaled / rate * math.sqrt(rate * hours / 24.0) / (hours / 24.0),
                                 "n": int(rate * hours / 24.0)}
     sched = G.read_schedule()
-    in_record = sched[(sched.arrival >= t0) & (sched.arrival <= data.times.iloc[-1])]
+    # the model counts a ship when it enters the area: its scheduled berth time plus its delay (mean of the fit),
+    # less the lead it enters with. The lines counted are those entering during the record on that reckoning (by
+    # their scheduled time alone, the busy days just before the record were left out: 9.3 a day against 10.3)
+    shift = pd.Timedelta(hours=float(d.mean()) - G.ENTRY_LEAD_H)
+    in_record = sched[(sched.arrival + shift >= t0) & (sched.arrival + shift <= data.times.iloc[-1])]
     days = span / 1440.0
     # ... and the container calls the schedule lacks, at the terminals (generator.UNSCHEDULED_CODES)
     off = getattr(CC, "UNSCHEDULED_CALLS", None) or {"per_day": 0.0, "zones": {}}
