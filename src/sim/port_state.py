@@ -72,7 +72,8 @@ class PortStateLog:
                 task, task_ship = None, None
                 if c.task:
                     task, item = c.task
-                    task_ship = item.ship.ship_id if hasattr(item, "ship") else item.ship_id
+                    # (a hold, locks.LOCK_HOLD_P, is a task of the chamber alone: no ship)
+                    task_ship = None if item is None else item.ship.ship_id if hasattr(item, "ship") else item.ship_id
                 reserved = c.reserved_for
                 value = [c.state, c.side, _r(now + c.timer_min) if c.timer_min > 1e-9 else None, task, task_ship,
                          [p.ship.ship_id for p in c.ships], [s.ship_id for s in c.queue["a"]],

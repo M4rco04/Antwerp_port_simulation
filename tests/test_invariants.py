@@ -78,6 +78,69 @@ def test_one_ship_through_a_lock_takes_the_published_time():
     assert not lock.chambers[0].ships
 
 
+def _lockage(queue, rng=None, minutes=240):
+    """One sea lock (400 x 60 m, operating time from LockTimes), the ships of `queue` asking at side a at t = 0:
+    the events until the chamber is empty again."""
+    lock = Lock("Sea lock", [Chamber("sea chamber", 400.0, 60.0, 15.0)], sides={"a": {"nodes": []}, "b": {"nodes": []}},
+                times=LockTimes(), rng=rng)
+    for ship in queue:
+        lock.request(ship, 0.0)
+    events, t = [], 0.0
+    while t < minutes and sum(e["event"] == "exit" for e in events) < len(queue):
+        events += lock.step(t, 0.5, {"a": 0.0, "b": 0.0})
+        t += 0.5
+    return events
+
+
+def test_an_inland_craft_goes_in_beside_a_sea_going_ship_and_leaves_before_it():
+    """The barge asked first, but the ship goes in first (12 min) and the barge beside it, with no time of its own
+    (ALONGSIDE_ENTRY_MIN); at the other side the barge is away first."""
+    barge, ship = ShipRequest("barge", 110.0, 11.4, 3.0, "a"), ShipRequest("ship", 200.0, 30.0, 9.0, "a")
+    ev = _lockage([barge, ship])
+    at = {(e["event"], e["ship"]): e["t"] for e in ev if e["ship"]}
+    times = LockTimes()
+    assert at[("enter", "ship")] == pytest.approx(times.entry_min, abs=0.6)
+    assert at[("enter", "barge")] - at[("enter", "ship")] == pytest.approx(locks.ALONGSIDE_ENTRY_MIN, abs=0.6)
+    assert at[("exit", "barge")] < at[("exit", "ship")]
+    # two barges on their own still go in one behind the other, each in its own time
+    ev = _lockage([ShipRequest("b1", 110.0, 11.4, 3.0, "a"), ShipRequest("b2", 110.0, 11.4, 3.0, "a")])
+    at = {(e["event"], e["ship"]): e["t"] for e in ev if e["ship"]}
+    assert at[("enter", "b2")] - at[("enter", "b1")] == pytest.approx(times.small_entry_min, abs=0.6)
+
+
+def test_a_lock_holds_a_lockage_only_when_it_draws_one(monkeypatch):
+    """LOCK_HOLD_P: with probability 1 every lockage waits for its drawn time before the gates close; with 0, or
+    for a lock without a random stream, none does; a tide-dependent ship is never held."""
+    class Always:
+        def random(self):
+            return 0.0
+
+        def exponential(self, mean):
+            return 30.0
+
+    barge = lambda prio=4: ShipRequest("barge", 110.0, 11.4, 3.0, "a", prio)
+    out = lambda ev: next(e["t"] for e in ev if e["event"] == "exit")
+    plain = out(_lockage([barge()]))
+    monkeypatch.setattr(locks, "LOCK_HOLD_P", 1.0)
+    held = _lockage([barge()], rng=Always())
+    assert sum(e["event"] == "held" for e in held) == 1
+    assert out(held) == pytest.approx(plain + 30.0, abs=1.0)
+    assert out(_lockage([barge(prio=2)], rng=Always())) <= plain + 1.0       # tide-dependent: no hold of any kind
+    monkeypatch.setattr(locks, "LOCK_HOLD_P", 0.0)
+    assert out(_lockage([barge()], rng=Always())) == pytest.approx(plain, abs=1.0)
+
+
+def test_a_new_random_stream_does_not_move_the_old_ones():
+    """The streams are spawned in the order of engine.STREAMS: one added at the end (the locks' holds) leaves the
+    arrivals, the weather and the rest as they were, so earlier runs stay comparable seed by seed."""
+    import engine
+
+    assert engine.STREAMS[:7] == ("arrivals", "attributes", "weather", "service", "choice", "movement", "speed")
+    old = [np.random.default_rng(s).random() for s in np.random.SeedSequence(5).spawn(7)]
+    new = [np.random.default_rng(s).random() for s in np.random.SeedSequence(5).spawn(len(engine.STREAMS))]
+    assert new[:7] == old
+
+
 # ------------------------------------------------------------------ terminals
 def terminal(sts=6, per_ship=None):
     return Terminal(name="T", code="T", quay_line=[(0.0, 0.0), (1000.0, 0.0)], quay_length_m=1000.0,

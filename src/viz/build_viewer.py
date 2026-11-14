@@ -288,9 +288,35 @@ def pack_ships(ships, events, warmup_min, end_min):
     return cols, idx, {"names": names, "per_ship": per}
 
 
-def node_coords():
-    """Latitude / longitude (1e-5 degree) of every graph node, by node index."""
-    z = np.load(ARRAYS, allow_pickle=False)
+GRAPH_MISMATCH_M, GRAPH_MISMATCH_SHARE = 2000.0, 0.01
+
+
+def node_coords(run=None):
+    """Latitude / longitude (1e-5 degree) of every graph node, by node index: those saved with the run (nodes.npz),
+    else those of the graph as it is now. A run made before nodes.npz was saved is checked against the graph: its
+    routes are lists of cells next to each other, so if many of their steps are kilometres long the mesh has been
+    rebuilt since (its cells are numbered anew) and the run cannot be drawn on it."""
+    own = Path(run) / "nodes.npz" if run is not None else None
+    if own is not None and own.is_file():
+        z = np.load(own, allow_pickle=False)
+    else:
+        z = np.load(ARRAYS, allow_pickle=False)
+        routes = Path(run) / "routes.json" if run is not None else None
+        if routes is not None and routes.is_file():
+            steps = []
+            for r in json.loads(routes.read_text())[:2000]:
+                a = np.asarray(r, dtype=np.int64)
+                if len(a) < 2 or a.max() >= len(z["x"]):
+                    steps.append(np.array([np.inf]))
+                    continue
+                steps.append(np.hypot(np.diff(z["x"][a]), np.diff(z["y"][a])))
+            d = np.concatenate(steps) if steps else np.array([])
+            if len(d) and float((d > GRAPH_MISMATCH_M).mean()) > GRAPH_MISMATCH_SHARE:
+                raise RuntimeError(
+                    f"{Path(run).name} was simulated on another graph than cache/{ARRAYS.name} (rebuilt since): "
+                    f"{100 * float((d > GRAPH_MISMATCH_M).mean()):.0f} % of its route steps are over "
+                    f"{GRAPH_MISMATCH_M / 1000:.0f} km long on this one. Its viewer cannot be built again; run the "
+                    "simulation again (py src/sim/pipeline.py).")
     return (np.round(z["latitude"] * COORD).astype(int).tolist(), np.round(z["longitude"] * COORD).astype(int).tolist())
 
 
@@ -302,7 +328,7 @@ def pack_positions(pos, idx, step_min, run):
                      lying in a port with no berth model, which share the node's spot)
     Runs saved before routes were recorded (15-min points) become node records at extra nodes, flagged
     legacy, which the page joins with straight lines as before."""
-    lat, lon = node_coords()
+    lat, lon = node_coords(run)
     st_code = {s: i for i, s in enumerate(STATES)}
     pos = pos[pos.ship.isin(idx)].copy()
     pos["i"] = pos.ship.map(idx).astype(int)

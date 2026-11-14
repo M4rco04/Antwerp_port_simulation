@@ -482,7 +482,13 @@ def observed(cache=None):
     # where it left)
     d = data.df[data.df.visit.isin(v.index)].sort_values(["visit", "t"])
     tm, vis, sog = minute(d.t).to_numpy(), d.visit.to_numpy(), d.sog.fillna(0.0).to_numpy()
-    cut = np.flatnonzero((vis[1:] != vis[:-1]) | ((tm[1:] - tm[:-1] >= AWAY_H * 60) & ((sog[1:] >= UNDER_WAY_KN) | (sog[:-1] >= UNDER_WAY_KN))))
+    # ... and an inland craft not heard for INLAND_SILENT_H has left, whatever it did before and after: its berth
+    # stops are cut there (above), so its time in the area is too. Kept in the area through those silences, 14
+    # dry-cargo craft and 29 tankers at once were in the area and at no berth, under way or at anchor
+    inland = pd.Series(vis).map(v["class"]).isin(INLAND).to_numpy()
+    gap = tm[1:] - tm[:-1]
+    cut = np.flatnonzero((vis[1:] != vis[:-1]) | ((gap >= AWAY_H * 60) & ((sog[1:] >= UNDER_WAY_KN) | (sog[:-1] >= UNDER_WAY_KN)))
+                         | (inland[1:] & (gap >= FB.INLAND_SILENT_H * 60)))
     lo, hi = np.r_[0, cut + 1], np.r_[cut, len(tm) - 1]
     there = pd.DataFrame({"cls": pd.Series(vis[lo]).map(v["class"]).to_numpy(), "start": tm[lo], "end": tm[hi]})
     # container calls the model leaves out by design (MODEL.md §18): lay-up and repair (a stop of more than

@@ -96,7 +96,7 @@ INLAND_CALL_PLACES = ("ghent_terneuzen_canal", "zuid_beveland_canal", "schelde_r
 # so does a sea-going ship calling on the Ghent-Terneuzen canal inside the area (Sluiskil): it left the model
 # there and never came back out through the lock (validation: 16 sea-going lock passages a day at Terneuzen
 # where the AIS has 27)
-SEA_CALL_PLACES = ("ghent_terneuzen_canal",)
+SEA_CALL_PLACES = ("ghent_terneuzen_canal", "zeebrugge")
 # Inland craft keep off the sea locks at the head of the big docks where another lock will do: the AIS has 43 %
 # of their right-bank lock passages at Zandvliet and Berendrecht (the rest at Boudewijn and Van Cauwelaert) and
 # half of the left bank's at Kieldrecht (the rest at Kallo), where routes by length alone gave 58 % and 60 %
@@ -139,6 +139,16 @@ ULCV_HOLD_LOCKS = ("Zandvliet", "Berendrecht", "Terneuzen", "Hansweert")   # tra
 ULCV_HOLD_M = 5000.0                   # ... while a ULCV passes within this of their river side
 ULCV_FALLBACK_AFTER_MIN = 12 * 60.0    # assumed: waited this long for its own quay
 ULCV_FALLBACK = ("PSA Noordzee Terminal", "PSA Europa Terminal", "MPET", "DP World Antwerp Gateway")
+# A container ship's scheduled stay ends when it leaves, not when its work ends: the wait for its pilot, tugs and
+# tide and the unmooring lie inside it (in the AIS the ships of the schedule lie still 25 h at the median at
+# Deurganckdok and 19 h at the river terminals, where their lines give 28 to 30 h and 23 to 26 h). The work is
+# planned to end this long before the scheduled departure. Calibrated on the time at the berth (MODEL.md §19)
+CONTAINER_DEPARTURE_ALLOWANCE_MIN = 150.0
+# A container ship that finds its quay taken, or the tide wrong, when it asks for clearance is not sent to anchor
+# at once: a ship with a berth time is told before it is there and loses the time at sea (it waits off the pilot
+# station, counted in the area but not at anchor). After this long it anchors like any other ship. Sent to anchor
+# at once, one in four container ships anchored where the AIS has one in eight
+CONTAINER_SEA_WAIT_MAX_MIN = 18 * 60.0
 BERTH_CHANGE_MIN = 60.0                # berth planning: a ship is planned to leave this long before the next
                                        # one is due on its quay (assumed)
 UNMOORING_PLAN_MIN = 60.0              # planned from the end of the work to the quay being free (assumed)
@@ -151,7 +161,7 @@ LOCK_RESERVE_LEAD_MIN = 60.0           # a ULCV's chamber is reserved this long 
 #   weather     the weather sequence                 service     durations: stays, mooring, anchor waits, draught change
 #   choice      berths, exits, next calls, locks     movement    tie-breaks in the right of way
 #   speed       each ship's own speed (SPEED_SPREAD)
-STREAMS = ("arrivals", "attributes", "weather", "service", "choice", "movement", "speed")
+STREAMS = ("arrivals", "attributes", "weather", "service", "choice", "movement", "speed", "locks")   # locks: their holds
 # Ships of one class do not all sail at one speed: each ship's speed through the water is its class's times a
 # factor drawn once, lognormal with this standard deviation of the logarithm (median 1), kept within
 # SPEED_FACTOR_RANGE. With one speed per class the 90th percentiles of the sailing times were 12 to 17 % short of
@@ -196,6 +206,7 @@ class Simulation:
         self.streams = dict(zip(STREAMS, (np.random.default_rng(q) for q in np.random.SeedSequence(seed).spawn(len(STREAMS)))))
         self.rng = self.streams["choice"]
         self.rng_service = self.streams["service"]
+        self.container_sea_wait_max_min = CONTAINER_SEA_WAIT_MAX_MIN
         self.graph = pickle.load(open(GRAPH, "rb"))["graph"]
         self.fg = FastGraph.load(GRAPH.with_suffix(".arrays.npz"), self.graph)
         fg = self.fg
@@ -245,6 +256,9 @@ class Simulation:
         self.lock_of_node = {n: lock for n, lock in self.locks.values()}
         for _, lock in self.locks.values():            # the durations of the code, not those the graph was built with
             lock.times = LockTimes()                   # (the cached graph holds each lock's own copy)
+            lock.rng = self.streams["locks"]
+            for c in lock.chambers:
+                c.held = False
         self.anchorages = {name: self.graph.nodes[n]["anchorage"] for name, n in self.graph.graph["anchorages"].items()}
         self.anchorage_node = dict(self.graph.graph["anchorages"])
         self.terminals = {t["name"]: t["resource"] for t in self.graph.graph["terminals"]}
@@ -1638,7 +1652,11 @@ class Simulation:
         # scheduled at DP World)
         stay_h = ship.stay_h or DEFAULT_STAY_H
         ship.moves = int(round(stay_h * n * T.moves_per_crane_h))
-        ship.timer = 60.0 * stay_h
+        # the scheduled stay runs from the berth time to the departure: the mooring is part of it, and so is the
+        # leaving (CONTAINER_DEPARTURE_ALLOWANCE_MIN). Lying still for all of it and leaving afterwards, the ships
+        # lay 28 h at the median where the AIS has 25 h
+        moored_for = max(now - ship.times.get("mooring", now), 0.0)
+        ship.timer = max(60.0 * stay_h - moored_for - CONTAINER_DEPARTURE_ALLOWANCE_MIN, 30.0 * stay_h)
         T.ship(ship.id).leaves = now + ship.timer + UNMOORING_PLAN_MIN
         ship.note(now, "handling", cranes=n, moves=ship.moves, hours=round(ship.timer / 60, 1))
 
@@ -2090,6 +2108,10 @@ class Simulation:
         pd.DataFrame(self.positions, columns=["step", "ship", "state", "route", "value", "offset"]).to_csv(
             out / "positions.csv.gz", index=False)
         (out / "routes.json").write_text(json.dumps(self.routes_rec, separators=(",", ":")))
+        # where the nodes of this run's routes lie: the viewer of a run must not take them from a graph built later
+        # (a rebuilt mesh numbers its cells anew, and a viewer made again then drew the ships all over the map)
+        z = np.load(GRAPH.with_suffix(".arrays.npz"), allow_pickle=False)
+        np.savez_compressed(out / "nodes.npz", latitude=z["latitude"], longitude=z["longitude"])
         self.port_log.save(out / "port_state.json.gz")
         summary = self.summary(ships)
         (out / "summary.json").write_text(json.dumps(summary, indent=2, default=str))

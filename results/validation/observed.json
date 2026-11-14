@@ -464,8 +464,8 @@
    "n": 15
   },
   "stock.inland_cargo.in_area": {
-   "value": 225.91481944444448,
-   "se": 3.2567900943525974,
+   "value": 220.0607916666667,
+   "se": 3.3843514697813357,
    "n": 15
   },
   "stock.inland_cargo.at_berth": {
@@ -479,8 +479,8 @@
    "n": 15
   },
   "stock.inland_tanker.in_area": {
-   "value": 217.87071064814816,
-   "se": 4.4371435264842685,
+   "value": 197.01313503086422,
+   "se": 6.969913117159693,
    "n": 15
   },
   "stock.inland_tanker.at_berth": {
