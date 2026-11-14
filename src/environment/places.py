@@ -45,7 +45,10 @@ SEA_GATES = ("sea_west", "sea_southwest", "sea_north")
 # 9 m with 20 m of water 4 km away, and every 15 m ship from the north started on it
 SEA_GATE_MIN_DEPTH_M = 20.0
 OUTSIDE = ("zeebrugge", "oosterschelde")
-CALL_PLACES = ("vlissingen",)   # placed at the median of the AIS calls there (background_traffic.ZONE_LOCATION)
+# placed at the median of the AIS calls there (background_traffic.ZONE_LOCATION). Terneuzen lay 440 m from its lock,
+# inside the 1 km by which a lock passage is timed (validation, MODEL.md §19): a call there counted as time to pass
+# the lock (inland craft took 2.7 h at the 90th percentile where the AIS has 1.8 h); its calls lie 1.1 km away
+CALL_PLACES = ("vlissingen", "terneuzen")
 # entry source -> what to snap it to: a node region, a canal zone, or an anchorage name
 SNAP = {
     "ghent_terneuzen_canal": {"zone": "ghent_terneuzen_canal"},

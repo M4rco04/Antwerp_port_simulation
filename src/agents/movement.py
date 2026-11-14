@@ -74,6 +74,13 @@ ENCOUNTER_STALE = 3                     # a ship blocked this many steps does no
 ENCOUNTER_OVERRIDE = 12                 # held this many steps by a rule: the VTS lets it proceed (logged)
 DEADLOCK_AFTER = 12                     # head-on / crossing deadlock with no way round: pass after 1 h
 LANE_FREE_AFTER = 36                    # stuck this long (3 h): detours may ignore the lanes
+# inland craft near a lock: the mean of their AIS speeds under way there (3.6 kn) rather than the median (3.1 kn).
+# The fixes near a lock are mostly of craft slowing to stop, so the median is the speed of the last metres, and a
+# craft sailing the whole approach at it took a quarter longer to pass Hansweert than the AIS. Calibrated (§19)
+INLAND_LOCK_APPROACH_KN = 3.6
+# inland craft sail down the river faster than up it, beyond what the current gives: with one speed both ways they
+# took 1.26 h from km 48 to km 32 where the AIS has 1.17 h, with the way up right (1.17 h). Calibrated (§19)
+INLAND_DOWN_RIVER_FACTOR = 1.08
 LOCK_WAIT_M = 800.0                     # ships bound into a lock join its queue this far before the gate
 LEG = {"sea": "sea", "river": "river", "dock": "river", "canal": "river"}
 WAITING = ("lock_queue", "mooring", "wait_pilot", "pilot_change", "at_berth", "unmooring")
@@ -130,7 +137,7 @@ class Mover:
         # inland craft took 1.05 h to pass Hansweert where the AIS has 0.67 h (validation, MODEL.md §19)
         if "lock_approach" in inland:
             m = np.isin(self.zone_label, ("dock", "canal")) & (fg.speed_limit_kn <= approach)
-            self.inland_limit_kn[m] = inland["lock_approach"][NR.SPEED_PERCENTILE]
+            self.inland_limit_kn[m] = max(inland["lock_approach"][NR.SPEED_PERCENTILE], INLAND_LOCK_APPROACH_KN)
         self.vis_cap = None
         self.denied = set()
         self.ships = {}                                        # key -> Ship on the mesh
@@ -409,6 +416,8 @@ class Mover:
             n = np.hypot(dx, dy)
             if n > 0:
                 current = sim.current_sog_u[t_index, sl] * (dx * fg.flow_dir[node, 0] + dy * fg.flow_dir[node, 1]) / n / KNOT
+        if not ship.sea_going and zone == "river" and nxt is not None and fg.chainage_m[nxt] < fg.chainage_m[node]:
+            stw *= INLAND_DOWN_RIVER_FACTOR
         sog = stw + current
         if not np.isnan(limit):
             sog = min(sog, limit)

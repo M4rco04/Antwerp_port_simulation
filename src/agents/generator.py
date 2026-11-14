@@ -58,6 +58,10 @@ WEEK_AHEAD_MIN = 5 * 24 * 60.0             # a week's calls are made this long b
 QUAY_GAP_M = 22.5                          # between two ships at a quay (terminals.MOORING_GAP_M), for the paper check
 SCHEDULE_TZ = "Europe/Brussels"
 SCHEDULE_YEAR = 2026
+# The AIS delay (actual berthing less the schedule) already holds the wait for a quay; the model then adds its own:
+# the paper berth plan moved the ships 4 h on average and they waited 2 h more, berthing 35 h late where the AIS
+# has 29 h. The drawn delay is shifted by that. Calibrated (MODEL.md §19)
+DELAY_SHIFT_H = -6.0
 ENTRY_LEAD_H = 8.0                  # enter the area this long before the berth time
 # schedule terminal code -> Terminal (graph.graph["terminals"]); other codes berth in a dock zone
 TERMINAL_OF_CODE = {"1700": "DP World Antwerp Gateway", "K1742": "MPET", "K1718": "MPET",
@@ -87,7 +91,9 @@ BACKGROUND_CLASSES = ("bulk_general", "tanker", "inland_cargo", "inland_tanker",
 # The stays of those craft are divided by it (engine), so that the craft lying in port stay at the AIS number.
 # Every inland craft was scaled until the validation: that put a third too many past Antwerp on the river,
 # where the trips are all heard (63 a day at km 88 against 46). Set again after a re-fit of the rates.
-INLAND_TRIP_SCALE = round((423 - 26) / (315 - 26), 2)
+# Of the 423, 20 were craft lying beside a lock whose position fell on either side of it (through and back within
+# the hour, validate.LOCK_FLIP_MIN): without them 174, 99 and 130, 403 in all.
+INLAND_TRIP_SCALE = round((403 - 26) / (315 - 26), 2)
 INLAND_SCALED_SOURCES = ("schelde_rijn_canal", "zuid_beveland_canal", "ghent_terneuzen_canal", "terneuzen")
 INLAND_CLASSES = ("inland_cargo", "inland_tanker")
 # canals reached only through a lock: the largest chamber's length and width (environment LOCKS):
@@ -202,7 +208,7 @@ class Generator:
         in weeks mode (_plan_berth), where the terminal's quay is known."""
         self.replay = {"plan": {}, "moved": 0, "moved_h": 0.0}
         for r in df.itertuples():
-            berth_t = r.arrival + pd.Timedelta(hours=CC.sample_arrival_delay(self.rng) if self.delays else 0.0)
+            berth_t = r.arrival + pd.Timedelta(hours=CC.sample_arrival_delay(self.rng) + DELAY_SHIFT_H if self.delays else 0.0)
             quay = TERMINAL_OF_CODE.get(r.terminal)
             if quay in quay_m and pd.notna(r.departure):
                 wanted = berth_t
@@ -289,7 +295,7 @@ class Generator:
         for r in w["calls"][w["calls"].week == source].itertuples():
             arrival = self._utc_of(begin + r.offset)
             departure = arrival + r.stay if pd.notna(r.stay) else pd.NaT
-            berth_t = arrival + pd.Timedelta(hours=CC.sample_arrival_delay(self.rng) if self.delays else 0.0)
+            berth_t = arrival + pd.Timedelta(hours=CC.sample_arrival_delay(self.rng) + DELAY_SHIFT_H if self.delays else 0.0)
             if pd.notna(r.quay) and pd.notna(r.stay):
                 plan = w["plan"].setdefault(r.quay, [])
                 plan[:] = [p for p in plan if p[1] > self._utc_of(old)]

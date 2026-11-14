@@ -56,8 +56,8 @@ class LockTimes:
 
 # assumed: how long a lockage waits to fill up (lockages carried one ship or none in three of four cycles). Set so
 # that the time per passage stays near the AIS (0.97 h): 20 and 15 min carried more ships but took 1.5 h
-BUNDLE_HOLD_MIN = 5.0               # 10 min, with 4 + 3 min to enter and leave, made an inland craft take 1.3 h
-EMPTY_HOLD_MIN = 5.0                # to pass Hansweert where the AIS has 0.7 h (validation, MODEL.md §19)
+BUNDLE_HOLD_MIN = 3.0               # 10 min, with 4 + 3 min to enter and leave, made an inland craft take 1.3 h
+EMPTY_HOLD_MIN = 3.0                # to pass Hansweert where the AIS has 0.7 h; 5 min 0.82 h (MODEL.md §19)
 SMALL_SHIP_LOA_M, SMALL_SHIP_BEAM_M = 80.0, 9.0
 # operating time of a lockage (closing the gates, levelling, opening them), min, where Rijkswaterstaat gives it
 # ("bedieningstijd schutproces", Capaciteit Zeeuwse sluizen, 2001, table 3). Half of it is levelling and a quarter
@@ -96,6 +96,14 @@ BARGE_LOCKS = ("Royers", "Kattendijk")
 # MODEL.md §19)
 PASSAGE_TIME_LOCKS = ("Boudewijn", "Van Cauwelaert")
 OPERATING_MIN.update(_antwerp_operating_min())
+# Operating times set on the AIS passage times instead (calibrated, MODEL.md §19), where the published figure cannot
+# be right for today's lock. Timed from 1 km before the lock to 1 km beyond, an inland craft passes Hansweert in
+# 36 min (median of 1,121 passages), less than Kreekrak's 45 min, although the 2001 table gives Hansweert the longer
+# operating time (15 against 11 min): with 15 min the model took 47 min. Van Cauwelaert, which carries four in five
+# inland craft of its complex, took 77 min with the 25 min left of its figure, where the AIS has 60 min; with
+# 15 min inland craft took 55 min and the sea-going ships 67 min against 81 min
+CALIBRATED_OPERATING_MIN = {"Hansweert west": 9.0, "Hansweert east": 9.0, "Van Cauwelaert": 20.0}
+OPERATING_MIN.update(CALIBRATED_OPERATING_MIN)
 
 
 @dataclass
@@ -286,6 +294,10 @@ class Lock:
         here, there = c.side, other_side(c.side)
         if c.state == "open":
             leaving = [p for p in c.ships if p.ship.from_side != here]
+            # inland craft leave before the sea-going ships they shared the chamber with (they are away in a
+            # minute or two; behind the big ships, 8 min each, they took a third longer than the AIS to pass
+            # Zandvliet-Berendrecht and Terneuzen, validation, MODEL.md §19)
+            leaving.sort(key=lambda p: p.ship.loa > self.times.small_loa_m)
             if leaving:
                 small = leaving[0].ship.loa <= self.times.small_loa_m
                 c.task, c.timer_min = ("exit", leaving[0]), self.times.small_exit_min if small else self.times.exit_min
