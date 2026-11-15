@@ -27,6 +27,7 @@ and works as type B otherwise. The durations in LockTimes are first guesses to c
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -59,6 +60,11 @@ class LockTimes:
 BUNDLE_HOLD_MIN = 3.0               # 10 min, with 4 + 3 min to enter and leave, made an inland craft take 1.3 h
 EMPTY_HOLD_MIN = 3.0                # to pass Hansweert where the AIS has 0.7 h; 5 min 0.82 h (MODEL.md §19)
 SMALL_SHIP_LOA_M, SMALL_SHIP_BEAM_M = 80.0, 9.0
+# a lockage with a ship of this priority or higher in it, or called for one, is never held (LOCK_HOLD_P): sea-going
+# ships (priority 3, under pilotage and with tugs ordered) and tide-dependent ones (2). With the holds on every
+# lockage the sea-going ships' passage times spread a fifth wider than in the AIS
+HOLD_FREE_PRIORITY = 3
+CALLED_HOLD_MAX_MIN = 12.0          # a loaded chamber waits this long for a ship it has called in (assumed)
 # An inland craft goes into a chamber alongside a sea-going ship that is going in or made fast there: it needs no
 # time of the chamber's own (the ship's entry, 12 min, holds it). One behind the other, each craft added its 2 min
 # to a lockage that the ship had already made long
@@ -72,7 +78,8 @@ ALONGSIDE_ENTRY_MIN = 0.5
 # §19), lock by lock: at Zandvliet-Berendrecht, Boudewijn-Van Cauwelaert and Terneuzen the queues of the model
 # already give the AIS spread or more, and a hold there (tried: 0.10 at every lock) put the 90th percentiles 20 to
 # 45 % over; the locks not named have none
-LOCK_HOLD_P = {"Hansweert": 0.10, "Kreekrak": 0.06, "Kallo": 0.08, "Kieldrecht": 0.06}
+LOCK_HOLD_P = {"Hansweert": 0.20, "Kreekrak": 0.06, "Kallo": 0.25, "Kieldrecht": 0.16, "Zandvliet": 0.10,
+               "Berendrecht": 0.10, "Boudewijn": 0.05, "Van Cauwelaert": 0.05, "Terneuzen": 0.08}
 LOCK_HOLD_MEAN_MIN = 35.0
 
 
@@ -122,7 +129,7 @@ OPERATING_MIN.update(_antwerp_operating_min())
 # inland craft of its complex, took 77 min with the 25 min left of its figure, where the AIS has 60 min; with
 # 15 min inland craft took 55 min and the sea-going ships 67 min against 81 min. (Hansweert was 9 min before its
 # lockages were held now and then, LOCK_HOLD_P: the holds add 4 min to the median)
-CALIBRATED_OPERATING_MIN = {"Hansweert west": 8.0, "Hansweert east": 8.0, "Van Cauwelaert": 20.0}
+CALIBRATED_OPERATING_MIN = {"Hansweert west": 6.0, "Hansweert east": 6.0, "Van Cauwelaert": 20.0}
 OPERATING_MIN.update(CALIBRATED_OPERATING_MIN)
 
 
@@ -138,6 +145,8 @@ class ShipRequest:
     turn: int = 0                     # queue number, given by Lock.request
     requested_at: float = 0.0
     entered_at: float = 0.0
+    ready_at: float = 0.0             # the minute from which it can be at the gate (the engine sets it: a ship waits
+                                      # away from the lock until its chamber is called, then sails in; inf until then)
 
     @property
     def exclusive(self):
@@ -300,12 +309,25 @@ class Lock:
                 events += self._finish(c, t, levels)
                 continue
             if not self._start_next(c, t, levels, events):
-                break
+                # nothing to do now: on to the moment within this step at which a ship sailing in gets to the gate
+                at_gate = min((s.ready_at for s in c.queue[c.side] if t + 1e-9 < s.ready_at < end - 1e-9), default=None)
+                if at_gate is None:
+                    break
+                t = at_gate
         return events
 
     def _gate_min(self, c):
         op = OPERATING_MIN.get(c.name)
         return op / 4 if op else self.times.gate_min
+
+    def minutes_to_open(self, c, levels=None):
+        """Minutes until a chamber that has closed lies open at its other side (0 for one that is open)."""
+        if c.state == "open":
+            return 0.0
+        gate, op = self._gate_min(c), OPERATING_MIN.get(c.name)
+        dh = abs(levels.get("a", 0.0) - levels.get("b", 0.0)) if levels else 0.0
+        level = op / 2 if op else self.times.level_base_min + self.times.level_min_per_m * dh
+        return c.timer_min + {"closing": level + gate, "levelling": gate}.get(c.state, 0.0)
 
     def _event(self, kind, t, c, ship=None, **extra):
         return {"t": t, "lock": self.name, "chamber": c.name, "event": kind,
@@ -343,8 +365,8 @@ class Lock:
             if (c.ships or c.queue[there]) and not c.held:
                 c.held = True
                 rng = getattr(self, "rng", None)
-                quick = any(p.ship.exclusive or p.ship.priority <= 2 for p in c.ships) or any(
-                    s.exclusive or s.priority <= 2 for s in c.queue[there])
+                quick = any(p.ship.exclusive or p.ship.priority <= HOLD_FREE_PRIORITY for p in c.ships) or any(
+                    s.exclusive or s.priority <= HOLD_FREE_PRIORITY for s in c.queue[there])
                 p_hold = hold_probability(self.name)
                 if rng is not None and p_hold > 0 and not quick and rng.random() < p_hold:
                     c.task, c.timer_min = ("hold", None), float(rng.exponential(LOCK_HOLD_MEAN_MIN))
@@ -363,6 +385,18 @@ class Lock:
         and before sailing empty for a ship on the far side (EMPTY_HOLD_MIN from its request). Not for a
         ship with a tide to keep or one that has the chamber to itself."""
         there = other_side(c.side)
+        called = [s for s in c.queue[c.side] if t < s.ready_at < math.inf]
+        if called:
+            # a ship called to this side is sailing in: the chamber does not leave empty, and with ships in it
+            # waits for it up to CALLED_HOLD_MAX_MIN from when the first went in (a ship called in and then
+            # left at the gate waited a whole cycle there: an hour at Terneuzen). For a sea-going ship it waits
+            # until the ship is in: the lockage is planned around it (its tugs and pilot are ordered for it).
+            # With the 12 min for them too, a sea-going ship coming in for half an hour or more missed the chamber
+            # it was called to in a fifth to a third of its passages of the Antwerp sea locks and lay an hour at
+            # the gate: 90th percentile 2.96 h at Zandvliet-Berendrecht against 2.25 h (MODEL.md §19)
+            if (not c.ships or any(s.priority <= HOLD_FREE_PRIORITY for s in called)
+                    or t - min(p.ship.entered_at for p in c.ships) < CALLED_HOLD_MAX_MIN):
+                return True
         if c.ships:
             first = min(p.ship.entered_at for p in c.ships)
             if any(p.ship.exclusive or p.ship.priority <= 2 for p in c.ships) or t - first >= BUNDLE_HOLD_MIN:
@@ -382,6 +416,8 @@ class Lock:
         # in turn (VTS priority first); among the ships of one priority the sea-going ones first, the inland craft
         # then go in beside them (ALONGSIDE_ENTRY_MIN)
         for ship in sorted(c.queue[c.side], key=lambda s: (s.priority, s.loa <= self.times.small_loa_m, s.turn)):
+            if ship.ready_at > t + 1e-9:
+                continue                # not at the gate yet (waiting away from the lock, or sailing in)
             if c.reserved_for and t >= c.reserved_from and ship.ship_id != c.reserved_for:
                 continue
             if ship.exclusive and c.ships:
@@ -389,7 +425,12 @@ class Lock:
             if ship.draught + self.ukc_m > water:
                 events.append(self._event("too_deep", t, c, ship, water_over_sill=round(water, 2)))
                 continue
-            if pack(c.length_m, c.width_m, [p.ship for p in c.ships] + [ship],
+            # the room of a ship of higher priority that has been called and is sailing in is kept for it: the
+            # lock master does not let the barges at the gate fill the chamber a sea-going ship is coming for (it
+            # then missed the lockage it was called to and waited a whole cycle at the gate: Terneuzen's
+            # sea-going passages 1.68 h at the 90th percentile against 1.33 h, MODEL.md §19)
+            coming = [s for s in c.queue[c.side] if s is not ship and s.priority < ship.priority and t < s.ready_at < math.inf]
+            if pack(c.length_m, c.width_m, [p.ship for p in c.ships] + coming + [ship],
                     self.times.gap_long_m, self.times.gap_side_m) is not None:
                 return ship
         return None
@@ -430,6 +471,32 @@ class Lock:
                          "waiting_a": [s.ship_id for s in c.queue["a"]],
                          "waiting_b": [s.ship_id for s in c.queue["b"]], "timer_min": round(c.timer_min, 1)}
                 for c in self.chambers}
+
+
+def in_next_lockage(lock, c, ship):
+    """Will this waiting ship be in the chamber's next lockage from its side: does it pack into the chamber with the
+    ships of its side already in it and those before it in the queue (a ship with the chamber to itself: alone)?"""
+    side = ship.from_side
+    inside = [p.ship for p in c.ships if p.ship.from_side == side] if c.side == side and c.state == "open" else []
+    order = lambda s: (s.priority, s.loa <= lock.times.small_loa_m, s.turn)
+    before = [s for s in c.queue[side] if s is not ship and order(s) < order(ship)]
+    if ship.exclusive or any(s.exclusive for s in inside + before):
+        return not inside and not before
+    if c.reserved_for and c.reserved_for != ship.ship_id:
+        return False
+    return pack(c.length_m, c.width_m, inside + before + [ship], lock.times.gap_long_m, lock.times.gap_side_m) is not None
+
+
+def expected_wait(lock, c, side):
+    """Roughly the minutes until this chamber can take a ship waiting at this side: none when it lies open there,
+    the rest of its way when it is coming, a whole crossing more when it lies open at the other side or has just
+    left. For choosing between locks side by side (engine: a ship takes the one that is ready first)."""
+    op = OPERATING_MIN.get(c.name) or (2 * lock.times.gate_min + lock.times.level_base_min)
+    busy = 2.0 * len(c.queue[side]) + sum(lock.times.exit_min if p.ship.loa > lock.times.small_loa_m else lock.times.small_exit_min
+                                           for p in c.ships if p.ship.from_side != side)
+    if c.side == side:
+        return busy if c.state == "open" else lock.minutes_to_open(c) + op + busy
+    return (op if c.state == "open" else lock.minutes_to_open(c)) + busy
 
 
 def lock_preference(locks, loa, beam, draught=0.0, level_m=0.0):

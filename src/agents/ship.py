@@ -77,7 +77,7 @@ class Ship:
     berth_zone: str | None = None
     schedule: dict = field(default_factory=dict)   # level 1: scheduled berth arrival / departure
     moves: int = 0                          # level 1: call size (container moves), set when handling starts
-    stay_h: float | None = None             # level 1: the scheduled stay at the berth (h)
+    stay_h: float | None = None             # level 1: the hours at the berth (the line's stay x its ratio)
     cranes_wanted: int = 0                  # level 1: cranes the terminal would give a ship this size
     dwell_h: float = 0.0                    # level 2: time at the berth
     exit: str | None = None                 # where it leaves after the berth

@@ -74,6 +74,17 @@ MANOEUVRING = ("mooring", "unmooring", "boarding", "pilot_change")
 # before the call: a sixth of the inland passages of Terneuzen took over 2.5 h, their 90th percentile 3.4 h
 # where the AIS has 1.8 h
 LYING = ("at_berth", "dwell_port")
+# a ship waiting for a lock is heard where it waits; in the model it has a fix there too, lying still, and one at the
+# gate, under way, while it sails in from the waiting place (engine._call_to_lock). Without them a passage was timed
+# from the ship's last fix before it joined the queue, and only when that fix happened to lie in the right ring:
+# a quarter of the inland passages of Terneuzen were timed, the slow ones (median 65 min where all of them took 46),
+# and the whole wait counted or none of it by where the waiting place lay
+AT_LOCK = ("lock_queue",)
+SAILING_IN = ("lock_sail_in",)
+# "sea-going" craft under this length are workboats and tugs with an IMO number (a 35 m multicat passed the Terneuzen
+# lock ten times in the record, a 33 m tug eight times in five days): service craft, which the model leaves out by
+# design (MODEL.md §18). They are in no count of sea-going ships, in the record or in the model
+MIN_SEA_GOING_LOA_M = 50.0
 # sea-going ships calling at Antwerp a day, from the port's own statistics: 13,655 in 2020, 10,608 from January
 # to September 2021 (Port of Antwerp press releases): 37.3 and 38.9 a day. In the fixes: sea-going ships passing
 # km 48 up-river (nothing but Antwerp lies beyond for them)
@@ -303,10 +314,10 @@ def model_frame(sim, geo):
     # (sea-going ships under way in the docks 4 to 8 where the AIS has 2.8, growing with the length of the run)
     gone = {x.id: math.ceil(e["t"] / STEP_MIN) for x in sim.done for e in x.log[-3:] if e["event"] == "exited"}
     until = np.minimum(until, p.ship.map(gone).fillna(sim.k + 1))
-    still = p[(p.route < 0) & p.state.isin(MANOEUVRING + LYING)].assign(until=until)
+    still = p[(p.route < 0) & p.state.isin(MANOEUVRING + LYING + AT_LOCK + SAILING_IN)].assign(until=until)
     # (a pilot changed at a lock boards in the chamber, where a real ship lies still: only at sea and on the river)
     z = geo.zone[still.value.to_numpy().astype(np.int64)]
-    still = still[still.state.isin(("mooring", "unmooring") + LYING) | np.isin(z, ("sea", "river"))]
+    still = still[still.state.isin(("mooring", "unmooring") + LYING + AT_LOCK + SAILING_IN) | np.isin(z, ("sea", "river"))]
     reps = (still.until - still.step).clip(lower=1).astype(int).to_numpy()
     s_ship = np.repeat(still.ship.to_numpy(), reps)
     s_step = np.repeat(still.step.to_numpy(), reps) + np.concatenate([np.arange(r) for r in reps]) if len(reps) else np.array([], dtype=int)
@@ -314,11 +325,16 @@ def model_frame(sim, geo):
     ship = np.r_[m.ship.to_numpy(), s_ship]
     step = np.r_[m.step.to_numpy(), s_step]
     node = np.r_[node, s_node]
-    kn = np.r_[np.nan_to_num(kn), np.repeat(np.where(still.state.isin(LYING), 0.0, UNDER_WAY_KN), reps)]
     by = sim.by_id
+    # (a sea-going ship coming into a lock under tugs makes under 1 kn for most of it, and is not under way as the
+    # AIS counts it; an inland craft sails in)
+    slow = still.state.isin(LYING + AT_LOCK) | (still.state.isin(SAILING_IN) & still.ship.map(lambda i: by[i].sea_going))
+    kn = np.r_[np.nan_to_num(kn), np.repeat(np.where(slow, 0.0, UNDER_WAY_KN), reps)]
     cls = pd.Series(ship).map(lambda i: by[i].cls)
+    workboat = (cls.isin(SEA) & (pd.Series(ship).map(lambda i: by[i].loa) < MIN_SEA_GOING_LOA_M)).to_numpy()
     f = pd.DataFrame({"id": ship, "t": step * STEP_MIN, "cls": cls.to_numpy(),
-                      "grp": cls.map(GROUP).to_numpy(), "piloted": pd.Series(ship).map(lambda i: by[i].needs_pilot).to_numpy(),
+                      "grp": np.where(workboat, None, cls.map(GROUP).to_numpy()),
+                      "piloted": pd.Series(ship).map(lambda i: by[i].needs_pilot).to_numpy(),
                       "x": fg.x[node], "y": fg.y[node], "lon": geo.lon[node], "lat": geo.lat[node],
                       "zone": geo.zone[node], "chain": geo.chain[node], "basin": geo.basin[node], "kn": kn})
     return f.sort_values(["id", "t"], kind="stable").reset_index(drop=True)
@@ -332,12 +348,16 @@ def model_stocks(sim, t0, t1):
     """Mean number of ships per class in the area, at a berth, in another port and at anchor between t0 and t1
     (from the ships' state changes), and of container ships at the four terminals."""
     minutes = {}
+    away = {(s.id, e["t"]): True for s in sim.done + sim.ships for e in s.log
+            if e["event"] == "dwell_port" and str(e.get("place", "")).startswith("beyond_")}
     for s in sim.done + sim.ships:
         ev = [(e["t"], e["event"]) for e in s.log if e["event"] in STATES]
         for (a, state), (b, _) in zip(ev, ev[1:] + [(sim.t, "end")]):
             lo, hi = max(a, t0), min(b, t1)
             if hi <= lo or state == "exited":
                 continue
+            if state == "dwell_port" and away.get((s.id, a)):
+                continue                               # a call beyond the area (up the Ghent canal): not in it
             keys = ["in_area"] + {"at_berth": ["at_berth"], "dwell_port": ["at_berth"], "anchored": ["at_anchor"]}.get(state, [])
             if state == "at_berth" and s.terminal:
                 keys.append("at_terminal")
@@ -402,8 +422,9 @@ def ais_frame(data, geo):
     dist, i = cKDTree(np.column_stack([geo.x[w], geo.y[w]])).query(np.column_stack([x, y]))
     node, on = w[i], dist <= SNAP_MAX_M
     t0 = data.times.iloc[0]
+    workboat = (cls.isin(SEA) & (df.mmsi.map(ships.length) < MIN_SEA_GOING_LOA_M)).to_numpy()
     f = pd.DataFrame({"id": df.visit.to_numpy(), "t": (df.t - t0).dt.total_seconds().to_numpy() / 60.0, "cls": cls.to_numpy(),
-                      "grp": cls.map(GROUP).to_numpy(),
+                      "grp": np.where(workboat, None, cls.map(GROUP).to_numpy()),
                       "piloted": (cls.isin(PILOTED) & (df.mmsi.map(ships.length) > 80)).to_numpy(), "x": x, "y": y,
                       "lon": df.lon.to_numpy(), "lat": df.lat.to_numpy(), "zone": np.where(on, geo.zone[node], ""),
                       "chain": np.where(on, geo.chain[node], np.nan), "basin": np.where(on, geo.basin[node], -1),

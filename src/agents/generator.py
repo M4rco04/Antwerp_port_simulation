@@ -63,6 +63,14 @@ SCHEDULE_YEAR = 2026
 # has 29 h. The drawn delay is shifted by that. Calibrated (MODEL.md §19)
 DELAY_SHIFT_H = -6.0
 ENTRY_LEAD_H = 8.0                  # enter the area this long before the berth time
+# A line's stay is a plan. The hours a call really lies in port, over the hours its line gives it, are drawn from
+# the AIS calls matched to their lines (container_calls.SCHEDULE_STAY_RATIO: at Deurganckdok median 0.98 and mean
+# 1.16, at the river terminals 0.87 and 0.96, in the docks 1.41 and 1.94). With the line's stay itself (less an
+# allowance for leaving, set on the median) the model had the AIS's median time at the berth and 14 % too few
+# container ships at berths: the long stays were missing (MODEL.md §19). The berth zone of each terminal:
+ZONE_OF_TERMINAL = {"DP World Antwerp Gateway": "antwerp_deurganckdok", "MPET": "antwerp_deurganckdok",
+                    "PSA Noordzee Terminal": "antwerp_river_quays", "PSA Europa Terminal": "antwerp_river_quays"}
+MAX_STAY_H = 96.0                   # longer is lay-up or repair, which the model leaves out (MODEL.md §18)
 # schedule terminal code -> Terminal (graph.graph["terminals"]); other codes berth in a dock zone
 TERMINAL_OF_CODE = {"1700": "DP World Antwerp Gateway", "K1742": "MPET", "K1718": "MPET",
                     "K913": "PSA Noordzee Terminal", "K869": "PSA Europa Terminal"}
@@ -95,6 +103,10 @@ BACKGROUND_CLASSES = ("bulk_general", "tanker", "inland_cargo", "inland_tanker",
 # the hour, validate.LOCK_FLIP_MIN): without them 174, 99 and 130, 403 in all.
 INLAND_TRIP_SCALE = round((403 - 26) / (315 - 26), 2)
 INLAND_SCALED_SOURCES = ("schelde_rijn_canal", "zuid_beveland_canal", "ghent_terneuzen_canal", "terneuzen")
+# ... but a trip whose first call is in the port of Antwerp is heard there for hours and is seldom missed: those
+# trips get this scale instead (None: the same). With one scale for all, inland craft passed the dock locks 17 %
+# more often than in the AIS (MODEL.md §19). Calibrated with INLAND_TRIP_SCALE on the lock passages
+INLAND_TRIP_SCALE_ANTWERP = None
 INLAND_CLASSES = ("inland_cargo", "inland_tanker")
 # canals reached only through a lock: the largest chamber's length and width (environment LOCKS):
 # a ship entering from or leaving to them must fit (Kreekrak, Hansweert, Royers)
@@ -158,10 +170,11 @@ def read_schedule(path=SCHEDULE):
 class Generator:
     def __init__(self, start, rng, delays=True, schedule=SCHEDULE, background=True, containers=True,
                  container_mode="replay", rate_factor=1.0, bunching=True, rng_attributes=None, quay_m=None,
-                 unscheduled=True):
+                 unscheduled=True, rng_stays=None):
         self.start = pd.Timestamp(start)
         self.rng = rng
         self.rng_att = rng if rng_attributes is None else rng_attributes
+        self.rng_stay = self.rng_att if rng_stays is None else rng_stays     # the stay ratios (a stream of their own)
         self.delays = delays
         self.background = background
         self.counter = itertools.count(1)
@@ -210,14 +223,16 @@ class Generator:
         for r in df.itertuples():
             berth_t = r.arrival + pd.Timedelta(hours=CC.sample_arrival_delay(self.rng) + DELAY_SHIFT_H if self.delays else 0.0)
             quay = TERMINAL_OF_CODE.get(r.terminal)
+            hours = (r.departure - r.arrival).total_seconds() / 3600 if pd.notna(r.departure) else None
+            ratio = self._stay_ratio(ZONE_OF_TERMINAL[quay], hours) if quay else None    # (else drawn with its berth zone)
             if quay in quay_m and pd.notna(r.departure):
                 wanted = berth_t
-                berth_t = self._plan_berth(self.replay["plan"].setdefault(quay, []), berth_t, r.departure - r.arrival,
+                berth_t = self._plan_berth(self.replay["plan"].setdefault(quay, []), berth_t, (r.departure - r.arrival) * ratio,
                                            CC.dimensions_for_teu(r.teu)["loa"] + QUAY_GAP_M, quay_m[quay])
                 if berth_t > wanted:
                     self.replay["moved"] += 1
                     self.replay["moved_h"] += (berth_t - wanted).total_seconds() / 3600
-            ship = self._container(r, r.arrival, r.departure, berth_t)
+            ship = self._container(r, r.arrival, r.departure, berth_t, ratio)
             if ship.spawn_t < 0:             # due before the run starts: the warm-up replaces it
                 continue
             self.pending.append(ship)
@@ -236,11 +251,12 @@ class Generator:
                 r = pool.iloc[int(self.rng_att.integers(len(pool)))]
                 stay = r.departure - r.arrival
                 quay = TERMINAL_OF_CODE.get(r.terminal)
+                ratio = self._stay_ratio(ZONE_OF_TERMINAL[quay], stay.total_seconds() / 3600) if quay else None
                 berth_t = arrival
                 if quay in quay_m:
-                    berth_t = self._plan_berth(plans.setdefault(quay, []), arrival, stay,
+                    berth_t = self._plan_berth(plans.setdefault(quay, []), arrival, stay * ratio,
                                                CC.dimensions_for_teu(r.teu)["loa"] + QUAY_GAP_M, quay_m[quay])
-                ship = self._container(r, arrival, arrival + stay, berth_t)
+                ship = self._container(r, arrival, arrival + stay, berth_t, ratio)
                 ship.schedule["arrival_min"] = None        # no scheduled time: nothing to be late against
                 ship.schedule["unscheduled"] = True
                 out.append(ship)
@@ -296,15 +312,17 @@ class Generator:
             arrival = self._utc_of(begin + r.offset)
             departure = arrival + r.stay if pd.notna(r.stay) else pd.NaT
             berth_t = arrival + pd.Timedelta(hours=CC.sample_arrival_delay(self.rng) + DELAY_SHIFT_H if self.delays else 0.0)
+            ratio = (self._stay_ratio(ZONE_OF_TERMINAL[r.quay], r.stay.total_seconds() / 3600 if pd.notna(r.stay) else None)
+                     if pd.notna(r.quay) else None)
             if pd.notna(r.quay) and pd.notna(r.stay):
                 plan = w["plan"].setdefault(r.quay, [])
                 plan[:] = [p for p in plan if p[1] > self._utc_of(old)]
                 wanted = berth_t
-                berth_t = self._plan_berth(plan, berth_t, r.stay, r.metres, w["quay"][r.quay])
+                berth_t = self._plan_berth(plan, berth_t, r.stay * ratio, r.metres, w["quay"][r.quay])
                 if berth_t > wanted:
                     w["moved"] += 1
                     w["moved_h"] += (berth_t - wanted).total_seconds() / 3600
-            ship = self._container(r, arrival, departure, berth_t)
+            ship = self._container(r, arrival, departure, berth_t, ratio)
             if ship.spawn_t >= 0:                           # due before the run starts: the warm-up replaces it
                 self.pending.append(ship)
         for ship in self._unscheduled(self._utc_of(begin), 7.0, w["plan"], w["quay"]):
@@ -331,8 +349,14 @@ class Generator:
         """A local clock time of the schedule's time zone as UTC."""
         return local.tz_localize(SCHEDULE_TZ, ambiguous=True, nonexistent="shift_forward").tz_convert("UTC")
 
-    def _container(self, r, arrival, departure, berth_t):
-        """A container ship for schedule line r berthing at berth_t, with its scheduled arrival / departure."""
+    def _stay_ratio(self, zone, scheduled_h=None):
+        """Hours a call lies in port over the hours its line gives it (ENTRY_LEAD_H comment above), drawn from
+        the matched calls with about the same scheduled stay."""
+        return float(CC.sample_stay_ratio(self.rng_stay, zone, scheduled_h)) if hasattr(CC, "sample_stay_ratio") else 1.0
+
+    def _container(self, r, arrival, departure, berth_t, ratio=None):
+        """A container ship for schedule line r berthing at berth_t, with its scheduled arrival / departure. ratio:
+        its stay over the scheduled one (drawn here, for its berth zone, when not given)."""
         code = r.terminal or self._code_for_line_without_one()
         spawn = self.minutes(berth_t) - ENTRY_LEAD_H * 60
         dims = CC.dimensions_for_teu(r.teu, self.rng_att)
@@ -348,6 +372,10 @@ class Generator:
         elif code not in TERMINAL_OF_CODE:
             zones = CC.TERMINAL_LOCATION.get(code, {}).get("zones") or {"antwerp_right_bank_docks": 1.0}
             zone = max(zones, key=zones.get)
+        if ratio is None:
+            ratio = self._stay_ratio(zone or ZONE_OF_TERMINAL.get(TERMINAL_OF_CODE.get(code)), stay_h)
+        scheduled_stay_h = stay_h
+        stay_h = min(stay_h * ratio, MAX_STAY_H)        # the hours it lies at its berth
         # one in nine container ships comes in at anchor (AIS, P_CATEGORY_GIVEN_CLASS) and lies there for an anchor
         # stay of container ships before it berths at its berth time: it enters that much earlier (engine.enter).
         # Slowed at sea instead, as all of them were, the model had 0.4 container ships at anchor against 2.1
@@ -362,7 +390,7 @@ class Generator:
                               "arrival_min": self.minutes(arrival),
                               "departure_min": self.minutes(departure) if pd.notna(departure) else None,
                               # when it is to berth: the schedule and its delay (the engine times its entry by it)
-                              "berth_min": self.minutes(berth_t)},
+                              "berth_min": self.minutes(berth_t), "stay_h": scheduled_stay_h, "stay_ratio": ratio},
                     stay_h=stay_h, cranes_wanted=cranes_for(r.teu))
         if zone:
             ship.dwell_h = stay_h
@@ -422,9 +450,15 @@ class Generator:
             for source, rate in EP.RATE_PER_HOUR[cls].items():
                 lam = rate * EP.HOURLY_FACTOR[cls][hour] * dt / 60.0
                 scale = INLAND_TRIP_SCALE if cls in INLAND_CLASSES and source in INLAND_SCALED_SOURCES else 1.0
-                lam *= scale
+                top = max(scale, INLAND_TRIP_SCALE_ANTWERP or 0.0) if scale != 1.0 else 1.0
+                lam *= top
                 for _ in range(self.rng.poisson(lam)):
                     dest = BT.sample_destination(cls, self.rng_att, source)
+                    if top != 1.0:              # the scale of this trip, by where it goes (thinned from the larger one)
+                        own = INLAND_TRIP_SCALE_ANTWERP if INLAND_TRIP_SCALE_ANTWERP and dest in ANTWERP_ZONES else INLAND_TRIP_SCALE
+                        if self.rng_att.random() >= own / top:
+                            continue
+                        scale = own
                     a = self._fitting_attributes(cls, source, dest)
                     loa = float(a["loa"])
                     ship = Ship(id=f"B{next(self.counter):05d}", cls=cls, loa=loa,
@@ -432,6 +466,10 @@ class Generator:
                                 draught=float(a["draught"] or self.median_draught[cls]), level=2, source=source,
                                 destination=dest, spawn_t=t0 + self.rng.uniform(0, dt), dg=a["dg"])
                     ship.trip_scale = scale
+                    # the trips added by the scale are the ones the AIS missed: out and back with one short call.
+                    # They make their first call and leave; with the whole chain of calls of a heard visit they
+                    # put a fifth too many inland craft through the dock locks (MODEL.md §19)
+                    ship.single_call = scale > 1.0 and bool(self.rng_att.random() < 1.0 - 1.0 / scale)
                     out.append(ship)
         return out
 

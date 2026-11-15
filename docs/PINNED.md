@@ -52,27 +52,31 @@ Things set aside on 10 November 2026, with what each one waits for.
 
 ## Validation gaps (MODEL.md §19)
 
-As of 14 November 2026, after the third calibration round (103 of 113 numbers agree; 47 within 5 %).
+As of 15 November 2026, after the fourth calibration round (`0011_round3-barges-after-ship`: 105 of 113 numbers
+agree, emergent 62 of 66, calibrated 31 of 35, input 12 of 12).
 
-- **Inland craft in the sea locks.** Still a sixth to a quarter longer than the AIS through Zandvliet–Berendrecht,
-  Kallo, Terneuzen and Kieldrecht, although they now go in beside the sea-going ships and leave before them. Needs
-  lockages for inland craft alone and the chamber assignment rules (Terneuzen: which ships use which of the three
-  chambers); ask Rijkswaterstaat / North Sea Port and the harbour master.
-- **Lock holds are calibrated, not observed.** Probability per lock (Hansweert 0.10, Kreekrak 0.06, Kallo 0.08,
-  Kieldrecht 0.06) and a mean of 35 min, set on the 90th percentiles of the passage times. Ask the lock
-  operators for stoppages (maintenance, shift changes, bridge openings).
-- **Lock times set on the AIS, not on a source.** Hansweert 8 min (published: 15 min, 2001) and Van Cauwelaert
-  20 min (locks.csv: 45 min as a passage time). Confirm at the source.
-- **Too many inland craft at Kieldrecht and Zandvliet–Berendrecht** (a third and a fifth). Fit moves between
-  berths within one dock zone (now merged into one call); the choice between the locks of one bank.
-- **Sea-going voyages into and between the docks** are still short (Terneuzen, Kallo, river beyond Deurganckdok)
-  with Zeebrugge now a place of call. No single cause found; look at stops under 1 h and shifts across a lock
-  within one zone.
-- **Container ships at berths 14 % short** with the median time at the berth right: the schedule's stays have no
-  long tail (AIS mean 27 h, median 25 h), and the calls in the docks are fewer than in the AIS. The allowance for
-  leaving (150 min) and the wait at sea (up to 18 h) are calibrated; real call sizes would replace both.
-- **Canal scaling per canal.** One factor for three canals leaves km 32 a tenth short of inland craft.
-- **Rijkswaterstaat's lock counts** (2017, 2018) and the AIS (2026) differ by up to 14 % at one lock; the model
-  follows the AIS. A newer count would settle it.
+- **Zandvliet–Berendrecht's 90th percentiles.** Inland craft 2.69 h against 2.17 h, sea-going ships 2.64 h against
+  2.25 h, with both medians right (1.32 against 1.17 h, 1.80 against 1.75 h). The slow inland passages wait an hour
+  to be called: the chambers' capacity at the busy hours. The time a sea-going ship takes to come in (30 min,
+  calibrated) trades the two: at 18 min the inland craft are right and the sea-going ships 15 % fast. Needs the
+  lock planning of the 500 m locks (lockages for inland craft alone, how barges are fitted around a sea-going ship).
+- **Lock holds are calibrated, not observed.** Probability per lock (Kallo 0.25, Hansweert 0.20, Kieldrecht 0.16,
+  Zandvliet and Berendrecht 0.10, Terneuzen 0.08, Kreekrak 0.06, Boudewijn and Van Cauwelaert 0.05) and a mean of
+  35 min, set on the 90th percentiles of the passage times. Ask the lock operators for stoppages.
+- **Lock times set on the AIS, not on a source.** Hansweert 6 min (published: 15 min, 2001), Van Cauwelaert 20 min
+  (locks.csv: 45 min as a passage time), the time a sea-going ship takes to come in (Zandvliet and Berendrecht 30,
+  Kieldrecht 26, Boudewijn and Van Cauwelaert 20, Kallo 14 min). Confirm at the source.
+- **Sea-going ships under way in the docks** 3.21 against 2.76 (+16 %), with the piloted ones under way in the docks
+  right (3.15 against 3.20). Probably the last of the approach to a berth counted both as sailing and in the
+  mooring time for the unpiloted small ships; not changed.
+- **Small sea-going ships on the canals** (Hansweert 0.08 a day against 0.47, Kreekrak 0.05 against 0.40, Royers
+  0.12 against 0): a few ships a week, coasters to and from the Rhine that the fit puts on other routes.
+- **Canal scaling per canal.** One factor for three canals leaves km 32 (−12 %), km 68 and km 72 (−10 %) short of
+  inland craft.
+- **Rijkswaterstaat's lock counts** (2017, 2018) and the AIS (2026) differ: Terneuzen 126 against 153 passages a day
+  in the AIS, Kreekrak 189 against 174, Hansweert 113 against 99. The model follows the AIS (147, 170, 100) and so
+  "differs" on all three. A newer count would settle it.
+- **Container ships in the area** +10 % (28.6 against 25.9) with the ships at berths and at anchor right: time
+  under way between the sea and the berth; the virtual arrival is planned at the class's speed.
 - **Rebuild of the cached graph.** The place "terneuzen" was moved in the cached graph by hand to where
   places.CALL_PLACES now puts it; the next rebuild gives the same.

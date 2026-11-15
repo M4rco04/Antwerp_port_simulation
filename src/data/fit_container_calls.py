@@ -33,6 +33,10 @@ SCHEDULE_YEAR = 2026
 # a port call belongs to a schedule line if it starts this close to the scheduled arrival: half a week, so
 # that a weekly service's call is never paired with the line of the week before or after (it was 96 h)
 MATCH_WINDOW_H = 84
+# a stay of more than this is lay-up or repair, not a call (validate.CONTAINER_LAYUP_H): not in the stay ratios
+LAYUP_H = 96.0
+# the berth zones with a terminal have stay ratios of their own; every other call counts as "docks"
+STAY_ZONES = ("antwerp_deurganckdok", "antwerp_river_quays")
 # berth stops in Antwerp this close together are one port call (shifting berth)
 SHIFT_MAX_H = 3
 # the draught a ship usually sails at, not the largest it ever reported (that overstated the deep tail)
@@ -138,11 +142,33 @@ def match_schedule(schedule, container, calls, times):
                      "arrival_delay_h": ((call.start - line.arrival).total_seconds() / 3600
                                          if call.start_observed and inside else np.nan),
                      "departure_delay_h": ((call.end - line.departure).total_seconds() / 3600
-                                           if call.end_observed and inside and pd.notna(line.departure) else np.nan)})
+                                           if call.end_observed and inside and pd.notna(line.departure) else np.nan),
+                     # the hours it lay in port over the hours its line gives it, when both ends were seen
+                     "port_h": ((call.end - call.start).total_seconds() / 3600
+                                if call.start_observed and call.end_observed else np.nan),
+                     "scheduled_h": ((line.departure - line.arrival).total_seconds() / 3600
+                                     if pd.notna(line.departure) else np.nan)})
     matched = pd.DataFrame(rows)
     log.info("%d schedule lines in the AIS period, %d matched to a berth call, %d arrival delays kept",
              len(lines), len(matched), matched.arrival_delay_h.notna().sum())
     return matched
+
+
+def stay_ratios(matched):
+    """Hours in port over the scheduled stay, per kind of berth (STAY_ZONES): the values to draw from. A line's
+    stay is a plan: half the calls lie longer than their line says and one in ten more than twice as long (86
+    calls: median 1.02, mean 1.31). Calls of more than LAYUP_H are lay-up or repair, which the model leaves out."""
+    m = matched[matched.port_h.notna() & (matched.scheduled_h > 0) & (matched.port_h <= LAYUP_H)]
+    ratio = m.port_h / m.scheduled_h
+    kind = m.zone.map(lambda z: z if z in STAY_ZONES else "docks")
+    out = {}
+    for k, r in ratio.groupby(kind):
+        # with each ratio the scheduled stay it belongs to: the short lines are the ones that overrun (the mean of
+        # the ratios is 1.16 at Deurganckdok, the hours in port over the hours scheduled 1.09)
+        pairs = sorted((round(float(h), 1), round(float(v), 3)) for h, v in zip(m.scheduled_h[r.index], r))
+        out[k] = {"n": int(len(r)), "mean": round(float(r.mean()), 3), "median": round(float(r.median()), 3),
+                  "values": [round(float(v), 3) for v in sorted(r)], "pairs": pairs}
+    return out
 
 
 def entry_to_berth(entries, calls, catalogue):
@@ -186,6 +212,7 @@ def fit(data, stops):
         "TEU_DIMENSIONS": fit_dimensions(container),
         "SCHEDULE_DELAY_H": {"arrival": summary(matched.arrival_delay_h),
                              "departure": summary(matched.departure_delay_h)},
+        "SCHEDULE_STAY_RATIO": stay_ratios(matched),
         "ENTRY_TO_BERTH_H": entry_to_berth(data.entries, calls, data.zones.catalogue()),
         "TERMINAL_LOCATION": terminals,
         "UNSCHEDULED_CALLS": unscheduled(data, calls),
@@ -207,6 +234,9 @@ SCHEDULE_DELAY_H   arrival / departure -> n, mean_h, median_h, sd_h, p10_h, p90_
                    {tz} local time. One line to one call, within +-{window} h; only lines
                    scheduled that long inside the AIS period at both ends count (so that no
                    delay within the window goes unseen).
+SCHEDULE_STAY_RATIO kind of berth (antwerp_deurganckdok, antwerp_river_quays, "docks") -> n, mean, median, values:
+                   the hours a matched call lay in port (both ends seen, lay-up left out) over the hours
+                   its line gives it
 ENTRY_TO_BERTH_H   entry category (sea / anchorage) -> the same summary: hours from entering
                    the area to berthing in Antwerp (includes any anchorage wait)
 TERMINAL_LOCATION  schedule terminal code -> median lat/lon of its berth calls, berth zones, n ("" = the
@@ -259,6 +289,19 @@ def sample_entry_to_berth(rng, category="sea"):
     """Hours from entering the area (category "sea" or "anchorage") to berthing in Antwerp."""
     summary = ENTRY_TO_BERTH_H.get(category) or ENTRY_TO_BERTH_H["sea"]
     return _bootstrap(rng, summary["values"])
+
+
+def sample_stay_ratio(rng, zone=None, scheduled_h=None, nearest=10):
+    """Hours a call lies in port over the hours its schedule line gives it, for a call in this berth zone (the
+    two terminal zones; any other counts as the docks): the ratio of one of the `nearest` matched calls whose
+    scheduled stay is closest to this one's (a short line overruns more than a long one)."""
+    fit = SCHEDULE_STAY_RATIO.get(zone) or SCHEDULE_STAY_RATIO.get("docks")
+    if not fit:
+        return 1.0
+    if scheduled_h is None or not fit.get("pairs"):
+        return _bootstrap(rng, fit["values"])
+    near = sorted(fit["pairs"], key=lambda p: abs(p[0] - scheduled_h))[:nearest]
+    return _bootstrap(rng, [v for _, v in near])
 '''
 
 
