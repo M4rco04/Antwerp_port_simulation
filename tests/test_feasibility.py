@@ -172,3 +172,18 @@ def test_inland_craft_lie_alongside_only_while_there_is_room(sim):
         sim.berth_ship.clear()
         sim.berth_ship.update(saved_berths)
         sim.ships[:] = saved_ships
+
+
+# ------------------------------------------------------------------ random streams per ship
+def test_each_ship_draws_from_its_own_stream(sim):
+    """A ship's choices, durations and speed come from a stream of its own (Simulation.ship_rng): what another ship
+    draws, or whether it draws at all, does not move them. With one stream for all, one more draw for one ship moved
+    every later draw of every other ship (MODEL.md §1)."""
+    mk = lambda i: Ship(id=i, cls="inland_cargo", loa=80.0, beam=9.5, draught=2.5, level=2, source="sea_west",
+                        destination="exit_sea_west", spawn_t=0.0)
+    first = sim.ship_rng(mk("A00001"), "choice").random(5)
+    sim.ship_rng(mk("B00002"), "choice").random(100)            # another ship draws a hundred times
+    again = sim.ship_rng(mk("A00001"), "choice").random(5)      # the same ship (by id) in another configuration
+    assert (first == again).all()
+    assert not (sim.ship_rng(mk("A00001"), "service").random(5) == first).all()   # streams differ by kind
+    assert not (sim.ship_rng(mk("B00002"), "choice").random(5) == first).all()    # and by ship

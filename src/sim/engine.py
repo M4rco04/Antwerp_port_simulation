@@ -31,6 +31,7 @@ import math
 import pickle
 import sys
 import time
+import zlib
 from pathlib import Path
 
 import numpy as np
@@ -204,7 +205,13 @@ LOCK_SEA_COMING_IN_MIN = {"Zandvliet": 30.0, "Berendrecht": 30.0, "Boudewijn": 2
 #   choice      berths, exits, next calls, locks     movement    tie-breaks in the right of way
 #   speed       each ship's own speed (SPEED_SPREAD)
 #   locks       the holds of the locks               stays       a container call's stay over its line's
+# Choices, durations and speed are drawn per ship (Simulation.ship_rng): each ship has a stream of its own for each,
+# from the seed, the stream and its id (the ids come from the arrivals, which do not depend on the port). With one
+# stream for all ships a change that made one more draw for one ship moved every later draw of every other ship,
+# so two configurations no longer compared like with like (the share of calls at the town of Vlissingen moved
+# Terneuzen's sea-going lock times and the tankers at anchor, runs 0024 / 0028)
 STREAMS = ("arrivals", "attributes", "weather", "service", "choice", "movement", "speed", "locks", "stays")
+SHIP_STREAMS = ("choice", "service", "speed")
 # Ships of one class do not all sail at one speed: each ship's speed through the water is its class's times a
 # factor drawn once, lognormal with this standard deviation of the logarithm (median 1), kept within
 # SPEED_FACTOR_RANGE. With one speed per class the 90th percentiles of the sailing times were 12 to 17 % short of
@@ -261,9 +268,8 @@ class Simulation:
         self.start = pd.Timestamp(start, tz="UTC")
         self.n_steps = int(days * 24 * 60 / DT_MIN)
         self.warmup_min = warmup_days * 24 * 60
+        self.seed = int(seed)
         self.streams = dict(zip(STREAMS, (np.random.default_rng(q) for q in np.random.SeedSequence(seed).spawn(len(STREAMS)))))
-        self.rng = self.streams["choice"]
-        self.rng_service = self.streams["service"]
         self.container_sea_wait_max_min = CONTAINER_SEA_WAIT_MAX_MIN
         self.graph = pickle.load(open(GRAPH, "rb"))["graph"]
         self.fg = FastGraph.load(GRAPH.with_suffix(".arrays.npz"), self.graph)
@@ -394,6 +400,17 @@ class Simulation:
     def pilot_zone(self, node):
         return PILOT_ZONE.get(self.mover.zone_label[node], "river")
 
+    def ship_rng(self, ship, stream):
+        """The ship's own random stream for choices, durations or its speed (SHIP_STREAMS): from the seed, the
+        stream and the ship's id, so that a draw one ship makes or does not make leaves every other ship's draws
+        as they were (common random numbers between two configurations, MODEL.md §1)."""
+        key = "_rng_" + stream
+        g = ship.__dict__.get(key)
+        if g is None:
+            g = np.random.default_rng(np.random.SeedSequence([self.seed, STREAMS.index(stream), zlib.crc32(ship.id.encode())]))
+            ship.__dict__[key] = g
+        return g
+
     # ------------------------------------------------------------------ routes
     @staticmethod
     def needs(ship):
@@ -461,7 +478,7 @@ class Simulation:
                                   for c in complexes], dtype=float)
                     if w.sum() <= 0:
                         continue
-                    pick = int(self.rng.choice(len(complexes), p=w / w.sum()))
+                    pick = int(self.ship_rng(ship, "choice").choice(len(complexes), p=w / w.sum()))
                     avoid += [l for i, c in enumerate(complexes) if i != pick for l in c]
                 # Royers and Kattendijk carry the same penalty as a complex not drawn, so a ship whose drawn complex
                 # does not fit went through them on a tie (0.3 sea-going passages a day; the AIS has none)
@@ -474,7 +491,7 @@ class Simulation:
                     continue
                 if a in avoid or b in avoid:
                     continue                           # its complex is not this ship's
-                avoid.append(b if self.rng.random() < na / max(na + nb, 1e-9) else a)
+                avoid.append(b if self.ship_rng(ship, "choice").random() < na / max(na + nb, 1e-9) else a)
             avoid = ship.avoid_locks = tuple(avoid)
         return avoid
 
@@ -823,7 +840,7 @@ class Simulation:
         if share:                                      # river side or behind the locks, by the AIS share of the calls
             drawn = getattr(ship, "call_side", None)
             if not drawn or drawn[0] != (zone, getattr(ship, "calls", 1)):
-                river = bool(self.rng.random() < share["sea_going" if ship.sea_going else "inland"])
+                river = bool(self.ship_rng(ship, "choice").random() < share["sea_going" if ship.sea_going else "inland"])
                 drawn = ship.call_side = ((zone, getattr(ship, "calls", 1)), river)
             side = [i for i in ids if self.berths[i]["nodes"] and self._behind_locks(self.berths[i]["nodes"][0]) != drawn[1]]
             where = ZONE_RIVER_KM_SHARE.get(zone)
@@ -835,8 +852,8 @@ class Simulation:
                     groups = [[self.berths[i]["nodes"][0] for i in side if lo <= km[self.berths[i]["nodes"][0]] < hi]
                               for lo, hi, _ in where]
                     w = np.array([p if g else 0.0 for g, (_, _, p) in zip(groups, where)], dtype=float)
-                    g = groups[int(self.rng.choice(len(groups), p=w / w.sum()))]
-                    drawn = ship.call_side = drawn + (int(g[int(self.rng.integers(len(g)))]),)
+                    g = groups[int(self.ship_rng(ship, "choice").choice(len(groups), p=w / w.sum()))]
+                    drawn = ship.call_side = drawn + (int(g[int(self.ship_rng(ship, "choice").integers(len(g)))]),)
                 node = drawn[2]
                 ship.candidate = {"kind": "berth", "id": None, "node": node, "nodes": [node], "zone": zone}
                 return node
@@ -961,7 +978,7 @@ class Simulation:
                 w.append(q)
         if not names:
             return None
-        return names[int(self.rng.choice(len(names), p=np.array(w) / sum(w)))]
+        return names[int(self.ship_rng(ship, "choice").choice(len(names), p=np.array(w) / sum(w)))]
 
     def _vlissingen_node(self, ship, node):
         """Where a call at Vlissingen lies: Vlissingen-Oost (the place), or for a share of the inland craft the
@@ -971,7 +988,7 @@ class Simulation:
             return node
         drawn = getattr(ship, "vlissingen_call", None)
         if not drawn or drawn[0] != getattr(ship, "calls", 1):
-            drawn = ship.vlissingen_call = (getattr(ship, "calls", 1), bool(self.rng.random() < share))
+            drawn = ship.vlissingen_call = (getattr(ship, "calls", 1), bool(self.ship_rng(ship, "choice").random() < share))
         if not drawn[1]:
             return node
         if not hasattr(self, "_vlissingen_town"):
@@ -1013,7 +1030,7 @@ class Simulation:
         old quays nobody uses, some reached only through locks that are hardly used."""
         w = np.array([(self.berths[b].get("calls") or {}).get(ship.cls, 0)
                       + 0.1 * sum((self.berths[b].get("calls") or {}).values()) + 0.05 for b in ids], dtype=float)
-        return ids[int(self.rng.choice(len(ids), p=w / w.sum()))]
+        return ids[int(self.ship_rng(ship, "choice").choice(len(ids), p=w / w.sum()))]
 
     def quay_eta(self, ship):
         """The minute a ship cleared now is planned to need its quay: now for a ship inside the area's
@@ -1296,7 +1313,7 @@ class Simulation:
         self.n_entered += 1
         self.terminal_draught(ship)
         ship.arrival_draught = ship.draught
-        ship.speed_factor = float(np.clip(math.exp(self.streams["speed"].normal(0.0, SPEED_SPREAD)), *SPEED_FACTOR_RANGE))
+        ship.speed_factor = float(np.clip(math.exp(self.ship_rng(ship, "speed").normal(0.0, SPEED_SPREAD)), *SPEED_FACTOR_RANGE))
         ship.set_state(State.SPAWNED, now, source=ship.source, destination=ship.destination, cls=ship.cls)
         if getattr(ship, "slowed_min", 0.0):
             ship.note(now, "virtual_arrival", minutes=ship.slowed_min)
@@ -1321,7 +1338,7 @@ class Simulation:
                 # three in four anchor stays last minutes)
                 wait = getattr(ship, "anchor_wait_h", None)
                 ship.anchor_until = now + 60.0 * (wait if wait is not None else ANCHOR_WAIT_FACTOR.get(ship.cls, 1.0)
-                                                  * BT.sample_anchorage_wait(ship.cls, self.rng_service))
+                                                  * BT.sample_anchorage_wait(ship.cls, self.ship_rng(ship, "service")))
                 self.vts.request(ship, now)            # it waits at anchor for its clearance like any arrival
             else:                                      # no pilot needed: it weighs anchor and sails
                 self.anchorages[ship.anchorage].leave(ship.id, now)
@@ -1386,7 +1403,7 @@ class Simulation:
         if not ship.sea_going or ship.level == 1 or not zone or ship.cls not in BT.NEXT_CALL:
             return None
         ship.calls = getattr(ship, "calls", 1) + 1
-        following = BT.sample_next_call(ship.cls, self.rng, zone) if ship.calls <= INLAND_MAX_CALLS else None
+        following = BT.sample_next_call(ship.cls, self.ship_rng(ship, "choice"), zone) if ship.calls <= INLAND_MAX_CALLS else None
         if following:
             ship.note(now, "next_call", destination=following)
             ship.shift_since = now
@@ -1470,10 +1487,10 @@ class Simulation:
         if not near:
             return False
         ship.anchor_stopped = True                     # one draw a visit, on its first voyage past an anchorage
-        if self.rng_service.random() >= p:
+        if self.ship_rng(ship, "service").random() >= p:
             return False
         w = np.array([shares[a] for a in near], dtype=float)
-        name = near[int(self.rng_service.choice(len(near), p=w / w.sum()))]
+        name = near[int(self.ship_rng(ship, "service").choice(len(near), p=w / w.sum()))]
         a = self.anchorages[name]
         if not a.has_room(ship.loa, ship.draught):
             return False
@@ -1481,7 +1498,7 @@ class Simulation:
         if to is None or len(to) < 2:
             return False
         ship.anchor_target, ship.after_anchor_target = name, route[-1]
-        ship.inland_anchor_h = float(BT.sample_anchorage_wait(ship.cls, self.rng_service))
+        ship.inland_anchor_h = float(BT.sample_anchorage_wait(ship.cls, self.ship_rng(ship, "service")))
         ship.note(now, "inland_anchor_stop", anchorage=name, hours=round(ship.inland_anchor_h, 2))
         self.sail(ship, to, State.TO_ANCHORAGE, now)
         return True
@@ -1602,6 +1619,8 @@ class Simulation:
         ship.needs_tugs = ship.tugs_needed(departing=True) + WG.extra_tugs(ship, self.weather, self.now_ts(now))
 
     def finish(self, ship, now, how="exited"):
+        for stream in SHIP_STREAMS:                    # its own random streams are not needed any more
+            ship.__dict__.pop("_rng_" + stream, None)
         if ship.anchorage:
             self.anchorages[ship.anchorage].leave(ship.id, now)
             ship.anchorage = None
@@ -1760,7 +1779,7 @@ class Simulation:
                         continue
                     if not self._service_ready(ship, now, "arrival"):
                         continue
-                    ship.timer = PI.mooring_minutes(ship.loa, "arrival", self._berth_area(ship), self.rng_service)
+                    ship.timer = PI.mooring_minutes(ship.loa, "arrival", self._berth_area(ship), self.ship_rng(ship, "service"))
                 ship.timer -= DT_MIN
                 if ship.timer <= 0:
                     self._release_services(ship, now)
@@ -1784,7 +1803,7 @@ class Simulation:
                         continue
                     if not self._service_ready(ship, now, "departure"):
                         continue
-                    ship.timer = PI.mooring_minutes(ship.loa, "departure", self._berth_area(ship), self.rng_service)
+                    ship.timer = PI.mooring_minutes(ship.loa, "departure", self._berth_area(ship), self.ship_rng(ship, "service"))
                 ship.timer -= DT_MIN
                 if ship.timer <= 0:
                     self._release_services(ship, now)
@@ -1804,7 +1823,7 @@ class Simulation:
                         self.go(ship, now)
                         continue
                     ship.departing = True
-                    ship.exit = (BT.sample_exit(ship.cls, self.rng, ship.berth["name"], ship.source)
+                    ship.exit = (BT.sample_exit(ship.cls, self.ship_rng(ship, "choice"), ship.berth["name"], ship.source)
                                  if ship.cls in BT.P_EXIT_GIVEN_CLASS else "exit_sea_north")
                     ship.berth = None
                     self.go(ship, now)
@@ -1829,7 +1848,7 @@ class Simulation:
         INLAND_TRIP_SCALE): the AIS stays of the calls it saw also hold those trips. The trips added for them make
         one call (generator: single_call), so the hours they add are one call's, not a visit's: with the trip
         scale s, the calls per visit grow by (s - 1) / INLAND_CALLS_PER_VISIT and the stays are divided by that."""
-        hours = BT.sample_berth_dwell(ship.cls, self.rng_service, zone)
+        hours = BT.sample_berth_dwell(ship.cls, self.ship_rng(ship, "service"), zone)
         scale = getattr(ship, "trip_scale", 1.0)
         return hours / (1.0 + (scale - 1.0) / INLAND_CALLS_PER_VISIT)
 
@@ -1869,7 +1888,7 @@ class Simulation:
         b = ship.berth or {}
         zone = b.get("zone") or b.get("name")
         ship.calls = getattr(ship, "calls", 1) + 1
-        following = BT.sample_next_call(ship.cls, self.rng, zone) if zone and ship.calls <= INLAND_MAX_CALLS else None
+        following = BT.sample_next_call(ship.cls, self.ship_rng(ship, "choice"), zone) if zone and ship.calls <= INLAND_MAX_CALLS else None
         if following is None:
             return False
         before = ship.destination, ship.berth_zone
@@ -1891,7 +1910,7 @@ class Simulation:
         leaving."""
         if not ship.sea_going:
             return
-        ratio = min(max(BT.sample_draught_change(ship.cls, self.rng_service, ship.draught), 0.4), 1.6)
+        ratio = min(max(BT.sample_draught_change(ship.cls, self.ship_rng(ship, "service"), ship.draught), 0.4), 1.6)
         before = ship.draught
         draught = round(min(before * ratio, DEPARTURE_MAX_DRAUGHT_M.get(ship.cls, math.inf)), 2)
         berth_limit = self.berths.get((ship.berth or {}).get("id"), {}).get("max_draught_m")
@@ -1913,7 +1932,7 @@ class Simulation:
         ship.departing = True
         zone = (ship.berth or {}).get("zone") or ("antwerp_deurganckdok" if ship.terminal in ("MPET", "DP World Antwerp Gateway") else "antwerp_river_quays")
         cls = ship.cls if ship.cls in BT.P_EXIT_GIVEN_CLASS else "bulk_general"
-        ship.exit = BT.sample_exit(cls, self.rng, zone, ship.source)
+        ship.exit = BT.sample_exit(cls, self.ship_rng(ship, "choice"), zone, ship.source)
         ship.mark("ready", now)
         ship.set_state(State.WAIT_CLEARANCE, now, departing=True)
         if ship.needs_pilot:
