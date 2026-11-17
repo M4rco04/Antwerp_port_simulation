@@ -849,6 +849,8 @@ A run records every ship's timeline, every event, and the state of the port each
 
 **Time in port** of a ship is decomposed by state, so time at anchor, on the river, in locks, at berth and in handling add up to its total. A container ship's delay against the schedule is its actual minus scheduled berth time.
 
+**Memory.** The ships' positions every step are written to a binary file during the run (engine.PositionLog, 21 bytes a row; 14 MB for the 31.7-day run, where the list in memory took about 200 MB), and the validation builds the fixes once for both windows, with a fix every step for a ship lying still only from a day before the first window (its numbers are the same as with every fix of the run). One replication of the standard run peaks at 2.3 GB (2.8 GB before): 1.2 GB at the end of the run, 1.1 GB more while it is validated. The positions file of a run that is stopped is left in the system's temporary folder.
+
 **Replications.** One run is one draw. `src/sim/replicate.py` runs a configuration with several seeds and gives every result as a mean with its 95 % confidence interval (Student's t over the replications). Because arrivals and weather have their own random streams (§1), two configurations run on the same seeds are compared seed by seed, which is much tighter than comparing two means.
 
 **Choosing the warm-up.** The same script applies Welch's procedure: the ships in the area per step, averaged over the replications and smoothed with a moving average of one day, plotted against time. The warm-up is where that curve stops rising; the script suggests the first time after which it stays inside the band it keeps over the last half of the run, and warns when that is later than the warm-up used.

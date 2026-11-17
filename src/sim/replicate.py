@@ -106,11 +106,15 @@ def one(job):
     # the numbers that are set against the AIS record (validate.py), measured the way the record is
     import validate
     until = cfg.get("measure_until")
-    measured = validate.simulated(sim, ships, t1=None if until is None else until * 1440.0)
+    # the fixes are built once, from a day before the warm-up ends, for both windows (the largest thing a
+    # replication holds: built over the whole run, twice, it took two workers to the edge of a 16 GB machine)
+    tr = validate.model_tracks(sim, min([sim.warmup_min] + [cfg["holdout"][0] * 1440.0] if cfg.get("holdout") else [sim.warmup_min]))
+    sim.positions.close()                        # the positions file is not needed any more
+    measured = validate.simulated(sim, ships, t1=None if until is None else until * 1440.0, tr=tr)
     (out / "validation.json").write_text(json.dumps(measured, indent=1))
     held = {}
     if cfg.get("holdout"):                       # a second window of the run: the days held out of the fit
-        held = validate.simulated(sim, ships, *(d * 1440.0 for d in cfg["holdout"]))
+        held = validate.simulated(sim, ships, *(d * 1440.0 for d in cfg["holdout"]), tr=tr)
         (out / "validation_holdout.json").write_text(json.dumps(held, indent=1))
     return ({"seed": seed, "wall_s": round(time.time() - t0), **flatten(summary), **{f"v.{k}": v for k, v in measured.items()},
              **{f"h.{k}": v for k, v in held.items()}}, series["ships"].to_numpy())

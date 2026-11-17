@@ -210,9 +210,9 @@ def lock_passages(f, geo, ring_m=LOCK_RING_M):
 
 def tracks(f, geo):
     """Everything read from a list of fixes. f: id, t (min), cls, grp, piloted, x, y, lon, lat, zone, chain, basin,
-    kn; sorted by id and t."""
-    f = f.copy()
-    f["sea_lon"] = np.where((f.zone == "sea") & (f.lat <= SEA_SECTION_MAX_LAT), f.lon, np.nan)
+    kn; sorted by id and t. Adds a column to f (sea_lon) rather than copying it: the model's frame is the largest
+    thing a replication holds."""
+    f["sea_lon"] =np.where((f.zone == "sea") & (f.lat <= SEA_SECTION_MAX_LAT), f.lon, np.nan)
     p = [passages(f, "sea_lon", SEA_SECTION_LON, SEA_BAND_LON, "sea")]
     p += [passages(f, "chain", 1000.0 * km, BAND_M, name) for name, km in SECTIONS_KM.items()]
     under = f[(f.kn >= UNDER_WAY_KN) & f.zone.isin(("sea", "river", "dock")) & ((f.zone != "sea") | (f.lon >= MIN_SEA_LON))
@@ -297,10 +297,19 @@ def quantiles(samples, min_n=8):
 
 
 # ------------------------------------------------------------------ the model
-def model_frame(sim, geo):
-    """The model's positions as fixes: every ship under way, every step (bow position, at its mesh node)."""
+def model_frame(sim, geo, t_from=None):
+    """The model's positions as fixes: every ship under way, every step (bow position, at its mesh node).
+    t_from (min): a ship lying still gets a fix every step only from then on (a measured window needs them from a day
+    before it: TRANSIT_MAX_H, LOCK_MAX_H); before then one fix where it lay down, which is enough to say on which side
+    of a section or in which basin it was (a passage is a change of side between two fixes, however far apart: a
+    ship in by one dock lock and out by another passes the river between them). The fixes of every step of every
+    ship lying still are most of the frame. Without t_from, every step of the whole run."""
     fg = sim.fg
-    p = pd.DataFrame(sim.positions, columns=["step", "ship", "state", "route", "value", "offset"])
+    step_from = None if t_from is None else max(int(t_from // STEP_MIN), 0)
+    if hasattr(sim.positions, "frame"):                # engine.PositionLog: on disk
+        p = sim.positions.frame()
+    else:
+        p = pd.DataFrame(sim.positions, columns=["step", "ship", "state", "route", "value", "offset"])
     m = p[p.route >= 0].sort_values(["ship", "step"], kind="stable").reset_index(drop=True)
     node = np.zeros(len(m), dtype=np.int64)
     rid, val = m.route.to_numpy(), m.value.to_numpy()
@@ -327,9 +336,18 @@ def model_frame(sim, geo):
     # (a pilot changed at a lock boards in the chamber, where a real ship lies still: only at sea and on the river)
     z = geo.zone[still.value.to_numpy().astype(np.int64)]
     still = still[still.state.isin(("mooring", "unmooring") + LYING + AT_LOCK + SAILING_IN) | np.isin(z, ("sea", "river"))]
-    reps = (still.until - still.step).clip(lower=1).astype(int).to_numpy()
+    first = still.step.to_numpy()
+    reps = (still.until.to_numpy() - first).clip(min=1).astype(int)
+    if step_from is not None:
+        # lying down before the cut: one fix at that step, and a fix every step from the cut on if still lying then
+        early = first < step_from
+        on = early & (still.until.to_numpy() > step_from)
+        still = pd.concat([still[~early], still[early], still[on]])
+        first = np.r_[first[~early], first[early], np.full(int(on.sum()), step_from)]
+        reps = np.r_[reps[~early], np.ones(int(early.sum()), dtype=int),
+                     (still.until.to_numpy()[len(first) - int(on.sum()):] - step_from).astype(int)]
     s_ship = np.repeat(still.ship.to_numpy(), reps)
-    s_step = np.repeat(still.step.to_numpy(), reps) + np.concatenate([np.arange(r) for r in reps]) if len(reps) else np.array([], dtype=int)
+    s_step = np.repeat(first, reps) + np.concatenate([np.arange(r) for r in reps]) if len(reps) else np.array([], dtype=int)
     s_node = np.repeat(still.value.to_numpy().astype(np.int64), reps)
     ship = np.r_[m.ship.to_numpy(), s_ship]
     step = np.r_[m.step.to_numpy(), s_step]
@@ -380,14 +398,27 @@ def model_stocks(sim, t0, t1):
     return out
 
 
-def simulated(sim, ships=None, t0=None, t1=None):
-    """The numbers of one finished run, after its warm-up; or of the minutes t0 to t1 of it (a part of the run
-    set against a part of the record: the days the model was fitted on, and the days held out)."""
+MARGIN_MIN = 24 * 60.0                  # fixes kept before a window: a transit (TRANSIT_MAX_H) or a lock passage
+                                        # (LOCK_MAX_H) that ends in it began before it
+
+
+def model_tracks(sim, t_from=None):
+    """tracks() of the model's fixes from t_from (min) on, for one or more windows that start then or later."""
     geo = geometry(sim.graph, sim.fg)
+    f = model_frame(sim, geo, None if t_from is None else t_from - MARGIN_MIN)
+    tr = tracks(f, geo)
+    del f
+    return tr
+
+
+def simulated(sim, ships=None, t0=None, t1=None, tr=None):
+    """The numbers of one finished run, after its warm-up; or of the minutes t0 to t1 of it (a part of the run
+    set against a part of the record: the days the model was fitted on, and the days held out). tr: model_tracks
+    built once for several windows (from no later than t0)."""
     t0, t1 = float(sim.warmup_min if t0 is None else t0), float(sim.t if t1 is None else t1)
     days = (t1 - t0) / 1440.0
-    f = model_frame(sim, geo)
-    tr = tracks(f, geo)
+    if tr is None:
+        tr = model_tracks(sim, t0)
     # the fixes are on the step grid: a window that starts between two steps is read from the first step in it
     out = from_tracks(tr, t0, t1, np.arange(math.ceil(t0 / STEP_MIN - 1e-9) * STEP_MIN, t1, STEP_MIN))
     out.update(quantiles(durations(tr, t0, t1)))

@@ -28,8 +28,10 @@ import argparse
 import json
 import logging
 import math
+import os
 import pickle
 import sys
+import tempfile
 import time
 import zlib
 from pathlib import Path
@@ -259,6 +261,86 @@ class Route(list):
     free_from = None
 
 
+class PositionLog:
+    """The ships' positions every step (for the viewer and the validation), kept in a binary file on disk rather
+    than in memory: a row is (step, ship, state, route, value, offset), 21 bytes in the file where a tuple in a list
+    took about 300. Rows are buffered and written in blocks; frame() reads them back. The file is removed when the
+    log is closed or collected."""
+    DTYPE = np.dtype([("step", "<i4"), ("ship", "<i4"), ("state", "u1"), ("route", "<i4"), ("value", "<f8")])
+    BLOCK = 20000
+
+    def __init__(self):
+        fd, self.path = tempfile.mkstemp(prefix="positions_", suffix=".bin")
+        self.fh = open(fd, "wb")
+        self.ships, self.ship_code = [], {}
+        self.states, self.state_code = [], {}
+        self.buf, self.offsets, self.offset_buf = [], None, []
+        self.n = 0
+
+    def append(self, row):
+        step, ship, state, route, value, offset = row
+        s = self.ship_code.get(ship)
+        if s is None:
+            s = self.ship_code[ship] = len(self.ships)
+            self.ships.append(ship)
+        c = self.state_code.get(state)
+        if c is None:
+            c = self.state_code[state] = len(self.states)
+            self.states.append(state)
+        self.buf.append((step, s, c, route, value))
+        self.offset_buf.append(offset)
+        self.n += 1
+        if len(self.buf) >= self.BLOCK:
+            self.flush()
+
+    def flush(self):
+        if self.buf:
+            np.array(self.buf, dtype=self.DTYPE).tofile(self.fh)
+            # the sideways offset is almost always 0: kept apart, as (row, offset) for the rows where it is not
+            nz = [(self.n - len(self.buf) + i, o) for i, o in enumerate(self.offset_buf) if o]
+            if nz:
+                block = np.array(nz, dtype=[("row", "<i8"), ("offset", "<f4")])
+                self.offsets = block if self.offsets is None else np.concatenate([self.offsets, block])
+            self.buf, self.offset_buf = [], []
+            self.fh.flush()
+
+    def __len__(self):
+        return self.n
+
+    def frame(self, step_from=None):
+        """The rows as a DataFrame (step, ship, state, route, value, offset); with step_from, only the rows from that
+        step on and each ship's last row before it (where it was then: a ship lying still has no row while it lies)."""
+        self.flush()
+        a = np.fromfile(self.path, dtype=self.DTYPE)
+        offset = np.zeros(len(a), dtype=np.float32)
+        if self.offsets is not None:
+            offset[self.offsets["row"]] = self.offsets["offset"]
+        keep = None
+        if step_from is not None:
+            keep = a["step"] >= step_from
+            before = np.flatnonzero(~keep)
+            if len(before):                            # the last record of each ship before the cut
+                last = pd.Series(before).groupby(a["ship"][before]).max().to_numpy()
+                keep[last] = True
+        if keep is not None:
+            a, offset = a[keep], offset[keep]
+        ships = np.array(self.ships, dtype=object)
+        states = pd.Categorical.from_codes(a["state"].astype(np.int16), categories=self.states) if self.states else []
+        return pd.DataFrame({"step": a["step"].astype(np.int64), "ship": ships[a["ship"]] if len(a) else np.array([], dtype=object),
+                             "state": np.asarray(states, dtype=object) if len(a) else np.array([], dtype=object),
+                             "route": a["route"].astype(np.int64), "value": a["value"], "offset": offset.astype(np.float64)})
+
+    def close(self):
+        try:
+            self.fh.close()
+            os.remove(self.path)
+        except Exception:                              # already closed, or the interpreter is shutting down
+            pass
+
+    def __del__(self):
+        self.close()
+
+
 class Simulation:
     def __init__(self, start="2026-10-21 00:00", days=7.0, seed=1, delays=True, warmup_days=2.0, background=True,
                  weather_mode="bootstrap", container_mode="replay", container_rate=1.0, bunching=True,
@@ -369,7 +451,7 @@ class Simulation:
                     self.hold_chainage[name] = float(np.nanmedian(fg.chainage_m[near]))
         river = np.flatnonzero(fg.region == fg.code("region", "river")) if "region" in fg.labels else np.arange(fg.n)
         self.reach_from = int(river[np.argmax(fg.depth_m[river])])      # the deepest cell of the main channel
-        self.events, self.series, self.positions = [], [], []
+        self.events, self.series, self.positions = [], [], PositionLog()
         self.routes_rec, self._last_pos = [], {}
         self.terminal_waiting = {}                     # terminal -> {ship id: since when it waits for quay}   # routes sailed (node lists) and last fixed position per ship
         self.port_log = PortStateLog(self)             # locks, VTS queue and berths over time (the viewer)
@@ -2399,8 +2481,7 @@ class Simulation:
         lv.to_csv(out / "levels.csv.gz", index=False)
         # route = -1: the ship lies at node `value`; else it is `value` m along routes[route] (route.json),
         # `offset` m to starboard of the route's centre line (passing or overtaking in one lane, movement.py)
-        pd.DataFrame(self.positions, columns=["step", "ship", "state", "route", "value", "offset"]).to_csv(
-            out / "positions.csv.gz", index=False)
+        self.positions.frame().to_csv(out / "positions.csv.gz", index=False)
         (out / "routes.json").write_text(json.dumps(self.routes_rec, separators=(",", ":")))
         # where the nodes of this run's routes lie: the viewer of a run must not take them from a graph built later
         # (a rebuilt mesh numbers its cells anew, and a viewer made again then drew the ships all over the map)

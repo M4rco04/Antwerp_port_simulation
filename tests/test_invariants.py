@@ -326,3 +326,28 @@ def test_a_seed_reproduces_a_run():
     a, b = simulate(0.5, 5), simulate(0.5, 5)
     pd.testing.assert_frame_equal(a.ship_table(), b.ship_table())
     assert len(a.ship_table()) != len(simulate(0.5, 6).ship_table()) or not a.ship_table().equals(simulate(0.5, 6).ship_table())
+
+
+# ------------------------------------------------------------------ positions on disk
+def test_the_position_log_gives_back_what_was_written(monkeypatch):
+    """engine.PositionLog keeps the positions in a file: what frame() reads back is what was appended, across the
+    blocks it is written in, with the sideways offsets; the file is gone once closed."""
+    import os
+
+    import engine
+
+    monkeypatch.setattr(engine.PositionLog, "BLOCK", 7)
+    log = engine.PositionLog()
+    rng = np.random.default_rng(9)
+    rows = [(k, f"S{int(rng.integers(5)):03d}", ("sailing", "at_berth", "lock_queue")[int(rng.integers(3))],
+             int(rng.integers(-1, 4)), round(float(rng.uniform(0, 90000)), 1), float(rng.choice([0.0, 0.0, 12.5, -30.0])))
+            for k in range(100)]
+    for r in rows:
+        log.append(r)
+    f = log.frame()
+    assert len(log) == len(f) == len(rows)
+    want = pd.DataFrame(rows, columns=["step", "ship", "state", "route", "value", "offset"])
+    pd.testing.assert_frame_equal(f, want, check_dtype=False)
+    path = log.path
+    log.close()
+    assert not os.path.exists(path)
