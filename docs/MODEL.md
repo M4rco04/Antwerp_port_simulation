@@ -1127,11 +1127,33 @@ Scores, five seeds each (a number agrees as in Method; the mean difference is th
 | `0021_loss-fixes` | Draught of container ships to a zone, zone drawn again, next call waits 24 h, alongside limit | 120 of 133 | 9.3 % | 97 of 122 | 19.5 % | 16.4 |
 | `0023_reach-fix` | Feasibility by the ship's own size | 125 of 135 | 9.5 % | 95 of 122 | 19.2 % | 4.4 |
 | `0024_canal-draught` | Draught from a canal, unreachable further call left out | 122 of 135 | 9.3 % | 98 of 122 | 18.1 % | 0.2 |
-| `0028_vlissingen-ais` | Inland calls at the town of Vlissingen at the AIS share (the current state) | 126 of 135 | 8.8 % | 97 of 122 | 18.5 % | — |
+| `0028_vlissingen-ais` | Inland calls at the town of Vlissingen at the AIS share | 126 of 135 | 8.8 % | 97 of 122 | 18.5 % | — |
+| `0029_baseline` | A random stream per ship (§1), positions on disk (§17): the baseline | 125 of 135 | 8.9 % | 98 of 121 | 18.3 % | — |
 
 Up to `0024` the fitted days went from 127 of 133 agreeing to 122 of 135, and the held-out days from 97 of 122 to 98: what was taken out had been fitted to the fitted days. In `0024` emergent 76 of 85 agree, calibrated 35 of 39, input 11 of 11; 98 of 135 lie within 10 %. In `0028` emergent 81 of 85, calibrated 34 of 39, input 11 of 11; 97 within 10 %. The Vlissingen share changes one draw of each inland call there, which shifts the later draws of a seed, so `0028` and `0024` are not paired seed by seed as other pairs of runs are: the moves elsewhere (Terneuzen's sea-going 90th percentile now differs, the sailing-time 90th percentiles to km 8 now agree) are within what another set of draws gives. A run with `--set locks.BUNDLE_HOLD_MIN=0` (four of five seeds before it was stopped for lack of memory; not kept) tested the lockage without the wait for a second craft: see Hansweert below.
 
 The 13 fitted numbers that differ in `0024`, of which `0028` puts right inland craft off Vlissingen (8.9 against 12.7 a day; 12.2 in `0028`) and the two 90th percentiles of the sailing time to km 8: inland craft under way at sea (0.38 against 0.66); Hansweert's inland median (0.74 against 0.60 h, 1.18 against 0.96 h with the approaches) and 90th percentile (1.17 against 1.50 h); bulk carriers at anchor (3.9 against 5.6); the 90th percentiles of the sailing time between the sea and km 8, both ways (10 % short); sea-going ships under way in the docks (+15 %); sea-going ships through Royers (0.25 a day against none); Kallo's sea-going median with the approaches (1.83 against 1.50 h); Kieldrecht's inland 90th percentile with the approaches (2.2 against 4.3 h); Rijkswaterstaat's count at Terneuzen. On the days held out 24 of 122 differ, among them inland craft through Kallo (24.8 a day against 11.8) and Zandvliet–Berendrecht (75.6 against 53.1), tankers at anchor (11.1 against 6.2), inland tankers at berths (168 against 127) and container ships at the terminals (9.4 against 12.6); with three days of record these are leads to follow when the record is longer, not findings.
+
+**The baseline** (`0029_baseline`, 17 November 2026) is the model as it stands after the fifth round, with a random stream per ship (§1): emergent 78 of 85 agree on the fitted days, calibrated 36 of 39, input 11 of 11; 98 of 121 on the days held out. It is set against `0028` number by number with the seed-by-seed test, but a stream per ship draws every number anew, so that test is too strict here: the few verdicts that change lie at the edge of their tolerance, and the one run result that moved, the hours of the passenger ships in the area (25.0 to 31.2 h), is the tail of their stays (median 24 h, 99th percentile 368 h): their distributions do not differ (Mann-Whitney p = 0.17).
+
+**The calibrated values against the days held out** (baseline; fitted days / days held out, difference from the record):
+
+| Value | Set on | Fitted | Held out | |
+| --- | --- | --- | --- | --- |
+| Sailing factors (§7) | median sailing times, sea to km 8 and km 8 to km 62 | 0 to +1 % | −3 to +5 % | holds |
+| Speed of each ship, spread 0.10 (§7) | 90th percentiles of the sailing times | −11 to 0 % | −22 to +14 % | holds, but for the 90th percentile from km 8 to sea (−11 % and −22 %: ships slowing at sea for their berth time, not modelled) |
+| Inland craft 8 % faster down the river (§7) | inland median from km 48 to km 32 | 0 % | +12 % (up: +8 %) | not shown either way: on the days held out the craft were faster both ways, which the factor (a difference between the ways) does not touch |
+| Inland lock approach 3.6 kn (§11.6) | inland medians at Hansweert, Kreekrak, Terneuzen | +21, −11, −10 % | +34, −12, −8 % | the mean AIS speed there, as much measured as set; Hansweert, §14 |
+| Lock holds (§14): Kallo, Kieldrecht, Terneuzen, Kreekrak, Boudewijn–Van Cauwelaert | inland 90th percentiles | −7 to +15 % | −10 to +10 % | holds |
+| Time a sea-going ship takes to come into the sea locks (§14) | sea-going medians at the Antwerp locks | −8 to −2 % | −9 to +9 % | holds |
+| Van Cauwelaert 20 min (§14) | inland median of Boudewijn–Van Cauwelaert | +9 % | 0 % | holds |
+| Complex factors, Boudewijn–Van Cauwelaert × 1.32, Kallo × 1.9 (§10.2) | sea-going passages per complex | −8 to +2 % | −10 to +54 % | not shown: Kallo +54 % is 4.9 a day against 3.2, a dozen ships in three days |
+| Route cost of the sea locks for inland craft (§10.2) | inland passages at the dock locks | +6 to +10 % | +12 to +95 % | not shown: the days held out are a Friday, a Saturday and a Sunday (below) |
+| Inland craft anchoring on the way (§12) | inland craft at anchor | +12 %, 0 % | 1.06 against 0.21, −5 % | not shown: a rare stop, three days |
+| Canal scaling k = 1.30 (§6.2) | inland passages at the canal locks | −13 to +4 % | −3 to +20 % | holds on the fitted days; the days held out: below |
+| Container delay shifted −6 h (§2.1) | berthing against the schedule | +7 % | — | cannot be tested: no schedule call matched in the days held out |
+
+Nothing calibrated fails on the days held out. Where it is not shown, the cause is the days themselves: three of them, two at a weekend. **Inland traffic has a weekly pattern** that the model does not have (§18): in the AIS an inland craft passes Hansweert 99 times on a weekday and 70 at a weekend, Terneuzen 132 and 87, Zandvliet–Berendrecht 73 and 46, Kieldrecht 27 and 18, km 32 182 and 120 (Kreekrak 164 and 156, Kallo 21 and 24: no pattern). The model runs every day at the mean, so on days held out that are mostly weekend it has a quarter to a half too many inland craft at those locks. A weekday factor on the inland arrivals would put this right, and the days held out need to be more and to cover whole weeks.
 
 **What the model does not reproduce, and why.** The numbers in the list below are those of the fourth round, except where the fifth round is named. Added by the fifth round:
 
