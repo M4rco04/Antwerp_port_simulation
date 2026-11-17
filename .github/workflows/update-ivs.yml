@@ -2,8 +2,8 @@ name: Pobierz cotygodniowy IVS weekmonitor
 
 on:
   schedule:
-    # Uruchamia się w każdy poniedziałek o 08:00 UTC (plik pojawia się na serwerze ok. 04:30)
-    - cron: '0 8 * * 1'
+    # Uruchamia się w każdy wtorek o 08:00 UTC
+    - cron: '0 8 * * 2'
   # Pozwala też odpalić skrypt ręcznie jednym kliknięciem z zakładki Actions na GitHubie
   workflow_dispatch:
 
@@ -24,16 +24,16 @@ jobs:
           FILENAME=$(curl -s "$BASE_URL" | grep -oE 'IVS_weekmonitor_[0-9A-Za-z]+\.zip' | head -n 1)
           
           echo "Znaleziono plik: $FILENAME"
-          mkdir -p inland_trips temp_zip
+          mkdir -p data/inland_trips temp_zip
           curl -sL "${BASE_URL}${FILENAME}" -o "temp_zip/${FILENAME}"
           
-          # Rozpakowuje zawartość ZIP do folderu inland_trips/ i usuwa tymczasowy plik
-          unzip -o "temp_zip/${FILENAME}" -d inland_trips/
+          # Rozpakowuje zawartość ZIP do folderu data/inland_trips/ i usuwa tymczasowy plik
+          unzip -o "temp_zip/${FILENAME}" -d data/inland_trips/
           rm -rf temp_zip
 
       - name: Zapisz zmiany w repozytorium
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add inland_trips/
+          git add data/inland_trips/
           git diff --quiet && git diff --staged --quiet || (git commit -m "Aktualizacja danych IVS weekmonitor" && git push)
