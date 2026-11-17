@@ -1,0 +1,22 @@
+{
+  "label": "holdout-baseline",
+  "reps": 5,
+  "seed": 401,
+  "start": "2026-10-15 01:00",
+  "days": 31.72,
+  "warmup": 11.0,
+  "delays": true,
+  "background": true,
+  "weather": "bootstrap",
+  "containers": "replay",
+  "container_rate": 1.0,
+  "bunching": true,
+  "routing": "lanes",
+  "checks": false,
+  "measure_until": 28.0,
+  "holdout": [
+    28.9583,
+    31.7188
+  ],
+  "set": []
+}

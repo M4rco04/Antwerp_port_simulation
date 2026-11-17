@@ -1,0 +1,16 @@
+{
+  "label": "weeks",
+  "reps": 3,
+  "seed": 1,
+  "start": "2026-10-21 00:00",
+  "days": 21.0,
+  "warmup": 7.0,
+  "delays": false,
+  "background": true,
+  "weather": "bootstrap",
+  "containers": "weeks",
+  "container_rate": 1.0,
+  "bunching": true,
+  "routing": "lanes",
+  "checks": false
+}

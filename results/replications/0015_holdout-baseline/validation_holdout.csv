@@ -1,0 +1,133 @@
+number,group,what,unit,kind,model,model_se,reps,record,record_se,difference,z,tolerance,verdict
+arrivals.bulk_general,Arrivals,bulk and general cargo ships entering,a day,I,28.54552,1.4280303912732395,5,,,,,,
+arrivals.container,Arrivals,container ships entering,a day,I,8.33182,0.7684577225846584,5,8.294817193303096,1.733258298823687,0.004460955055981069,0.01951653165272223,0.1,agrees
+arrivals.inland_cargo,Arrivals,inland cargo craft entering,a day,I,142.58285999999998,2.7721389058991974,5,,,,,,
+arrivals.inland_tanker,Arrivals,inland tankers entering,a day,I,94.83789999999999,3.610560072897278,5,,,,,,
+arrivals.passenger,Arrivals,passenger ships entering,a day,I,5.14398,0.3116262078195606,5,,,,,,
+arrivals.tanker,Arrivals,tankers entering,a day,I,18.909640000000003,1.24122031791298,5,,,,,,
+flow.km08.inland,River traffic,"km 8, off Vlissingen: inland",passages a day,E,11.37476,1.0598552050162324,5,10.065786672344048,1.507273879309062,0.13004183083398566,0.7103954777705231,0.25,agrees
+flow.km08.sea_going,River traffic,"km 8, off Vlissingen: sea-going",passages a day,E,104.25645999999999,1.9821541016278215,5,106.65786672344048,11.353718379930106,-0.022515045511525538,-0.2083569843165726,0.15,agrees
+flow.km32.inland,River traffic,"km 32, Terneuzen to Hansweert: inland",passages a day,E,154.24742,2.867079546053788,5,160.3320457840364,26.08649823380445,-0.03795015372180965,-0.23185196492375812,0.25,agrees
+flow.km32.sea_going,River traffic,"km 32, Terneuzen to Hansweert: sea-going",passages a day,E,75.20378000000001,2.8190692345878983,5,82.06889909466021,8.057585609263926,-0.08365067852002998,-0.8042076801375604,0.15,agrees
+flow.km48.inland,River traffic,"km 48, Hansweert to Bath: inland",passages a day,E,92.73682,2.7035846601133096,5,85.46050670640834,14.014786913078524,0.08514240757533485,0.5097892760145789,0.25,agrees
+flow.km48.sea_going,River traffic,"km 48, Hansweert to Bath: sea-going",passages a day,E,75.4211,2.7407089577333807,5,81.2975962367063,8.963187111540796,-0.07228376371173731,-0.6269704369631723,0.15,agrees
+flow.km62.inland,River traffic,"km 62, Bath to the Zandvliet locks: inland",passages a day,E,94.18584000000001,2.7156979118819526,5,85.79384003974167,14.720910108684587,0.09781587997892366,0.5606137200098815,0.25,agrees
+flow.km62.sea_going,River traffic,"km 62, Bath to the Zandvliet locks: sea-going",passages a day,E,75.05886,2.7166550912105114,5,82.61150481056804,9.146023584806736,-0.09142364405401646,-0.7916019940681839,0.15,agrees
+flow.km68.inland,River traffic,"km 68, Zandvliet to Deurganckdok: inland",passages a day,E,115.9935,4.929035611354417,5,125.05698672911785,18.29304693014444,-0.07247485299441925,-0.47839853837878743,0.25,agrees
+flow.km68.sea_going,River traffic,"km 68, Zandvliet to Deurganckdok: sea-going",passages a day,E,39.84786,1.8927623357410714,5,47.89096383709966,3.5598217240269743,-0.16794616755800013,-1.9949489746994544,0.15,agrees
+flow.km72.inland,River traffic,"km 72, Deurganckdok to Boudewijn: inland",passages a day,E,90.5633,3.901572793502642,5,99.23180956436225,21.38937922940137,-0.08735615728885619,-0.39869322411629265,0.25,agrees
+flow.km72.sea_going,River traffic,"km 72, Deurganckdok to Boudewijn: sea-going",passages a day,E,20.8658,1.3775108489590926,5,22.674179060595918,3.2810537266694637,-0.07975499601388393,-0.5081872253137198,0.15,agrees
+flow.km80.inland,River traffic,"km 80, Kallo to Antwerp: inland",passages a day,E,45.86126,3.167599462463649,5,38.46490667802143,12.36068085965139,0.19228834698316832,0.5796470327019718,0.25,agrees
+flow.km80.sea_going,River traffic,"km 80, Kallo to Antwerp: sea-going",passages a day,E,4.2745999999999995,0.17746553186464123,5,1.9805752405284014,1.1379196525549007,1.158261858741388,1.9919030051653615,0.15,agrees
+flow.km88.inland,River traffic,"km 88, above Antwerp: inland",passages a day,E,41.00706,2.792872192671909,5,35.36027048673419,12.79132475191665,0.15969305199133796,0.431293815416732,0.25,agrees
+flow.km88.sea_going,River traffic,"km 88, above Antwerp: sea-going",passages a day,E,2.8255600000000003,0.24028645113697109,5,1.542605715907823,0.7923094700110398,0.83167997555173,1.5495658104664114,0.15,agrees
+flow.sea.sea_going,River traffic,"sea, 3.10°E (Wandelaar to Wielingen): sea-going",passages a day,E,72.74043999999999,2.6777331429027806,5,83.50686861928078,3.963437329168473,-0.12892865937012207,-2.2508797274118457,0.15,agrees
+port.antwerp_calls,River traffic,"sea-going ships calling at Antwerp (the port's statistics, 2020 and 2021)",a day,E,36.58758,1.0561500269374615,5,38.099999999999994,0.8000000000000007,-0.039696062992125775,-1.1415050142666532,0.1,agrees
+transit.km08_to_km62.in.median,Sailing times,"sea-going, km 8 to km 62, median",h,C,2.70834,0.018626448936928355,5,2.5833333333333335,0.08638560930437482,0.048389677419354855,1.4145680267419922,0.1,agrees
+transit.km08_to_km62.in.p90,Sailing times,"sea-going, km 8 to km 62, 90th percentile",h,E,3.225,0.03544910436104133,5,3.4581944444444463,0.13768664310561965,-0.06743242700510109,-1.6401719335702674,0.1,agrees
+transit.km08_to_km62.out.median,Sailing times,"sea-going, km 62 to km 8, median",h,C,2.5,0.026341772909202577,5,2.5,0.05723849164867362,0.0,0.0,0.1,agrees
+transit.km08_to_km62.out.p90,Sailing times,"sea-going, km 62 to km 8, 90th percentile",h,E,3.26166,0.24874152166455846,5,3.0833333333333335,0.09491616159173438,0.05783567567567562,0.6698076136995884,0.1,agrees
+transit.km32_to_km48.in.median,Sailing times,"inland, km 32 to km 48, median",h,E,1.1667,0.0,5,1.0833333333333333,0.050963578418627024,0.07695384615384629,1.6358087334816458,0.1,agrees
+transit.km32_to_km48.in.p90,Sailing times,"inland, km 32 to km 48, 90th percentile",h,E,1.5599999999999998,0.08652616945179069,5,1.5833333333333333,0.06194314001865205,-0.014736842105263218,-0.2192714159456571,0.1,agrees
+transit.km32_to_km48.out.median,Sailing times,"inland, km 48 to km 32, median",h,E,1.21668,0.020404249557383857,5,1.0833333333333333,0.04456844125957196,0.12308923076923083,2.720409328476242,0.1,differs
+transit.km32_to_km48.out.p90,Sailing times,"inland, km 48 to km 32, 90th percentile",h,E,1.58,0.07999999999999999,5,1.5166666666666668,0.11006930478224605,0.04175824175824169,0.4654441050667602,0.1,agrees
+transit.sea_to_km08.in.median,Sailing times,"sea-going, sea to km 8, median",h,C,1.86666,0.02042874445481174,5,1.8331944444444463,0.06780004247720185,0.018255322372905974,0.47260477649154303,0.1,agrees
+transit.sea_to_km08.in.p90,Sailing times,"sea-going, sea to km 8, 90th percentile",h,E,2.35002,0.18331999999999996,5,2.1666666666666665,0.05786715945010664,0.08462461538461556,0.9537909606719362,0.1,agrees
+transit.sea_to_km08.out.median,Sailing times,"sea-going, km 8 to sea, median",h,C,1.7000199999999999,0.020404249557383854,5,1.75,0.045060450432620025,-0.02856000000000008,-1.010413184278435,0.1,agrees
+transit.sea_to_km08.out.p90,Sailing times,"sea-going, km 8 to sea, 90th percentile",h,E,1.9733399999999999,0.02973877267137972,5,2.5833333333333335,0.19512631028612107,-0.23612645161290333,-3.0904592308060703,0.1,differs
+underway.dock.inland,Ships under way,dock: inland,ships,E,0.0,0.0,5,23.11117453069508,2.4820072412050216,-1.0,-9.311485537598408,0.25,differs
+underway.dock.sea_going,Ships under way,dock: sea-going,ships,E,0.0,0.0,5,2.5755327245053277,0.40410530431484987,-1.0,-6.373419742341856,0.15,differs
+underway.river.inland,Ships under way,river: inland,ships,E,0.0,0.0,5,20.467132800608827,3.25646619749873,-1.0,-6.285074543789061,0.25,differs
+underway.river.sea_going,Ships under way,river: sea-going,ships,E,0.0,0.0,5,12.483384069000508,1.141674953972351,-1.0,-10.934271637969934,0.15,differs
+underway.sea.inland,Ships under way,sea: inland,ships,E,0.0,0.0,5,0.43015918315575846,0.13953443763338996,-1.0,-3.082817334928817,0.25,differs
+underway.sea.sea_going,Ships under way,sea: sea-going,ships,E,0.0,0.0,5,9.805016489091832,0.8910607493927402,-1.0,-11.003757595398486,0.15,differs
+pilots.dock.mean,Piloted ships under way,"dock, mean",ships,E,0.0,0.0,5,2.857718163368848,0.35302826753229744,-1.0,-8.094870655385703,0.15,differs
+pilots.dock.p95,Piloted ships under way,"dock, 95th percentile",ships,E,0.0,0.0,5,6.333333333333333,0.6666666666666667,-1.0,-9.499999999999998,0.15,differs
+pilots.river.mean,Piloted ships under way,"river, mean",ships,E,0.0,0.0,5,12.753979578893961,1.1033691385271722,-1.0,-11.559122992979992,0.15,differs
+pilots.river.p95,Piloted ships under way,"river, 95th percentile",ships,E,0.0,0.0,5,19.066666666666663,0.9683892697555985,-1.0,-19.689051977495268,0.15,differs
+pilots.sea.mean,Piloted ships under way,"sea, mean",ships,E,0.0,0.0,5,10.835346905124302,0.9340542606308596,-1.0,-11.600339896534615,0.15,differs
+pilots.sea.p95,Piloted ships under way,"sea, 95th percentile",ships,E,0.0,0.0,5,16.0,2.0,-1.0,-8.0,0.15,differs
+lockpass.Boudewijn-Van Cauwelaert.inland,Locks,Boudewijn-Van Cauwelaert: inland passing,a day,E,95.92465999999999,3.383531159838786,5,84.33644575564949,10.102334984784642,0.13740458399118902,1.0876975453294306,0.25,agrees
+lockpass.Boudewijn-Van Cauwelaert.sea_going,Locks,Boudewijn-Van Cauwelaert: sea-going passing,a day,E,9.563480000000002,0.9693325019826788,5,9.399120005677382,0.8718811692280845,0.01748674282521566,0.12606643444467094,0.15,agrees
+lockpass.Hansweert.inland,Locks,Hansweert: inland passing,a day,E,100.19922,2.1265239343586058,5,88.127173373075,15.04318269005441,0.136984384780158,0.7945929431708875,0.25,agrees
+lockpass.Hansweert.sea_going,Locks,Hansweert: sea-going passing,a day,E,0.0,0.0,5,2.104636191287245,0.9520044859347334,-1.0,-2.2107418844994102,0.15,differs
+lockpass.Kallo.inland,Locks,Kallo: inland passing,a day,E,23.61892,2.283633304057375,5,11.837089530297959,1.090619223579238,0.9953317020662488,4.655565933890707,0.25,differs
+lockpass.Kallo.sea_going,Locks,Kallo: sea-going passing,a day,E,5.651159999999999,0.9894229649649333,5,3.2092723825744898,0.4097021855778257,0.7608851248290176,2.280233066909814,0.15,differs
+lockpass.Kieldrecht.inland,Locks,Kieldrecht: inland passing,a day,E,28.83536,1.5309166203944615,5,23.131573344688096,3.961411131771767,0.2465801426612304,1.3430350105567461,0.25,agrees
+lockpass.Kieldrecht.sea_going,Locks,Kieldrecht: sea-going passing,a day,E,8.69406,0.458210080203393,5,9.294483814390135,1.8702280845280588,-0.06460001721241712,-0.3118207813617749,0.15,agrees
+lockpass.Kreekrak.inland,Locks,Kreekrak: inland passing,a day,E,169.89674,3.636983047884607,5,174.8896762878027,14.17348490770095,-0.028549062436288172,-0.34121817280517813,0.25,agrees
+lockpass.Kreekrak.sea_going,Locks,Kreekrak: sea-going passing,a day,E,0.0,0.0,5,0.3333333333333333,0.33333333333333337,-1.0,-0.9999999999999999,0.15,agrees
+lockpass.Royers-Kattendijk.inland,Locks,Royers-Kattendijk: inland passing,a day,E,0.21736,0.14490250032349336,5,1.1046361912872449,0.5867555418233681,-0.8032293331375392,-1.4680694256953515,0.25,agrees
+lockpass.Royers-Kattendijk.sea_going,Locks,Royers-Kattendijk: sea-going passing,a day,E,0.07246,0.07246,5,0.0,0.0,,1.0,0.15,agrees
+lockpass.Terneuzen.inland,Locks,Terneuzen: inland passing,a day,E,123.74569999999999,1.8982853602659429,5,104.2975962367063,16.01543036425329,0.18646742077502607,1.205894117131953,0.25,agrees
+lockpass.Terneuzen.sea_going,Locks,Terneuzen: sea-going passing,a day,E,20.35862,1.4417503644528755,5,21.69360382006752,2.5793015861159936,-0.06153813036968082,-0.45178628789404013,0.15,agrees
+lockpass.Zandvliet-Berendrecht.inland,Locks,Zandvliet-Berendrecht: inland passing,a day,E,72.3782,0.7098799884487501,5,53.10023621967415,5.453619285852561,0.3630485503034953,3.5053222931540833,0.25,differs
+lockpass.Zandvliet-Berendrecht.sea_going,Locks,Zandvliet-Berendrecht: sea-going passing,a day,E,36.22532,1.8003808881456165,5,35.84460192422721,7.80890992382281,0.010621350366161129,0.04750801004921864,0.15,agrees
+locktime.Boudewijn-Van Cauwelaert.inland.median,Locks,"Boudewijn-Van Cauwelaert: inland, time to pass, median",h,C,1.0691399999999998,0.009126313604079138,5,1.0833333333333333,0.029135260227620408,-0.013101538461538617,-0.46487993771217734,0.2,agrees
+locktime.Boudewijn-Van Cauwelaert.inland.p90,Locks,"Boudewijn-Van Cauwelaert: inland, time to pass, 90th percentile",h,C,1.71798,0.040572544904159,5,1.9166666666666667,0.18373643905798315,-0.10366260869565218,-1.0559300120003026,0.2,agrees
+locktime.Boudewijn-Van Cauwelaert.sea_going.median,Locks,"Boudewijn-Van Cauwelaert: sea-going, time to pass, median",h,C,1.3508400000000003,0.03456331291991554,5,1.4304796493127165,0.07894479950687883,-0.05567338853857842,-0.9241137553822593,0.2,agrees
+locktime.Boudewijn-Van Cauwelaert.sea_going.p90,Locks,"Boudewijn-Van Cauwelaert: sea-going, time to pass, 90th percentile",h,C,1.7947000000000002,0.0856529567498986,5,1.9346572998535219,0.11765651662477154,-0.07234216616251272,-0.9616961078448275,0.2,agrees
+locktime.Hansweert.inland.median,Locks,"Hansweert: inland, time to pass, median",h,C,0.71136,0.016614830724385975,5,0.5373610185716946,0.019422836997741267,0.32380276092745736,6.807546926909089,0.2,differs
+locktime.Hansweert.inland.p90,Locks,"Hansweert: inland, time to pass, 90th percentile",h,C,1.5273599999999998,0.05452824589146437,5,0.8333333333333334,0.03916490173316572,0.8328319999999997,10.337649931446714,0.2,differs
+locktime.Kallo.inland.median,Locks,"Kallo: inland, time to pass, median",h,C,0.9705,0.05509349326372399,5,0.9695811437242203,0.11344558734642579,0.0009476837309875039,0.0072858142803179605,0.2,agrees
+locktime.Kallo.inland.p90,Locks,"Kallo: inland, time to pass, 90th percentile",h,C,1.9063400000000001,0.17151374172351322,5,2.157386055085989,0.6562548945201921,-0.11636584675893002,-0.37011203530913306,0.2,agrees
+locktime.Kallo.sea_going.median,Locks,"Kallo: sea-going, time to pass, median",h,C,1.2587,0.0746,2,1.0369073648035434,0.07330024063299433,0.21389821571812082,2.120686484115234,0.2,differs
+locktime.Kallo.sea_going.p90,Locks,"Kallo: sea-going, time to pass, 90th percentile",h,C,2.19705,0.49935,2,1.142374874892254,0.06937714855481777,0.9232303233272882,2.0920016219467694,0.2,differs
+locktime.Kieldrecht.inland.median,Locks,"Kieldrecht: inland, time to pass, median",h,C,0.9801,0.053846439065178664,5,0.8333333333333334,0.12311759082971971,0.17611999999999992,1.0921946879569189,0.2,agrees
+locktime.Kieldrecht.inland.p90,Locks,"Kieldrecht: inland, time to pass, 90th percentile",h,C,2.13452,0.12900460224348587,5,2.233333333333334,0.5344406674334578,-0.04424477611940311,-0.1797292387762207,0.2,agrees
+locktime.Kieldrecht.sea_going.median,Locks,"Kieldrecht: sea-going, time to pass, median",h,C,1.4974,0.04195970686265574,5,1.2721536060250704,0.06816187708302247,0.17705911684574566,2.814116417824596,0.2,agrees
+locktime.Kieldrecht.sea_going.p90,Locks,"Kieldrecht: sea-going, time to pass, 90th percentile",h,C,2.01132,0.17830901659759107,5,1.9899718853035544,0.18464961252002665,0.010727847390260547,0.08316702032127707,0.2,agrees
+locktime.Kreekrak.inland.median,Locks,"Kreekrak: inland, time to pass, median",h,C,0.7615799999999999,0.007102281323631155,5,0.75,0.021010599860390913,0.015439999999999898,0.5221263066225418,0.2,agrees
+locktime.Kreekrak.inland.p90,Locks,"Kreekrak: inland, time to pass, 90th percentile",h,C,1.4000800000000002,0.05430284891237293,5,1.193948586296853,0.040477750925626055,0.17264680914149214,3.043463411497502,0.2,agrees
+locktime.Terneuzen.inland.median,Locks,"Terneuzen: inland, time to pass, median",h,C,0.86068,0.0013962091533863937,5,0.8614035509620711,0.03197273833280221,-0.0008399674708364022,-0.022608700223410418,0.2,agrees
+locktime.Terneuzen.inland.p90,Locks,"Terneuzen: inland, time to pass, 90th percentile",h,C,1.6827199999999998,0.06735502505381463,5,1.7498333333333358,0.1434334478592331,-0.03835412896466479,-0.4235324800164347,0.2,agrees
+locktime.Terneuzen.sea_going.median,Locks,"Terneuzen: sea-going, time to pass, median",h,C,0.9631399999999999,0.01880357944647773,5,1.0224289985217485,0.032317211382919604,-0.057988377293161704,-1.5857113691007032,0.2,agrees
+locktime.Terneuzen.sea_going.p90,Locks,"Terneuzen: sea-going, time to pass, 90th percentile",h,C,1.5491400000000002,0.06960366082326415,5,1.2691701870187353,0.03547858625535509,0.22059280610657145,3.583647643789108,0.2,differs
+locktime.Zandvliet-Berendrecht.inland.median,Locks,"Zandvliet-Berendrecht: inland, time to pass, median",h,C,1.36554,0.036748940120770845,5,1.0897823971910232,0.04793847699346096,0.25303914205235634,4.565259079946774,0.2,differs
+locktime.Zandvliet-Berendrecht.inland.p90,Locks,"Zandvliet-Berendrecht: inland, time to pass, 90th percentile",h,C,2.72622,0.07287771538680395,5,2.25,0.23768132678399975,0.21165333333333336,1.915582380469746,0.2,agrees
+locktime.Zandvliet-Berendrecht.sea_going.median,Locks,"Zandvliet-Berendrecht: sea-going, time to pass, median",h,C,1.7922800000000003,0.021548582319957835,5,1.75,0.029632801299119153,0.02416000000000018,1.1539495946742042,0.2,agrees
+locktime.Zandvliet-Berendrecht.sea_going.p90,Locks,"Zandvliet-Berendrecht: sea-going, time to pass, 90th percentile",h,C,2.6092,0.030727544646456877,5,2.1666666666666665,0.09322550527404007,0.2042461538461539,4.508334632393386,0.2,differs
+lockwide.Boudewijn-Van Cauwelaert.inland.median,Locks,"Boudewijn-Van Cauwelaert: inland, time to pass with the approaches (3 km either side), median",h,E,1.48254,0.014931496910892742,5,1.5831944444444463,0.052450564007064104,-0.06357680498289438,-1.8457022920616946,0.2,agrees
+lockwide.Boudewijn-Van Cauwelaert.inland.p90,Locks,"Boudewijn-Van Cauwelaert: inland, time to pass with the approaches (3 km either side), 90th percentile",h,E,2.28466,0.09820365369984967,5,2.2723884455513086,0.12086145268652593,0.005400289053887669,0.07880082028603808,0.2,agrees
+lockwide.Boudewijn-Van Cauwelaert.sea_going.median,Locks,"Boudewijn-Van Cauwelaert: sea-going, time to pass with the approaches (3 km either side), median",h,E,1.6121000000000003,0.033008423167428046,5,1.722096835439212,0.15060457943615962,-0.06387378060023997,-0.7134339413445103,0.2,agrees
+lockwide.Boudewijn-Van Cauwelaert.sea_going.p90,Locks,"Boudewijn-Van Cauwelaert: sea-going, time to pass with the approaches (3 km either side), 90th percentile",h,E,2.0974199999999996,0.07826452197515803,5,2.446632313500298,0.36855357334571337,-0.142731832475757,-0.9268533684410156,0.2,agrees
+lockwide.Hansweert.inland.median,Locks,"Hansweert: inland, time to pass with the approaches (3 km either side), median",h,E,1.0774000000000001,0.017992470647468065,5,0.9048413222034772,0.021801552211838583,0.19070600950927677,6.104547067806951,0.2,agrees
+lockwide.Hansweert.inland.p90,Locks,"Hansweert: inland, time to pass with the approaches (3 km either side), 90th percentile",h,E,2.0479,0.062372093118637624,5,1.2536029057101283,0.06294679454304587,0.6336114017220836,8.963484535749087,0.2,differs
+lockwide.Kallo.inland.median,Locks,"Kallo: inland, time to pass with the approaches (3 km either side), median",h,E,1.44254,0.061371643289063076,5,1.3843513738471906,0.22024270724017675,0.04203313353249313,0.2545060000443288,0.2,agrees
+lockwide.Kallo.inland.p90,Locks,"Kallo: inland, time to pass with the approaches (3 km either side), 90th percentile",h,E,2.20138,0.09802663617609247,5,1.7787196536451724,0.5052571894828221,0.23762055222623737,0.8212122210377529,0.2,agrees
+lockwide.Kallo.sea_going.median,Locks,"Kallo: sea-going, time to pass with the approaches (3 km either side), median",h,E,1.8977249999999999,0.07320899734094614,4,,,,,,
+lockwide.Kallo.sea_going.p90,Locks,"Kallo: sea-going, time to pass with the approaches (3 km either side), 90th percentile",h,E,2.1782,0.12506710865238177,4,,,,,,
+lockwide.Terneuzen.inland.median,Locks,"Terneuzen: inland, time to pass with the approaches (3 km either side), median",h,E,1.43932,0.015618367392272464,5,1.3376470977315573,0.04239467031152812,0.07600876377698133,2.2503912430789694,0.2,agrees
+lockwide.Terneuzen.inland.p90,Locks,"Terneuzen: inland, time to pass with the approaches (3 km either side), 90th percentile",h,E,2.43812,0.03674925033248974,5,2.451000066675418,0.12148723653556666,-0.005255025020414968,-0.10147871922185675,0.2,agrees
+lockwide.Terneuzen.sea_going.median,Locks,"Terneuzen: sea-going, time to pass with the approaches (3 km either side), median",h,E,1.32908,0.027208737567186038,5,1.4236924789101675,0.046610349570009514,-0.06645569904435614,-1.7530330342275249,0.2,agrees
+lockwide.Terneuzen.sea_going.p90,Locks,"Terneuzen: sea-going, time to pass with the approaches (3 km either side), 90th percentile",h,E,1.93814,0.08814099273323392,5,1.7116560158610263,0.05557215596982247,0.13231863297313498,2.173604851997219,0.2,agrees
+lockwide.Zandvliet-Berendrecht.inland.median,Locks,"Zandvliet-Berendrecht: inland, time to pass with the approaches (3 km either side), median",h,E,2.05912,0.038635688165218424,5,1.514553287962129,0.06994559658892613,0.3595559934180987,6.81502009617443,0.2,differs
+lockwide.Zandvliet-Berendrecht.inland.p90,Locks,"Zandvliet-Berendrecht: inland, time to pass with the approaches (3 km either side), 90th percentile",h,E,3.7381600000000006,0.09031686774905348,5,2.8174580754370253,0.3733433806744342,0.3267846050983961,2.396958996623475,0.2,differs
+lockwide.Zandvliet-Berendrecht.sea_going.median,Locks,"Zandvliet-Berendrecht: sea-going, time to pass with the approaches (3 km either side), median",h,E,2.1734999999999998,0.02395785883588098,5,2.0833333333333335,0.05518386699252139,0.04327999999999981,1.4987784243596285,0.2,agrees
+lockwide.Zandvliet-Berendrecht.sea_going.p90,Locks,"Zandvliet-Berendrecht: sea-going, time to pass with the approaches (3 km either side), 90th percentile",h,E,3.0659799999999997,0.06752923366957454,5,2.6744326179780424,0.06877072454507596,0.14640390615560908,4.062427138205003,0.2,agrees
+rws.Hansweert,Locks,"Hansweert: commercial passages, Rijkswaterstaat's count",a day,C,100.78,0.9723168207945392,5,113.0,,-0.10814159292035397,-12.567919981076018,0.1,differs
+rws.Kreekrak,Locks,"Kreekrak: commercial passages, Rijkswaterstaat's count",a day,C,170.98000000000002,1.3741906709041491,5,189.0,,-0.09534391534391524,-13.113172998142767,0.1,agrees
+rws.Terneuzen,Locks,"Terneuzen: commercial passages, Rijkswaterstaat's count",a day,C,147.68,1.4904361777681043,5,126.0,,0.1720634920634921,14.546077398943265,0.1,differs
+stock.bulk_general.at_anchor,Ships in the area,bulk and general cargo ships at anchor,ships,C,5.12394,0.5022514684896402,5,4.664369831638566,0.7187326469447294,0.09852781510680299,0.5241260894474806,0.15,agrees
+stock.bulk_general.at_berth,Ships in the area,bulk and general cargo ships at a berth,ships,I,61.12418,2.0017291903252055,5,45.63542516244092,3.0114975178052745,0.33940200584143376,4.283299419799744,0.15,differs
+stock.bulk_general.in_area,Ships in the area,bulk and general cargo ships in the area,ships,E,83.11848,2.1805901080670798,5,64.08164652488885,4.991295819407183,0.29707154087742393,3.495026904218027,0.15,differs
+stock.container.at_anchor,Ships in the area,container ships at anchor,ships,E,1.84902,0.145810505108514,5,1.3168991485897226,0.2641717139469808,0.4040710725495797,1.763504240268289,0.15,agrees
+stock.container.at_berth,Ships in the area,container ships at a berth,ships,I,11.95098,0.6323340346683862,5,14.376662959541328,0.790256904771945,-0.16872364375291143,-2.396676195540534,0.15,differs
+stock.container.in_area,Ships in the area,container ships in the area,ships,E,20.07048,0.640846963322758,5,22.689367398357202,1.5149956542771768,-0.11542355290817054,-1.5920665670601517,0.15,agrees
+stock.inland_cargo.at_anchor,Ships in the area,inland cargo craft at anchor,ships,C,0.97834,0.10639090938609368,5,0.21090663580246874,0.2005801503278835,3.6387350321034715,3.380028406904358,0.15,differs
+stock.inland_cargo.at_berth,Ships in the area,inland cargo craft at a berth,ships,C,160.61608,2.2859297787552455,5,156.29209635679214,3.3823673774936123,0.027666041623351453,1.0591802270988975,0.15,agrees
+stock.inland_cargo.in_area,Ships in the area,inland cargo craft in the area,ships,E,207.53042,2.101263423847658,5,205.22783893672138,13.286446443628055,0.011219633141430544,0.17117552743789308,0.15,agrees
+stock.inland_tanker.at_anchor,Ships in the area,inland tankers at anchor,ships,C,0.7388600000000001,0.1488655185057977,5,1.0385159712999283,0.19525598832147006,-0.2885424775170706,-1.2204367176765825,0.15,agrees
+stock.inland_tanker.at_berth,Ships in the area,inland tankers at a berth,ships,C,165.14132,2.827677384603836,5,127.34428358996082,2.5546016677342163,0.2968098397863138,9.918552237757678,0.15,differs
+stock.inland_tanker.in_area,Ships in the area,inland tankers in the area,ships,E,197.5693,3.391341877045132,5,168.81923761564573,5.513876698795851,0.17030086612409737,4.441307717185012,0.15,differs
+stock.tanker.at_anchor,Ships in the area,tankers at anchor,ships,C,10.48762,1.2937191810435522,5,6.2164016608879,0.5200250569902296,0.687088539658815,3.063292874863031,0.15,differs
+stock.tanker.at_berth,Ships in the area,tankers at a berth,ships,I,46.23512,3.172320178418313,5,37.838457079132084,2.5530377436314624,0.22190817409145044,2.062021925156616,0.15,differs
+stock.tanker.in_area,Ships in the area,tankers in the area,ships,E,69.95012,4.693124652126768,5,61.79008408719644,5.0688488895518775,0.13206060540860154,1.1812668176786394,0.15,agrees
+container.anchoring_share,Container ships,share that anchors before berthing,,C,0.12449999999999999,0.043036960859242836,5,0.13333333333333333,0.06206328908341752,-0.0662500000000001,-0.11695900048782054,0.5,agrees
+container.at_terminals,Container ships,at the four terminals,ships,E,9.53696,0.46902049486136527,5,12.607122674061346,0.6228791488529537,-0.24352604106709322,-3.9375344209900485,0.15,differs
+container.delay.mean,Container ships,"berthing against the schedule, mean",h,C,21.549,5.130992050081543,5,,,,,,
+container.delay.sd,Container ships,"berthing against the schedule, standard deviation",h,I,32.97768,3.544101065630042,5,,,,,,
+container.late_over_12h_share,Container ships,share berthing over 12 h after their planned time,,E,0.0348,0.014679100789898541,5,,,,,,
+container.sea_to_berth.median,Container ships,"3.10°E to the berth, median",h,E,5.016679999999999,0.053684005066686295,5,5.333333333333333,22.465021101400538,-0.059372500000000106,-0.01409535418548217,0.1,agrees
+container.sea_to_berth.p90,Container ships,"3.10°E to the berth, 90th percentile",h,E,5.96164,0.36103864834668314,5,411.61566666666675,82.33317455316121,-0.985516489087312,-4.926934115623842,0.25,differs
+container.stay.median,Container ships,"time at the berth, median",h,I,17.25,,1,19.790694444444444,3.3801719971646684,-0.12837823612387975,-0.7516464980408131,0.1,agrees
