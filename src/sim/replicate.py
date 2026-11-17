@@ -56,11 +56,29 @@ def flatten(summary):
         for k in PER_CLASS:
             if k in d:
                 row[f"{cls}.{k}"] = d[k]
-    for group in ("utilisation_mean", "release_valves", "containers", "locks"):
+    for group in ("utilisation_mean", "release_valves", "silent", "containers", "locks"):
         for k, v in (summary.get(group) or {}).items():
             if isinstance(v, (int, float)) and not isinstance(v, bool):
                 row[f"{group}.{k}"] = v
     return row
+
+
+def apply_overrides(items):
+    """Constants of the model set for this run: "module.NAME=json" replaces one, "module.NAME+=json" updates a
+    dict (locks.OPERATING_MIN+={"Hansweert west": 15}). For runs that take one calibrated value out at a time and
+    are compared with the baseline on the same seeds; the overrides are kept in config.json."""
+    import importlib
+
+    for item in items or []:
+        target, value = item.split("=", 1)
+        module, name = target.rstrip("+").rsplit(".", 1)
+        m, v = importlib.import_module(module), json.loads(value)
+        if not hasattr(m, name):
+            raise SystemExit(f"--set: {module} has no {name}")
+        if target.endswith("+"):
+            getattr(m, name).update(v)
+        else:
+            setattr(m, name, v)
 
 
 def one(job):
@@ -69,6 +87,7 @@ def one(job):
     sys.path.insert(0, str(ROOT / "src" / "sim"))
     import engine
 
+    apply_overrides(cfg.get("set"))
     logging.basicConfig(level=logging.WARNING, format="%(message)s")
     t0 = time.time()
     sim = engine.Simulation(start=cfg["start"], days=cfg["days"], seed=seed, delays=cfg["delays"],
@@ -86,10 +105,15 @@ def one(job):
     (out / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
     # the numbers that are set against the AIS record (validate.py), measured the way the record is
     import validate
-    measured = validate.simulated(sim, ships)
+    until = cfg.get("measure_until")
+    measured = validate.simulated(sim, ships, t1=None if until is None else until * 1440.0)
     (out / "validation.json").write_text(json.dumps(measured, indent=1))
-    return ({"seed": seed, "wall_s": round(time.time() - t0), **flatten(summary), **{f"v.{k}": v for k, v in measured.items()}},
-            series["ships"].to_numpy())
+    held = {}
+    if cfg.get("holdout"):                       # a second window of the run: the days held out of the fit
+        held = validate.simulated(sim, ships, *(d * 1440.0 for d in cfg["holdout"]))
+        (out / "validation_holdout.json").write_text(json.dumps(held, indent=1))
+    return ({"seed": seed, "wall_s": round(time.time() - t0), **flatten(summary), **{f"v.{k}": v for k, v in measured.items()},
+             **{f"h.{k}": v for k, v in held.items()}}, series["ships"].to_numpy())
 
 
 def interval(values, level=0.95):
@@ -149,13 +173,18 @@ def main():
     p.add_argument("--no-bunching", action="store_true")
     p.add_argument("--routing", choices=("lanes", "shortest"), default="lanes")
     p.add_argument("--checks", action="store_true", help="check the model's invariants every step (slower)")
+    p.add_argument("--measure-until", type=float, help="day of the run at which the validation numbers (v.*) end; default: its end")
+    p.add_argument("--holdout", type=float, nargs=2, metavar=("FROM", "TO"),
+                   help="days of the run measured as a second window (h.*: validate.py compare --prefix h.)")
+    p.add_argument("--set", action="append", default=[], metavar="module.NAME=json",
+                   help="set a constant of the model for this run (apply_overrides); may be given several times")
     a = p.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     log = logging.getLogger("replicate")
     cfg = {"label": a.label, "reps": a.reps, "seed": a.seed, "start": a.start, "days": a.days, "warmup": a.warmup,
            "delays": not a.no_delays, "background": not a.no_background, "weather": a.weather,
            "containers": a.containers, "container_rate": a.container_rate, "bunching": not a.no_bunching,
-           "routing": a.routing, "checks": a.checks}
+           "routing": a.routing, "checks": a.checks, "measure_until": a.measure_until, "holdout": a.holdout, "set": a.set}
     out = next_folder(a.label)
     out.mkdir(parents=True)
     (out / "config.json").write_text(json.dumps(cfg, indent=2))

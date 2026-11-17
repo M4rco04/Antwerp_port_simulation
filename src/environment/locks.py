@@ -59,6 +59,8 @@ class LockTimes:
 # that the time per passage stays near the AIS (0.97 h): 20 and 15 min carried more ships but took 1.5 h
 BUNDLE_HOLD_MIN = 3.0               # 10 min, with 4 + 3 min to enter and leave, made an inland craft take 1.3 h
 EMPTY_HOLD_MIN = 3.0                # to pass Hansweert where the AIS has 0.7 h; 5 min 0.82 h (MODEL.md §19)
+# BUNDLE_HOLD_MIN = 0 (a test of four seeds, not kept): Hansweert's inland median 0.73 -> 0.67 h (AIS 0.60), but Kreekrak
+# 0.67 -> 0.59 h (AIS 0.75) and Terneuzen 0.78 -> 0.75 h (AIS 0.87): kept at 3; Hansweert's excess is its own
 SMALL_SHIP_LOA_M, SMALL_SHIP_BEAM_M = 80.0, 9.0
 # a lockage with a ship of this priority or higher in it, or called for one, is never held (LOCK_HOLD_P): sea-going
 # ships (priority 3, under pilotage and with tugs ordered) and tide-dependent ones (2). With the holds on every
@@ -78,8 +80,11 @@ ALONGSIDE_ENTRY_MIN = 0.5
 # §19), lock by lock: at Zandvliet-Berendrecht, Boudewijn-Van Cauwelaert and Terneuzen the queues of the model
 # already give the AIS spread or more, and a hold there (tried: 0.10 at every lock) put the 90th percentiles 20 to
 # 45 % over; the locks not named have none
-LOCK_HOLD_P = {"Hansweert": 0.20, "Kreekrak": 0.06, "Kallo": 0.25, "Kieldrecht": 0.16, "Zandvliet": 0.10,
-               "Berendrecht": 0.10, "Boudewijn": 0.05, "Van Cauwelaert": 0.05, "Terneuzen": 0.08}
+# Zandvliet and Berendrecht had 0.10 against the note above; taken out (runs 0015/0016): their 90th percentiles
+# are over the AIS on the fitted days and on the days held out, with the holds and without. Hansweert had 0.20:
+# on the days held out its 90th percentile is 0.83 h, and the model gives 1.23 h without the hold (1.53 h with)
+LOCK_HOLD_P = {"Kreekrak": 0.06, "Kallo": 0.25, "Kieldrecht": 0.16,
+               "Boudewijn": 0.05, "Van Cauwelaert": 0.05, "Terneuzen": 0.08}
 LOCK_HOLD_MEAN_MIN = 35.0
 
 
@@ -129,7 +134,10 @@ OPERATING_MIN.update(_antwerp_operating_min())
 # inland craft of its complex, took 77 min with the 25 min left of its figure, where the AIS has 60 min; with
 # 15 min inland craft took 55 min and the sea-going ships 67 min against 81 min. (Hansweert was 9 min before its
 # lockages were held now and then, LOCK_HOLD_P: the holds add 4 min to the median)
-CALIBRATED_OPERATING_MIN = {"Hansweert west": 6.0, "Hansweert east": 6.0, "Van Cauwelaert": 20.0}
+# Hansweert is back at the published 15 min (it was 6): in the AIS a craft is 26 min within 400 m of the lock, and
+# the lockage with 15 min takes 22 to 25 min in the model, with 6 min 13 to 16. The 6 min made up for time the
+# model loses outside the chamber, and gave the lock two thirds more capacity than it has (runs 0015-0017)
+CALIBRATED_OPERATING_MIN = {"Van Cauwelaert": 20.0}
 OPERATING_MIN.update(CALIBRATED_OPERATING_MIN)
 
 

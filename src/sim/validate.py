@@ -99,6 +99,11 @@ LOCKS = {"Zandvliet-Berendrecht": ("Zandvliet", "Berendrecht"), "Boudewijn-Van C
          "Terneuzen": ("Terneuzen",), "Hansweert": ("Hansweert",), "Kreekrak": ("Kreekrak",)}
 LOCK_RING_M, LOCK_EDGE_M, LOCK_MAX_H = 1000.0, 800.0, 6.0
 LOCK_FLIP_MIN = 60.0
+# ... and the same passage timed from LOCK_WIDE_RING_M before the lock to as far beyond it: with the waiting places
+# of the outer harbour in it (the model's ships wait 1,200 m from the gate, movement.LOCK_WAIT_M, outside the
+# kilometre above, so that a wait there is in no lock time: the lock queues of the model grew by a third in the
+# fourth calibration round while the times over 1 km fell). Nothing is calibrated on it
+LOCK_WIDE_RING_M = 3000.0
 AWAY_H = 6.0                        # a ship under way, then silent this long, has been out of the area
 # Rijkswaterstaat's commercial passages a day (NMCA 2017; IVS90 2018, Deltares 2021): generator.INLAND_TRIP_SCALE
 RWS_PASSAGES = {"Kreekrak": 189.0, "Hansweert": 113.0, "Terneuzen": 126.0}
@@ -150,9 +155,9 @@ def passages(f, coord, at, band, name):
     return rows
 
 
-def lock_passages(f, geo):
+def lock_passages(f, geo, ring_m=LOCK_RING_M):
     """The lock passages in a list of fixes (see LOCKS): one row each, with the hours it took where it can be
-    timed (tight)."""
+    timed (tight), from ring_m before the lock to ring_m beyond."""
     on = np.flatnonzero(f.basin.to_numpy() >= 0)
     x, y, ids, t, b = (f[c].to_numpy()[on] for c in ("x", "y", "id", "t", "basin"))
     names = list(geo.locks)
@@ -164,12 +169,12 @@ def lock_passages(f, geo):
             continue
         i = min(joins, key=lambda j: dist[j, k] + dist[j, k + 1])
         lo = k                                         # back to the last fix outside the ring, in the old basin
-        while lo > 0 and ids[lo] == ids[k] and b[lo] == b[k] and dist[i, lo] < LOCK_RING_M and t[k] - t[lo] < LOCK_MAX_H * 60:
+        while lo > 0 and ids[lo] == ids[k] and b[lo] == b[k] and dist[i, lo] < ring_m and t[k] - t[lo] < LOCK_MAX_H * 60:
             lo -= 1
         hi = k + 1
-        while hi < len(t) - 1 and ids[hi] == ids[k] and b[hi] == b[k + 1] and dist[i, hi] < LOCK_RING_M and t[hi] - t[k] < LOCK_MAX_H * 60:
+        while hi < len(t) - 1 and ids[hi] == ids[k] and b[hi] == b[k + 1] and dist[i, hi] < ring_m and t[hi] - t[k] < LOCK_MAX_H * 60:
             hi += 1
-        ring = lambda j, basin: (ids[j] == ids[k] and b[j] == basin and LOCK_RING_M <= dist[i, j] <= LOCK_RING_M + LOCK_EDGE_M)
+        ring = lambda j, basin: (ids[j] == ids[k] and b[j] == basin and ring_m <= dist[i, j] <= ring_m + LOCK_EDGE_M)
 
         def crossing(out, inside, basin):
             """When the ship crossed the ring: at its fix just outside it if that lies within LOCK_EDGE_M of the
@@ -179,9 +184,9 @@ def lock_passages(f, geo):
             if ring(out, basin):
                 return t[out]
             if not (0 <= inside < len(t) and ids[out] == ids[k] == ids[inside] and b[out] == basin == b[inside]
-                    and dist[i, out] > LOCK_RING_M > dist[i, inside] and abs(t[out] - t[inside]) <= TIGHT_GAP_MIN):
+                    and dist[i, out] > ring_m > dist[i, inside] and abs(t[out] - t[inside]) <= TIGHT_GAP_MIN):
                 return None
-            return t[out] + (t[inside] - t[out]) * (dist[i, out] - LOCK_RING_M) / (dist[i, out] - dist[i, inside])
+            return t[out] + (t[inside] - t[out]) * (dist[i, out] - ring_m) / (dist[i, out] - dist[i, inside])
 
         t_in, t_out = crossing(lo, lo + 1, b[k]), crossing(hi, hi - 1, b[k + 1])
         tight = t_in is not None and t_out is not None and t_out - t_in <= LOCK_MAX_H * 60
@@ -214,6 +219,7 @@ def tracks(f, geo):
               & f.grp.notna()]
     pil = f[(f.kn >= UNDER_WAY_KN) & f.piloted & f.zone.isin(("sea", "river", "dock")) & (f.lon >= PILOT_MIN_LON)]
     return SimpleNamespace(passages=pd.concat(p, ignore_index=True), locks=lock_passages(f, geo),
+                           locks_wide=lock_passages(f, geo, LOCK_WIDE_RING_M),
                            underway=under.groupby(["t", "zone", "grp"]).size(),
                            piloted=pil.groupby(["t", "zone"]).id.nunique())
 
@@ -275,6 +281,9 @@ def durations(tr, t0, t1):
     lk = tr.locks[(tr.locks.t >= t0) & (tr.locks.t < t1) & tr.locks.tight]
     for (name, g_), g in lk.groupby(["lock", "grp"]):
         out[f"locktime.{name}.{g_}"] = g.hours.to_numpy()
+    lk = tr.locks_wide[(tr.locks_wide.t >= t0) & (tr.locks_wide.t < t1) & tr.locks_wide.tight]
+    for (name, g_), g in lk.groupby(["lock", "grp"]):
+        out[f"lockwide.{name}.{g_}"] = g.hours.to_numpy()
     return out
 
 
@@ -371,14 +380,16 @@ def model_stocks(sim, t0, t1):
     return out
 
 
-def simulated(sim, ships=None):
-    """The numbers of one finished run, after its warm-up."""
+def simulated(sim, ships=None, t0=None, t1=None):
+    """The numbers of one finished run, after its warm-up; or of the minutes t0 to t1 of it (a part of the run
+    set against a part of the record: the days the model was fitted on, and the days held out)."""
     geo = geometry(sim.graph, sim.fg)
-    t0, t1 = float(sim.warmup_min), float(sim.t)
+    t0, t1 = float(sim.warmup_min if t0 is None else t0), float(sim.t if t1 is None else t1)
     days = (t1 - t0) / 1440.0
     f = model_frame(sim, geo)
     tr = tracks(f, geo)
-    out = from_tracks(tr, t0, t1, np.arange(t0, t1, STEP_MIN))
+    # the fixes are on the step grid: a window that starts between two steps is read from the first step in it
+    out = from_tracks(tr, t0, t1, np.arange(math.ceil(t0 / STEP_MIN - 1e-9) * STEP_MIN, t1, STEP_MIN))
     out.update(quantiles(durations(tr, t0, t1)))
     out.update(model_stocks(sim, t0, t1))
     ships = sim.ship_table() if ships is None else ships
@@ -390,7 +401,8 @@ def simulated(sim, ships=None):
         if name in RWS_PASSAGES:
             out[f"rws.{name}"] = out.get(f"rws.{name}", 0.0) + n
     # container ships at the terminals
-    c = ships[(ships["class"] == "container") & ships.terminal.notna() & ships.moored_min.notna() & (ships.spawn_min >= t0)]
+    c = ships[(ships["class"] == "container") & ships.terminal.notna() & ships.moored_min.notna() & (ships.spawn_min >= t0)
+              & (ships.spawn_min < t1)]
     if len(c):
         late = (c.moored_min - c.scheduled_berth_min) / 60.0
         out["container.delay.mean"], out["container.delay.sd"] = float(late.mean()), float(late.std())
@@ -446,8 +458,11 @@ def interval_stock(start, end, day_edges):
     return [float(np.clip(np.minimum(e, b) - np.maximum(s, a), 0, None).sum() / (b - a)) for a, b in day_edges]
 
 
-def observed(cache=None):
-    """Every number of the AIS record with its day-to-day standard error."""
+def observed(cache=None, window=None):
+    """Every number of the AIS record with its day-to-day standard error. window: (from, to) in UTC, to measure
+    a part of the record only (the days held out of the fit); its last day may be a part of a day. The numbers
+    that are the fit itself (the arrival rates, the schedule delay) are left out of a window: they are no
+    measurement of those days."""
     import ais_pipeline as AP
     import container_calls as CC
     import entry_probabilities as EP
@@ -471,7 +486,14 @@ def observed(cache=None):
     # whole days of the record (UTC), each with enough snapshots
     first = (t0.normalize() - t0).total_seconds() / 60.0
     edges = [(a, a + 1440.0) for a in np.arange(first, span, 1440.0)]
-    edges = [(a, b) for a, b in edges if ((snaps >= a) & (snaps < b)).sum() * STEP_MIN >= MIN_DAY_H * 60]
+    w0, w1 = -math.inf, math.inf
+    if window:
+        stamp = lambda x: pd.Timestamp(x, tz=t0.tz) if t0.tz is not None else pd.Timestamp(x)
+        w0, w1 = ((stamp(x) - t0).total_seconds() / 60.0 for x in window)
+        w1 = min(w1, span)
+        edges = [(max(a, w0), min(b, w1)) for a, b in edges]
+        edges = [(a, b) for a, b in edges if b - a >= 720.0]                  # half a day at least
+    edges = [(a, b) for a, b in edges if ((snaps >= a) & (snaps < b)).sum() * STEP_MIN >= MIN_DAY_H / 24.0 * (b - a)]
     tr = tracks(f, geo)
     out = {}
     per_day = [from_tracks(tr, a, b, snaps) for a, b in edges]
@@ -532,27 +554,32 @@ def observed(cache=None):
     # container ships at the terminals
     cc = calls[(calls.cls == "container") & calls.zone.isin(TERMINAL_ZONES)]
     out["container.at_terminals"] = day_means(interval_stock(minute(cc.start), minute(cc.end), edges))
+    cc = cc[(minute(cc.start) >= w0) & (minute(cc.start) < w1)]              # (the calls that begin in the window)
     whole = cc[cc.start_observed & cc.end_observed].hours.to_numpy()
-    boot = np.array([np.median(rng.choice(whole, len(whole))) for _ in range(400)])
-    out["container.stay.median"] = {"value": float(np.median(whole)), "se": float(boot.std()), "n": int(len(whole))}
+    if len(whole) >= 8:
+        boot = np.array([np.median(rng.choice(whole, len(whole))) for _ in range(400)])
+        out["container.stay.median"] = {"value": float(np.median(whole)), "se": float(boot.std()), "n": int(len(whole))}
     seen = cc[cc.start_observed & ~cc.at_visit_start].sort_values("start").groupby("visit").head(1)
     anch_start = anchor.groupby("visit").start.min()
     anchored = (seen.visit.map(anch_start) < seen.start).fillna(False)
     p = float(anchored.mean())
-    out["container.anchoring_share"] = {"value": p, "se": math.sqrt(p * (1 - p) / len(seen)), "n": int(len(seen))}
+    if len(seen) >= 8:
+        out["container.anchoring_share"] = {"value": p, "se": math.sqrt(p * (1 - p) / len(seen)), "n": int(len(seen))}
     cross = tr.passages[(tr.passages.section == "sea") & (tr.passages.dir == 1)].groupby("id").t.min()
     h = ((minute(seen.set_index("visit").start) - cross) / 60.0).dropna()
     h = h[h > 0].to_numpy()
-    boot = np.array([[np.median(b), np.percentile(b, 90)] for b in (rng.choice(h, len(h)) for _ in range(400))])
-    out["container.sea_to_berth.median"] = {"value": float(np.median(h)), "se": float(boot[:, 0].std()), "n": int(len(h))}
-    out["container.sea_to_berth.p90"] = {"value": float(np.percentile(h, 90)), "se": float(boot[:, 1].std()), "n": int(len(h))}
+    if len(h) >= 8:
+        boot = np.array([[np.median(b), np.percentile(b, 90)] for b in (rng.choice(h, len(h)) for _ in range(400))])
+        out["container.sea_to_berth.median"] = {"value": float(np.median(h)), "se": float(boot[:, 0].std()), "n": int(len(h))}
+        out["container.sea_to_berth.p90"] = {"value": float(np.percentile(h, 90)), "se": float(boot[:, 1].std()), "n": int(len(h))}
     d = np.asarray(CC.SCHEDULE_DELAY_H["arrival"]["values"], dtype=float)
-    out["container.delay.mean"] = {"value": float(d.mean()), "se": float(d.std(ddof=1) / math.sqrt(len(d))), "n": int(len(d))}
-    boot = np.array([rng.choice(d, len(d)).std(ddof=1) for _ in range(400)])
-    out["container.delay.sd"] = {"value": float(d.std(ddof=1)), "se": float(boot.std()), "n": int(len(d))}
+    if not window:
+        out["container.delay.mean"] = {"value": float(d.mean()), "se": float(d.std(ddof=1) / math.sqrt(len(d))), "n": int(len(d))}
+        boot = np.array([rng.choice(d, len(d)).std(ddof=1) for _ in range(400)])
+        out["container.delay.sd"] = {"value": float(d.std(ddof=1)), "se": float(boot.std()), "n": int(len(d))}
     # what goes in: the fitted arrival rates (inland craft scaled to the lock counts), the schedule's calls
     hours = EP.EXPOSURE_HOURS
-    for c in SEA[1:] + INLAND + ("passenger",):
+    for c in () if window else SEA[1:] + INLAND + ("passenger",):
         rate = 24.0 * sum(EP.RATE_PER_HOUR[c].values())
         scaled = 24.0 * sum(r * (G.INLAND_TRIP_SCALE if c in INLAND and s in G.INLAND_SCALED_SOURCES else 1.0)
                             for s, r in EP.RATE_PER_HOUR[c].items())
@@ -563,8 +590,10 @@ def observed(cache=None):
     # less the lead it enters with. The lines counted are those entering during the record on that reckoning (by
     # their scheduled time alone, the busy days just before the record were left out: 9.3 a day against 10.3)
     shift = pd.Timedelta(hours=float(d.mean()) - G.ENTRY_LEAD_H)
-    in_record = sched[(sched.arrival + shift >= t0) & (sched.arrival + shift <= data.times.iloc[-1])]
-    days = span / 1440.0
+    first_t, last_t = ((t0 + pd.Timedelta(minutes=edges[0][0]), t0 + pd.Timedelta(minutes=edges[-1][1])) if window
+                       else (t0, data.times.iloc[-1]))
+    in_record = sched[(sched.arrival + shift >= first_t) & (sched.arrival + shift <= last_t)]
+    days = (last_t - first_t).total_seconds() / 86400.0
     # ... and the container calls the schedule lacks, at the terminals (generator.UNSCHEDULED_CODES)
     off = getattr(CC, "UNSCHEDULED_CALLS", None) or {"per_day": 0.0, "zones": {}}
     extra = off["per_day"] * sum(off["zones"].get(z, 0.0) for z in G.UNSCHEDULED_CODES)
@@ -574,7 +603,8 @@ def observed(cache=None):
         out[f"rws.{name}"] = {"value": n, "se": None, "n": None}
     ais_calls = out["port.antwerp_calls"]
     out["port.antwerp_calls"] = {"value": sum(PORT_CALLS_A_DAY) / 2, "se": (PORT_CALLS_A_DAY[1] - PORT_CALLS_A_DAY[0]) / 2, "n": None}
-    meta = {"first": str(t0), "last": str(data.times.iloc[-1]), "snapshots": int(len(snaps)), "days_counted": len(edges),
+    meta = {"first": str(first_t), "last": str(last_t),
+            "snapshots": int(((snaps >= edges[0][0]) & (snaps <= edges[-1][1])).sum()), "days_counted": len(edges),
             "ais_container_class_per_day": round(24.0 * sum(EP.RATE_PER_HOUR["container"].values()), 2),
             "ais_antwerp_calls_per_day": round(ais_calls["value"], 1) if ais_calls else None}
     return {"meta": meta, "numbers": {k: v for k, v in out.items() if v is not None}}
@@ -597,6 +627,9 @@ def label(metric):
         return "Locks", f"{p[1]}: commercial passages, Rijkswaterstaat's count", "a day", "C", 0.10
     if p[0] == "locktime":
         return "Locks", f"{p[1]}: {cls[p[2]]}, time to pass, {'median' if p[3] == 'median' else '90th percentile'}", "h", "C", 0.20
+    if p[0] == "lockwide":
+        return "Locks", (f"{p[1]}: {cls[p[2]]}, time to pass with the approaches ({LOCK_WIDE_RING_M / 1000:g} km either side), "
+                         f"{'median' if p[3] == 'median' else '90th percentile'}"), "h", "E", 0.20
     if p[0] == "underway":
         return "Ships under way", f"{p[1]}: {cls[p[2]]}", "ships", "E", 0.15 if p[2] == "sea_going" else 0.25
     if p[0] == "pilots":
@@ -611,15 +644,16 @@ def label(metric):
             "C" if grp == "sea_going" and p[3] == "median" else "E", 0.10
     if p[0] == "stock":
         what = {"in_area": "in the area", "at_berth": "at a berth", "at_anchor": "at anchor"}[p[2]]
-        kind = "E" if p[2] == "in_area" else ("C" if (p[2] == "at_anchor" and p[1] in ("bulk_general", "tanker"))
+        # inland craft at anchor: engine.INLAND_ANCHOR_STOP_P was set on this number
+        kind = "E" if p[2] == "in_area" else ("C" if (p[2] == "at_anchor" and (p[1] in ("bulk_general", "tanker") or p[1] in INLAND))
                                               or (p[2] == "at_berth" and p[1] in INLAND) else "I" if p[2] == "at_berth" else "E")
         return "Ships in the area", f"{cls[p[1]]} {what}", "ships", kind, 0.15
     names = {"container.at_terminals": ("at the four terminals", "ships", "E", 0.15),
              "container.stay.median": ("time at the berth, median", "h", "I", 0.10),
-             "container.anchoring_share": ("share that anchors before berthing", "", "E", 0.5),
+             "container.anchoring_share": ("share that anchors before berthing", "", "C", 0.5),    # engine.CONTAINER_SEA_WAIT_MAX_MIN
              "container.sea_to_berth.median": ("3.10°E to the berth, median", "h", "E", 0.10),
              "container.sea_to_berth.p90": ("3.10°E to the berth, 90th percentile", "h", "E", 0.25),
-             "container.delay.mean": ("berthing against the schedule, mean", "h", "I", 0.15),
+             "container.delay.mean": ("berthing against the schedule, mean", "h", "C", 0.15),      # generator.DELAY_SHIFT_H
              "container.delay.sd": ("berthing against the schedule, standard deviation", "h", "I", 0.15),
              "container.late_over_12h_share": ("share berthing over 12 h after their planned time", "", "E", 1.0)}
     if metric in names:
@@ -627,15 +661,17 @@ def label(metric):
     return "Other", metric, "", "E", 0.15
 
 
-def compare(folder, observed_path=None):
-    """Set the replications of a folder against the record. Returns the table (and writes it there)."""
+def compare(folder, observed_path=None, prefix="v.", name="validation"):
+    """Set the replications of a folder against the record. Returns the table (and writes it there). prefix: the
+    columns of replications.csv to take ("v." the days the model was fitted on, "h." the days held out,
+    replicate.py --holdout), name: of the files written."""
     folder = Path(folder)
     obs = json.loads(Path(observed_path or OUT / "observed.json").read_text())
     reps = pd.read_csv(folder / "replications.csv")
     rows = []
-    cols = [c for c in reps.columns if c.startswith("v.")]
+    cols = [c for c in reps.columns if c.startswith(prefix)]
     for col in cols:
-        k = col[2:]
+        k = col[len(prefix):]
         x = reps[col].dropna().to_numpy(dtype=float)
         if not len(x):
             continue
@@ -657,8 +693,8 @@ def compare(folder, observed_path=None):
     t = pd.DataFrame(rows)
     t["g"] = t.group.map(order.index)
     t = t.sort_values(["g", "number"], kind="stable").drop(columns="g").reset_index(drop=True)
-    t.to_csv(folder / "validation.csv", index=False)
-    (folder / "validation.md").write_text(markdown(t, obs["meta"], folder.name), encoding="utf-8")
+    t.to_csv(folder / f"{name}.csv", index=False)
+    (folder / f"{name}.md").write_text(markdown(t, obs["meta"], folder.name), encoding="utf-8")
     return t
 
 
@@ -693,20 +729,25 @@ def main():
     sub = p.add_subparsers(dest="cmd", required=True)
     o = sub.add_parser("observe", help="measure the AIS record")
     o.add_argument("--cache", help="keep the prepared AIS here (a pickle) to run again faster")
+    o.add_argument("--window", nargs=2, metavar=("FROM", "TO"), help="measure this part of the record only (UTC)")
+    o.add_argument("--out", default="observed.json", help="file name in results/validation")
     c = sub.add_parser("compare", help="set a folder of replications against the record")
     c.add_argument("folder")
+    c.add_argument("--observed", help="the record's numbers (default results/validation/observed.json)")
+    c.add_argument("--prefix", default="v.", help='columns of replications.csv: "v." or "h." (the hold-out window)')
+    c.add_argument("--name", default="validation", help="name of the files written in the folder")
     a = p.parse_args()
     if a.cmd == "observe":
         OUT.mkdir(parents=True, exist_ok=True)
-        out = observed(a.cache)
-        (OUT / "observed.json").write_text(json.dumps(out, indent=1))
-        print(f"{len(out['numbers'])} numbers of the record -> {OUT / 'observed.json'}")
+        out = observed(a.cache, a.window)
+        (OUT / a.out).write_text(json.dumps(out, indent=1))
+        print(f"{len(out['numbers'])} numbers of the record -> {OUT / a.out}")
     else:
-        t = compare(a.folder)
+        t = compare(a.folder, a.observed, a.prefix, a.name)
         pd.set_option("display.width", 250, "display.max_rows", 400, "display.max_colwidth", 70)
         show = t[t.record.notna()] if "record" in t else t
         print(show[["what", "kind", "record", "model", "difference", "z", "verdict"]].round(2).to_string())
-        print(f"\n{Path(a.folder) / 'validation.md'}")
+        print(f"\n{Path(a.folder) / (a.name + '.md')}")
 
 
 if __name__ == "__main__":

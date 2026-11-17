@@ -30,8 +30,10 @@ Things set aside on 10 November 2026, with what each one waits for.
 
 - **AIS record.** Only live data can be collected, so the record grows by waiting. Re-fit when it is longer:
   the weekly pattern, rare classes and routes, and a part held out for validation all need it.
-- **Hold-out split.** Fitting on the first weeks and validating on the rest is skipped for now, for the same
-  reason.
+- **Hold-out split.** Done in part (17 November 2026): the model is fitted on 26 October to 12 November and
+  measured again on 13 to 15 November, three whole days (MODEL.md §19). Three days are too few for a score of
+  their own; they were used to test calibrated values. Extend the held-out days as the record grows, and do not
+  re-fit on them.
 
 ## Locks
 
@@ -41,6 +43,29 @@ Things set aside on 10 November 2026, with what each one waits for.
   Cauwelaert the AIS reads it as the passage time. Open: confirm at the
   source which it is; Kattendijk's 45 min is long for so small a lock; a sea-going ship's entry and exit times
   (12 and 8 min) are still assumed; the Terneuzen new lock is still assumed (ask North Sea Port).
+
+- **Hansweert passage time.** With the published 15 min an inland craft takes 44 min to pass where the AIS has
+  36 (MODEL.md §14, §19). Not the wait of 3 min for a second craft: without it at every lock (a test, four
+  seeds) Hansweert is still 12 % slow and Kreekrak and Terneuzen become 21 % and 14 % fast, so it is kept.
+  The excess lies within 400 m of the lock (40 against 26 min; from 400 m to 3 km the model is right). In the
+  AIS Hansweert's lockage is 5 min shorter than Kreekrak's, the model's 4 min longer (15 against 11 min
+  published, 2001). Open: (1) ask Rijkswaterstaat for Hansweert's operating time now; (2) a wait for a second
+  craft only when one is coming (needs how far ahead a lock keeper looks); (3) the parts of a lock passage that
+  fall on 5-minute steps or at one place (the craft drawn at the gate from half its sail-in; the sail-in at
+  3.6 kn over the whole 1,200 m where the AIS speed is that of the last 600 m) put all three canal locks 5 to
+  14 min over within 400 m.
+- **Vlissingen town share.** Back at the AIS share, 0.094 (it was 0.036, calibrated): 12.2 inland passages a day
+  off Vlissingen against 12.7 (`0028_vlissingen-ais`, five seeds).
+- **Two inland craft abreast** at a berth (`ALONGSIDE_PER_BERTH`) is assumed. Not reached at today's traffic;
+  find a source before runs with more traffic.
+
+## Scenarios
+
+- **Scenario switches** (traffic factors and the like) are left for later; the fitted container mode can scale
+  its rate, the weeks and replay modes cannot yet (above).
+- **Read the `silent` block first** in any run with more traffic (MODEL.md §17): calls dropped or left out,
+  destinations drawn again, waits for a berth, anchorages full, and where stuck ships were let past (most at
+  km 20–25 off Terneuzen; no VTS hold was added there).
 
 ## Pilots
 
@@ -52,18 +77,29 @@ Things set aside on 10 November 2026, with what each one waits for.
 
 ## Validation gaps (MODEL.md §19)
 
-As of 15 November 2026, after the fourth calibration round (`0011_round3-barges-after-ship`: 105 of 113 numbers
-agree, emergent 62 of 66, calibrated 31 of 35, input 12 of 12).
+As of 17 November 2026, after the fifth round (`0028_vlissingen-ais`: 126 of 135 numbers agree on the fitted days,
+emergent 81 of 85, calibrated 34 of 39, input 11 of 11; 97 of 122 on the three days held out). The fourth round
+(`0011_round3-barges-after-ship`) had 105 of 113; the fifth took calibration out and did not aim at the score.
+The figures in the items below are the fourth round's unless they name the fifth.
+
+- **Fifth round, new or changed.** Hansweert's inland median +24 % and its 90th percentile −22 % (Locks, above);
+  bulk carriers at anchor 3.9 against 5.6 since the factor on their anchor stay was taken out (the stops at the
+  river anchorages are not modelled); inland craft under way at sea 0.38 against 0.66; Kallo's sea-going median
+  with the approaches 1.83 against 1.50 h; Kieldrecht's inland 90th percentile with the approaches 2.2 against
+  4.3 h. On the days held out: inland craft through Kallo 24.8 a day against 11.8 and through
+  Zandvliet–Berendrecht 75.6 against 53.1, tankers at anchor 11.1 against 6.2, inland tankers at berths 168
+  against 127. Leads for when the record is longer.
 
 - **Zandvliet–Berendrecht's 90th percentiles.** Inland craft 2.69 h against 2.17 h, sea-going ships 2.64 h against
   2.25 h, with both medians right (1.32 against 1.17 h, 1.80 against 1.75 h). The slow inland passages wait an hour
   to be called: the chambers' capacity at the busy hours. The time a sea-going ship takes to come in (30 min,
   calibrated) trades the two: at 18 min the inland craft are right and the sea-going ships 15 % fast. Needs the
   lock planning of the 500 m locks (lockages for inland craft alone, how barges are fitted around a sea-going ship).
-- **Lock holds are calibrated, not observed.** Probability per lock (Kallo 0.25, Hansweert 0.20, Kieldrecht 0.16,
-  Zandvliet and Berendrecht 0.10, Terneuzen 0.08, Kreekrak 0.06, Boudewijn and Van Cauwelaert 0.05) and a mean of
-  35 min, set on the 90th percentiles of the passage times. Ask the lock operators for stoppages.
-- **Lock times set on the AIS, not on a source.** Hansweert 6 min (published: 15 min, 2001), Van Cauwelaert 20 min
+- **Lock holds are calibrated, not observed.** Probability per lock (Kallo 0.25, Kieldrecht 0.16, Terneuzen 0.08,
+  Kreekrak 0.06, Boudewijn and Van Cauwelaert 0.05) and a mean of 35 min, set on the 90th percentiles of the
+  passage times. Those of Hansweert (0.20) and of Zandvliet and Berendrecht (0.10) did not hold on the days held
+  out and were taken out; the others are not yet tested one by one. Ask the lock operators for stoppages.
+- **Lock times set on the AIS, not on a source.** Van Cauwelaert 20 min
   (locks.csv: 45 min as a passage time), the time a sea-going ship takes to come in (Zandvliet and Berendrecht 30,
   Kieldrecht 26, Boudewijn and Van Cauwelaert 20, Kallo 14 min). Confirm at the source.
 - **Sea-going ships under way in the docks** 3.21 against 2.76 (+16 %), with the piloted ones under way in the docks

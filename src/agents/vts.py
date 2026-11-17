@@ -132,7 +132,8 @@ class SimpleVTS:
             reason = None
             if route is None:
                 reason = "destination" if target is None else "no_route"
-                if target is not None and ship.at is not None and not sim.voyage_reachable(ship, ship.at, target):
+                if target is not None and ship.at is not None and not sim.voyage_reachable(ship, ship.at, target) \
+                        and not sim.unreachable_resolved(ship, now):
                     ship.infeasible = "no route at high water"
             if ship.infeasible:
                 ship.note(now, "infeasible", why=ship.infeasible)

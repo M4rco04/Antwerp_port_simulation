@@ -646,7 +646,8 @@ class Mover:
                 o = self.ships.get(ko)
                 if o is not None and (ship.id, o.id) not in self.squeezed:
                     self.squeezed.add((ship.id, o.id))
-                    ship.note(self.sim.t, "squeeze_past", other=o.id, knot=not pair)
+                    ship.note(self.sim.t, "squeeze_past", other=o.id, knot=not pair,
+                              node=int(ship.cells[-1]) if ship.cells else None)
 
     def _queueing(self, ship):
         """Waiting behind a ship that is itself waiting (lock, berth, pilot): a queue, not something
