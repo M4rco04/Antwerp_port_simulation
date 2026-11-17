@@ -1,0 +1,39 @@
+name: Pobierz cotygodniowy IVS weekmonitor
+
+on:
+  schedule:
+    # Uruchamia się w każdy poniedziałek o 08:00 UTC (plik pojawia się na serwerze ok. 04:30)
+    - cron: '0 8 * * 1'
+  # Pozwala też odpalić skrypt ręcznie jednym kliknięciem z zakładki Actions na GitHubie
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fetch-ivs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pobierz repozytorium
+        uses: actions/checkout@v4
+
+      - name: Znajdź, pobierz i rozpakuj najnowszy plik ZIP
+        run: |
+          BASE_URL="https://downloads.rijkswaterstaatdata.nl/scheepvaart/goederenvervoer/"
+          # Wyciąga nazwę pliku IVS_weekmonitor_DDMMMYYYY.zip ze strony indeksu
+          FILENAME=$(curl -s "$BASE_URL" | grep -oE 'IVS_weekmonitor_[0-9A-Za-z]+\.zip' | head -n 1)
+          
+          echo "Znaleziono plik: $FILENAME"
+          mkdir -p inland_trips temp_zip
+          curl -sL "${BASE_URL}${FILENAME}" -o "temp_zip/${FILENAME}"
+          
+          # Rozpakowuje zawartość ZIP do folderu inland_trips/ i usuwa tymczasowy plik
+          unzip -o "temp_zip/${FILENAME}" -d inland_trips/
+          rm -rf temp_zip
+
+      - name: Zapisz zmiany w repozytorium
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add inland_trips/
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Aktualizacja danych IVS weekmonitor" && git push)
