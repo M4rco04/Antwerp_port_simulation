@@ -35,9 +35,10 @@ Things set aside on 10 November 2026, with what each one waits for.
   Kreekrak and Kallo). Done in part (18 November 2026): a day-of-week factor on the arrivals, kept only where the
   entries show it, which is inland cargo craft alone (MODEL.md §19, `0030_weekday`). It barely moves the held-out
   lock counts and gives Kreekrak a weekend dip it does not have. The weekend dip at the locks is
-  in cargo craft already in the area (at Zandvliet-Berendrecht over nine in ten of the inland passages), so it
-  needs the week on the stays: a craft whose stay ends at a weekend leaves on the Monday, or a weekly factor on
-  the end of a stay. Kallo's low count on the held-out days is not the week (no dip on fitted weekends). Hold out whole weeks.
+  in cargo craft already in the area (at Zandvliet-Berendrecht over nine in ten of the inland passages), so the
+  week is now on the stays too (18 November 2026, `0031_stay-week`): Zandvliet-Berendrecht on the held-out days
+  from +48 % to +34 %, Terneuzen, Hansweert, Kieldrecht and Boudewijn-Van Cauwelaert nearer the record, Kreekrak
+  a little further off. Kallo's low count on the held-out days is not the week (no dip on fitted weekends). Hold out whole weeks.
 - **Hold-out split.** Done in part (17 November 2026): the model is fitted on 26 October to 12 November and
   measured again on 13 to 15 November, three whole days (MODEL.md §19). Three days are too few for a score of
   their own; they were used to test calibrated values. Extend the held-out days as the record grows, and do not
@@ -88,8 +89,8 @@ Things set aside on 10 November 2026, with what each one waits for.
 As of 17 November 2026, the baseline after the fifth round (`0029_baseline`: 125 of 135 numbers agree on the fitted
 days, emergent 78 of 85, calibrated 36 of 39, input 11 of 11; 98 of 121 on the three days held out). Every calibrated
 value holds on the days held out or is not shown either way there (MODEL.md §19). The baseline is now
-`0030_weekday` (18 November 2026, with the day-of-week factor): 126 of 135 and 95 of 121, the same within the
-noise. The fourth round
+`0031_stay-week` (18 November 2026, with the day-of-week factors on the arrivals and the stays): 126 of 135 and
+96 of 121. The fourth round
 (`0011_round3-barges-after-ship`) had 105 of 113; the fifth took calibration out and did not aim at the score.
 The figures in the items below are the fourth round's unless they name the fifth.
 

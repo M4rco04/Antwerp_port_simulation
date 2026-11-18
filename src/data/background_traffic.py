@@ -26,6 +26,10 @@ BERTH_DWELL_H                     class (or "all") -> lognormal time at berth in
                                   mu, sigma (of ln hours), median_h, mean_h, n_complete, n_censored
 BERTH_DWELL_H_BY_ZONE             class -> berth zone -> the same, where there are enough stays
 INLAND_STAY_SCALE                 class (inland, bulk_general, tanker) -> the factor their stays were scaled by to give the AIS stock
+STAY_END_FACTOR                   class -> 7 multipliers (local day, Monday first) on the rate at which a berth stay
+                                  ends: Monday-Friday, Saturday, Sunday; 1 every day unless weekdays and weekends
+                                  differ (Welch, daily rates, Bonferroni over the classes tested)
+STAY_END_TEST                     class -> p-value of weekdays against weekends (Welch, daily rates)
 ANCHORAGE_WAIT_H                  class (or "all") -> lognormal time at anchor in hours
 ANCHOR_STAY_SCALE                 bulk_general / tanker -> the factor their anchor stays were scaled by to give the AIS stock
 P_ANCHORAGE_GIVEN_CLASS           class -> {anchorage: P} over the anchor stops
@@ -4571,6 +4575,19 @@ DG_SHARE = {'container': 0.5886,
  'inland_tanker': 0.007,
  'passenger': 0.0}
 
+# stays by the day of the week (fitted on the snapshots up to 2026-11-12 01:29Z)
+STAY_END_FACTOR = {'inland_cargo': [1.183, 1.183, 1.183, 1.183, 1.183, 0.52, 0.57],
+ 'inland_tanker': [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+ 'bulk_general': [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+ 'tanker': [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+ 'passenger': [1.034, 1.034, 1.034, 1.034, 1.034, 0.902, 0.904]}
+
+STAY_END_TEST = {'inland_cargo': 0.0002,
+ 'inland_tanker': 0.08801,
+ 'bulk_general': 0.78376,
+ 'tanker': 0.98095,
+ 'passenger': 0.00898}
+
 
 def _choice(rng, probs):
     names, weights = list(probs), list(probs.values())
@@ -4664,3 +4681,9 @@ def sample_berth_dwell(ship_class, rng, zone=None):
 def sample_anchorage_wait(ship_class, rng):
     """Hours at anchor (lognormal; per class where fitted, else all classes)."""
     return _lognormal(rng, ANCHORAGE_WAIT_H.get(ship_class) or ANCHORAGE_WAIT_H["all"])
+
+
+def stay_end_factor(ship_class, weekday):
+    """How fast a berth stay of this class runs out on this local day (0 = Monday): its timer counts down at
+    this rate, so the stays end that much more or less often (1 where the class has no weekly pattern)."""
+    return globals().get("STAY_END_FACTOR", {}).get(ship_class, [1.0] * 7)[weekday % 7]

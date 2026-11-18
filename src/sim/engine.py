@@ -53,7 +53,7 @@ from currents import CurrentModel                         # noqa: E402
 from clearance import node_clearance                      # noqa: E402
 from fast_graph import FastGraph, PassabilityCache        # noqa: E402
 from lanes import Lanes                                   # noqa: E402
-from generator import INLAND_TRIP_SCALE, Generator        # noqa: E402
+from generator import INLAND_TRIP_SCALE, WEEK_TZ, Generator   # noqa: E402
 from locks import HOLD_FREE_PRIORITY, LockTimes, ShipRequest, in_next_lockage   # noqa: E402
 from movement import Mover                                # noqa: E402
 from services import PILOT_BOAT_MIN, PilotPool, TugPool, boatmen, pilot_boats   # noqa: E402
@@ -1826,6 +1826,11 @@ class Simulation:
     def _timers(self, now):
         rising, after_hw = self.tide_phase()
         cranes_stopped = WG.cranes_stopped(self.weather, self.now_ts(now))
+        # a berth stay runs out at its class's rate for the local day (BT.STAY_END_FACTOR): inland cargo craft lie
+        # still over the weekend, so their stays end half as often then
+        ts = self.now_ts(now)
+        weekday = int((ts.tz_localize("UTC") if ts.tzinfo is None else ts).tz_convert(WEEK_TZ).dayofweek)
+        stay_rate = {}
         for ship in list(self.ships):
             st = ship.state
             if st == State.BOARDING:
@@ -1875,7 +1880,10 @@ class Simulation:
                     self._more_cranes(ship)
                 if ship.terminal and cranes_stopped:   # STS cranes stopped by the wind
                     continue
-                ship.timer -= DT_MIN
+                if (ship.berth or {}).get("kind") == "terminal":
+                    ship.timer -= DT_MIN
+                else:
+                    ship.timer -= DT_MIN * self._stay_rate(stay_rate, ship.cls, weekday)
                 if ship.timer <= 0:
                     self._ready_to_leave(ship, now)
             elif st == State.UNMOORING:
@@ -1894,7 +1902,7 @@ class Simulation:
                         self._to_next_call(ship)
                     self.start_voyage(ship, ship.pending_route, now)
             elif st == State.DWELL_PORT:
-                ship.timer -= DT_MIN
+                ship.timer -= DT_MIN * self._stay_rate(stay_rate, ship.cls, weekday)
                 if ship.timer <= 0:
                     if self._next_call(ship, now):
                         continue
@@ -1913,6 +1921,12 @@ class Simulation:
                 self.go(ship, now)
             elif st == State.ANCHORED and getattr(ship, "inland_anchor_h", None) is not None and now >= ship.anchor_until:
                 self._inland_anchor_up(ship, now)
+
+    @staticmethod
+    def _stay_rate(cache, cls, weekday):
+        if cls not in cache:
+            cache[cls] = BT.stay_end_factor(cls, weekday) if hasattr(BT, "stay_end_factor") else 1.0
+        return cache[cls]
 
     def _moored(self, ship, now):
         b = ship.berth

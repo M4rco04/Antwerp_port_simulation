@@ -8,6 +8,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -187,3 +188,33 @@ def test_each_ship_draws_from_its_own_stream(sim):
     assert (first == again).all()
     assert not (sim.ship_rng(mk("A00001"), "service").random(5) == first).all()   # streams differ by kind
     assert not (sim.ship_rng(mk("B00002"), "choice").random(5) == first).all()    # and by ship
+
+
+# ------------------------------------------------------------------ the week in the stays
+def test_inland_cargo_stays_run_out_slower_at_the_weekend(sim):
+    """BT.STAY_END_FACTOR: an inland cargo craft's berth stay counts down at its class's rate for the local day,
+    so stays end about half as often on a Sunday as on a weekday (AIS: inland cargo craft lie still over the
+    weekend; MODEL.md §2.1)."""
+    import background_traffic as BT
+    import engine
+    from ship import State
+
+    f = BT.STAY_END_FACTOR["inland_cargo"]
+    assert f[6] < 0.75 < 1.0 < f[0] and BT.STAY_END_FACTOR["tanker"] == [1.0] * 7
+    t0 = sim.now_ts(0.0)
+    t0 = t0.tz_localize("UTC") if t0.tzinfo is None else t0
+    at = lambda local: (pd.Timestamp(local, tz="Europe/Brussels") - t0).total_seconds() / 60.0
+    craft = ship("inland_cargo", 80.0, 9.5, 2.5)
+    craft.id = "stay-week"
+    saved = list(sim.ships)
+    try:
+        sim.ships[:] = [craft]
+        used = {}
+        for name, local in (("monday", "2026-10-26 12:00"), ("sunday", "2026-11-01 12:00")):
+            craft.state, craft.timer, craft.berth = State.DWELL_PORT, 600.0, {"name": "antwerp_other", "kind": "place"}
+            sim._timers(at(local))
+            used[name] = 600.0 - craft.timer
+        assert used["monday"] == pytest.approx(engine.DT_MIN * f[0])
+        assert used["sunday"] == pytest.approx(engine.DT_MIN * f[6])
+    finally:
+        sim.ships[:] = saved
