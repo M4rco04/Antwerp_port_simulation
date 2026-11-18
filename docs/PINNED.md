@@ -34,8 +34,10 @@ Things set aside on 10 November 2026, with what each one waits for.
   fewer inland passages at Hansweert, Terneuzen, Zandvliet-Berendrecht, Kieldrecht and on the river (none at
   Kreekrak and Kallo). Done in part (18 November 2026): a day-of-week factor on the arrivals, kept only where the
   entries show it, which is inland cargo craft alone (MODEL.md §19, `0030_weekday`). It barely moves the held-out
-  lock counts and gives Kreekrak a weekend dip it does not have. The lock counts fall at weekends for inland craft as a
-  whole, the entries only for cargo craft: perhaps craft in port move less at weekends (stays, not entries). Hold out whole weeks.
+  lock counts and gives Kreekrak a weekend dip it does not have. The weekend dip at the locks is
+  in cargo craft already in the area (at Zandvliet-Berendrecht over nine in ten of the inland passages), so it
+  needs the week on the stays: a craft whose stay ends at a weekend leaves on the Monday, or a weekly factor on
+  the end of a stay. Kallo's low count on the held-out days is not the week (no dip on fitted weekends). Hold out whole weeks.
 - **Hold-out split.** Done in part (17 November 2026): the model is fitted on 26 October to 12 November and
   measured again on 13 to 15 November, three whole days (MODEL.md §19). Three days are too few for a score of
   their own; they were used to test calibrated values. Extend the held-out days as the record grows, and do not
