@@ -36,6 +36,62 @@ from ais_pipeline import (AIS_DIR, CHARTS, CLASS_DESCRIPTIONS, KX, KY, LAT0, LON
 
 log = logging.getLogger("entry")
 
+# Day of the week. A class's rate is taken as one level Monday to Friday, one on Saturday and one on Sunday (two or
+# three observed days per weekday are too few for seven levels), and kept only where the weekend differs from the
+# weekdays beyond the spread from day to day: Welch's t-test on the daily rates, at WEEKDAY_ALPHA divided by the
+# number of classes tested. Else the factor is 1 on every day. Days with less than MIN_DAY_H observed hours are
+# left out of the test (not of the levels).
+WEEK_TZ = "Europe/Brussels"
+WEEKDAY_ALPHA = 0.05
+MIN_DAY_H = 12.0
+
+
+def day_exposure(windows):
+    """Observed hours per local day (WEEK_TZ)."""
+    hours = {}
+    for lo, hi in windows:
+        for t in pd.date_range(lo.floor("h"), hi, freq="h"):
+            a, b = max(lo, t), min(hi, t + pd.Timedelta(hours=1))
+            if b > a:
+                day = t.tz_convert(WEEK_TZ).normalize()
+                hours[day] = hours.get(day, 0.0) + (b - a).total_seconds() / 3600
+    return pd.Series(hours, dtype=float).sort_index()
+
+
+def weekday_factors(entries, windows, classes):
+    """class -> 7 multipliers (local Monday .. Sunday) on RATE_PER_HOUR, and class -> the test's p-value.
+    A multiplier is the rate on that kind of day over the rate of all the observed hours, so that the rate times
+    the factor gives that day's rate (the observed hours are not spread evenly over the week)."""
+    exposure = day_exposure(windows)
+    dow = pd.Series(exposure.index.dayofweek, index=exposure.index)
+    kinds = {"weekday": dow < 5, "saturday": dow == 5, "sunday": dow == 6}
+    full = exposure >= MIN_DAY_H
+    factors, tests = {}, {}
+    from scipy import stats
+
+    for cls in classes:
+        e = entries[entries["class"] == cls]
+        n = e.t.dt.tz_convert(WEEK_TZ).dt.normalize().value_counts().reindex(exposure.index, fill_value=0)
+        overall = n.sum() / exposure.sum() if exposure.sum() else 0.0
+        rate = n / exposure
+        wk, we = rate[full & kinds["weekday"]], rate[full & ~kinds["weekday"]]
+        p = float(stats.ttest_ind(wk, we, equal_var=False).pvalue) if len(wk) >= 2 and len(we) >= 2 and overall else 1.0
+        tests[cls] = round(p, 5) if p == p else 1.0
+        if p == p and p < WEEKDAY_ALPHA / len(classes) and overall:
+            level = {k: n[m].sum() / exposure[m].sum() / overall for k, m in kinds.items()}
+            factors[cls] = [round(float(level["weekday"]), 3)] * 5 + [round(float(level["saturday"]), 3),
+                                                                     round(float(level["sunday"]), 3)]
+        else:
+            factors[cls] = [1.0] * 7
+    return factors, tests
+
+
+def until_cut(entries, windows, until):
+    """The entries and observed windows up to `until` (the days the model is fitted on; the rest is held out)."""
+    if until is None:
+        return entries, windows
+    return entries[entries.t <= until], [(lo, min(hi, until)) for lo, hi in windows if lo < until]
+
 
 def hour_exposure(windows):
     hours = np.zeros(24)
@@ -70,6 +126,7 @@ def fit(entries, windows, catalogue, classes):
         hourly[cls] = [round(float(v), 3) for v in (smooth / smooth.mean() if smooth.mean() else np.ones(24))]
 
     p_class = {s: normalise({cls: counts[cls].get(s, 0) for cls in classes}) for s in sources}
+    weekday, weekday_test = weekday_factors(entries, windows, classes)
 
     # spawn points: where the ships of a source are first seen (for anchorages: the anchorage itself)
     location = {}
@@ -85,6 +142,8 @@ def fit(entries, windows, catalogue, classes):
         "UNRESOLVED_SHARE": unresolved_share,
         "RATE_PER_HOUR": rate,
         "HOURLY_FACTOR": hourly,
+        "WEEKDAY_FACTOR": weekday,
+        "WEEKDAY_TEST": weekday_test,
         "SOURCE_LOCATION": location,
     }
 
@@ -111,7 +170,10 @@ P_CLASS_GIVEN_SOURCE    source -> {{class: P}}
 RATE_PER_HOUR           class -> {{source: mean entries per hour}}; the unresolved
                         entries are shared out over the sources in proportion
 HOURLY_FACTOR           class -> 24 multipliers (UTC hour of day, mean 1) for an NHPP
-ENTRY_COUNTS            class -> {{source: number of entries}}, the raw data behind it all
+WEEKDAY_FACTOR          class -> 7 multipliers (local day, Monday first) on RATE_PER_HOUR: one level
+                        Monday to Friday, one Saturday, one Sunday, where the weekend differs (else 1)
+WEEKDAY_TEST            class -> p-value of weekdays against weekends (Welch, daily rates)
+ENTRY_COUNTS           class -> {{source: number of entries}}, the raw data behind it all
 UNRESOLVED_SHARE        class -> share of entries first seen under way mid-river
 SOURCE_LOCATION         source -> median lat/lon of the first fixes there (a spawn point)
 
@@ -141,11 +203,13 @@ def p_class(source):
     return dict(P_CLASS_GIVEN_SOURCE.get(source, {}))
 
 
-def arrival_rate(ship_class, source=None, hour=None):
-    """Mean entries per hour of a class (through one source, at one UTC hour of the day)."""
+def arrival_rate(ship_class, source=None, hour=None, weekday=None):
+    """Mean entries per hour of a class (through one source, at one UTC hour of the day, on one local weekday,
+    Monday = 0)."""
     rates = RATE_PER_HOUR[ship_class]
     rate = sum(rates.values()) if source is None else rates.get(source, 0.0)
-    return rate * (HOURLY_FACTOR[ship_class][hour % 24] if hour is not None else 1.0)
+    rate *= HOURLY_FACTOR[ship_class][hour % 24] if hour is not None else 1.0
+    return rate * (WEEKDAY_FACTOR.get(ship_class, [1.0] * 7)[weekday % 7] if weekday is not None else 1.0)
 
 
 def sample_source(ship_class, rng, category=None):
@@ -185,6 +249,35 @@ def plot_entries(entries, passing, zones, charts, path):
     log.info("Wrote %s", path)
 
 
+def patch_weekday(path, factors, tests, until):
+    """Write WEEKDAY_FACTOR and WEEKDAY_TEST into an existing generated module (before its functions), with the
+    docstring lines for them and arrival_rate taking the weekday; the module's other tables are not touched."""
+    import pprint
+    import re
+
+    text = path.read_text(encoding="utf-8")
+    for name in ("WEEKDAY_FACTOR", "WEEKDAY_TEST"):           # an earlier patch
+        text = re.sub(rf"\n{name} = .*?\n\n", "\n", text, flags=re.S)
+    note = f"(fitted on the snapshots up to {until:%Y-%m-%d %H:%M}Z)" if until is not None else ""
+    tables = (f"# day of the week {note}\n"
+              f"WEEKDAY_FACTOR = {pprint.pformat(factors, width=110, sort_dicts=False, compact=True)}\n\n"
+              f"WEEKDAY_TEST = {pprint.pformat(tests, width=110, sort_dicts=False, compact=True)}\n\n")
+    text = re.sub(r"\n# day of the week[^\n]*\n", "\n", text)
+    head, sep, tail = text.partition("\n\ndef p_source(")
+    if not sep:
+        raise SystemExit(f"{path}: no functions found to put the tables before")
+    text = head.rstrip("\n") + "\n\n" + tables + "\ndef p_source(" + tail
+    doc = DOCSTRING.split("WEEKDAY_FACTOR", 1)[1].split("ENTRY_COUNTS", 1)[0]
+    if "WEEKDAY_FACTOR          class" not in text.split('"""', 2)[1]:
+        text = text.replace("\nENTRY_COUNTS ", "\nWEEKDAY_FACTOR" + doc + "ENTRY_COUNTS ", 1)
+    old = re.search(r"def arrival_rate\(.*?\n\n\n", text, flags=re.S)
+    new = MODULE_FUNCTIONS.split("def arrival_rate(", 1)[1].split("\n\n\n", 1)[0]
+    if old:
+        text = text[:old.start()] + "def arrival_rate(" + new + "\n\n\n" + text[old.end():]
+    path.write_text(text, encoding="utf-8")
+    log.info("Wrote WEEKDAY_FACTOR and WEEKDAY_TEST into %s", path)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--ais", type=Path, default=AIS_DIR, help="snapshot directory")
@@ -192,11 +285,24 @@ def main():
     parser.add_argument("--charts", type=Path, default=CHARTS)
     parser.add_argument("--out", type=Path, default=REPO_ROOT / "src" / "data" / "entry_probabilities.py")
     parser.add_argument("--plot", type=Path, help="also save a map of the entry points")
+    parser.add_argument("--until", help="fit on the snapshots up to this UTC time only (the rest is held out), "
+                                        "e.g. '2026-11-12 01:29'")
+    parser.add_argument("--weekday-only", action="store_true",
+                        help="fit only WEEKDAY_FACTOR / WEEKDAY_TEST and write them into the existing --out module, "
+                             "leaving every other table as it was fitted")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     data = prepare(args.ais, args.schedule, args.charts)
-    entries = data.entries
+    until = pd.Timestamp(args.until, tz="UTC") if args.until else None
+    entries, windows = until_cut(data.entries, data.windows, until)
+    if args.weekday_only:
+        entries = entries[entries.scheldt_bound]
+        factors, tests = weekday_factors(entries, windows, list(CLASS_DESCRIPTIONS))
+        log.info("weekday factors: %s; p-values: %s", factors, tests)
+        patch_weekday(args.out, factors, tests, until)
+        return
+    data.windows = windows
     log.info("%d entries reach the Scheldt, %d more are still on their way to it, %d pass by (left out)",
              entries.reaches_scheldt.sum(), (entries.scheldt_bound & ~entries.reaches_scheldt).sum(),
              (~entries.scheldt_bound).sum())

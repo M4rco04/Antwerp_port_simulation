@@ -1,0 +1,19 @@
+{
+  "label": "p5-test",
+  "reps": 1,
+  "seed": 401,
+  "start": "2026-10-27 00:00",
+  "days": 5.0,
+  "warmup": 1.0,
+  "delays": true,
+  "background": true,
+  "weather": "bootstrap",
+  "containers": "replay",
+  "container_rate": 1.0,
+  "bunching": true,
+  "routing": "lanes",
+  "checks": false,
+  "measure_until": null,
+  "holdout": null,
+  "set": []
+}

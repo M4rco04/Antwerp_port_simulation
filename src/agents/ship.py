@@ -77,12 +77,13 @@ class Ship:
     berth_zone: str | None = None
     schedule: dict = field(default_factory=dict)   # level 1: scheduled berth arrival / departure
     moves: int = 0                          # level 1: call size (container moves), set when handling starts
-    stay_h: float | None = None             # level 1: the scheduled stay at the berth (h)
+    stay_h: float | None = None             # level 1: the hours at the berth (the line's stay x its ratio)
     cranes_wanted: int = 0                  # level 1: cranes the terminal would give a ship this size
     dwell_h: float = 0.0                    # level 2: time at the berth
     exit: str | None = None                 # where it leaves after the berth
     distress: bool = False
     arrival_draught: float | None = None    # the draught it came in at (draught changes at the berth)
+    speed_factor: float = 1.0               # its own speed against its class's (engine.SPEED_SPREAD)
 
     state: State = State.SPAWNED
     timer: float = 0.0
@@ -220,7 +221,7 @@ class Ship:
         """Speed through the water: JA22 planning speeds where they exist (container / bulk / tanker),
         else the class speed."""
         v = planning_speed(self.cls, self.draught, "departure" if self.departing else "arrival", leg)
-        return v or CLASS_SPEED_KN.get(self.cls, 12.0)
+        return (v or CLASS_SPEED_KN.get(self.cls, 12.0)) * self.speed_factor
 
     # ------------------------------------------------------------------ bookkeeping
     def mark(self, what, t):

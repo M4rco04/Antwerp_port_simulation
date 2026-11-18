@@ -78,6 +78,69 @@ def test_one_ship_through_a_lock_takes_the_published_time():
     assert not lock.chambers[0].ships
 
 
+def _lockage(queue, rng=None, minutes=240):
+    """One sea lock (400 x 60 m, operating time from LockTimes), the ships of `queue` asking at side a at t = 0:
+    the events until the chamber is empty again."""
+    lock = Lock("Sea lock", [Chamber("sea chamber", 400.0, 60.0, 15.0)], sides={"a": {"nodes": []}, "b": {"nodes": []}},
+                times=LockTimes(), rng=rng)
+    for ship in queue:
+        lock.request(ship, 0.0)
+    events, t = [], 0.0
+    while t < minutes and sum(e["event"] == "exit" for e in events) < len(queue):
+        events += lock.step(t, 0.5, {"a": 0.0, "b": 0.0})
+        t += 0.5
+    return events
+
+
+def test_an_inland_craft_goes_in_beside_a_sea_going_ship_and_leaves_before_it():
+    """The barge asked first, but the ship goes in first (12 min) and the barge beside it, with no time of its own
+    (ALONGSIDE_ENTRY_MIN); at the other side the barge is away first."""
+    barge, ship = ShipRequest("barge", 110.0, 11.4, 3.0, "a"), ShipRequest("ship", 200.0, 30.0, 9.0, "a")
+    ev = _lockage([barge, ship])
+    at = {(e["event"], e["ship"]): e["t"] for e in ev if e["ship"]}
+    times = LockTimes()
+    assert at[("enter", "ship")] == pytest.approx(times.entry_min, abs=0.6)
+    assert at[("enter", "barge")] - at[("enter", "ship")] == pytest.approx(locks.ALONGSIDE_ENTRY_MIN, abs=0.6)
+    assert at[("exit", "barge")] < at[("exit", "ship")]
+    # two barges on their own still go in one behind the other, each in its own time
+    ev = _lockage([ShipRequest("b1", 110.0, 11.4, 3.0, "a"), ShipRequest("b2", 110.0, 11.4, 3.0, "a")])
+    at = {(e["event"], e["ship"]): e["t"] for e in ev if e["ship"]}
+    assert at[("enter", "b2")] - at[("enter", "b1")] == pytest.approx(times.small_entry_min, abs=0.6)
+
+
+def test_a_lock_holds_a_lockage_only_when_it_draws_one(monkeypatch):
+    """LOCK_HOLD_P: with probability 1 every lockage waits for its drawn time before the gates close; with 0, or
+    for a lock without a random stream, none does; a tide-dependent ship is never held."""
+    class Always:
+        def random(self):
+            return 0.0
+
+        def exponential(self, mean):
+            return 30.0
+
+    barge = lambda prio=4: ShipRequest("barge", 110.0, 11.4, 3.0, "a", prio)
+    out = lambda ev: next(e["t"] for e in ev if e["event"] == "exit")
+    plain = out(_lockage([barge()]))
+    monkeypatch.setattr(locks, "LOCK_HOLD_P", 1.0)
+    held = _lockage([barge()], rng=Always())
+    assert sum(e["event"] == "held" for e in held) == 1
+    assert out(held) == pytest.approx(plain + 30.0, abs=1.0)
+    assert out(_lockage([barge(prio=2)], rng=Always())) <= plain + 1.0       # tide-dependent: no hold of any kind
+    monkeypatch.setattr(locks, "LOCK_HOLD_P", 0.0)
+    assert out(_lockage([barge()], rng=Always())) == pytest.approx(plain, abs=1.0)
+
+
+def test_a_new_random_stream_does_not_move_the_old_ones():
+    """The streams are spawned in the order of engine.STREAMS: one added at the end (the locks' holds) leaves the
+    arrivals, the weather and the rest as they were, so earlier runs stay comparable seed by seed."""
+    import engine
+
+    assert engine.STREAMS[:7] == ("arrivals", "attributes", "weather", "service", "choice", "movement", "speed")
+    old = [np.random.default_rng(s).random() for s in np.random.SeedSequence(5).spawn(7)]
+    new = [np.random.default_rng(s).random() for s in np.random.SeedSequence(5).spawn(len(engine.STREAMS))]
+    assert new[:7] == old
+
+
 # ------------------------------------------------------------------ terminals
 def terminal(sts=6, per_ship=None):
     return Terminal(name="T", code="T", quay_line=[(0.0, 0.0), (1000.0, 0.0)], quay_length_m=1000.0,
@@ -263,3 +326,49 @@ def test_a_seed_reproduces_a_run():
     a, b = simulate(0.5, 5), simulate(0.5, 5)
     pd.testing.assert_frame_equal(a.ship_table(), b.ship_table())
     assert len(a.ship_table()) != len(simulate(0.5, 6).ship_table()) or not a.ship_table().equals(simulate(0.5, 6).ship_table())
+
+
+# ------------------------------------------------------------------ positions on disk
+def test_the_position_log_gives_back_what_was_written(monkeypatch):
+    """engine.PositionLog keeps the positions in a file: what frame() reads back is what was appended, across the
+    blocks it is written in, with the sideways offsets; the file is gone once closed."""
+    import os
+
+    import engine
+
+    monkeypatch.setattr(engine.PositionLog, "BLOCK", 7)
+    log = engine.PositionLog()
+    rng = np.random.default_rng(9)
+    rows = [(k, f"S{int(rng.integers(5)):03d}", ("sailing", "at_berth", "lock_queue")[int(rng.integers(3))],
+             int(rng.integers(-1, 4)), round(float(rng.uniform(0, 90000)), 1), float(rng.choice([0.0, 0.0, 12.5, -30.0])))
+            for k in range(100)]
+    for r in rows:
+        log.append(r)
+    f = log.frame()
+    assert len(log) == len(f) == len(rows)
+    want = pd.DataFrame(rows, columns=["step", "ship", "state", "route", "value", "offset"])
+    pd.testing.assert_frame_equal(f, want, check_dtype=False)
+    path = log.path
+    log.close()
+    assert not os.path.exists(path)
+
+
+def test_inland_cargo_craft_follow_the_week():
+    """EP.WEEKDAY_FACTOR: inland cargo craft enter less often at the weekend (Sunday about half a weekday), and a
+    class without a weekly pattern enters as often on Sunday as on a weekday."""
+    import entry_probabilities as EP
+    from generator import Generator
+
+    f = EP.WEEKDAY_FACTOR["inland_cargo"]
+    assert f[6] < f[5] < f[0] and EP.WEEKDAY_FACTOR["tanker"] == [1.0] * 7
+    start = pd.Timestamp("2026-10-26 00:00", tz="Europe/Brussels").tz_convert("UTC")        # a Monday
+    g = Generator(start, np.random.default_rng(12), container_mode="nhpp", rng_attributes=np.random.default_rng(13))
+    n = {}
+    for k in range(28 * 288):                                                             # four weeks
+        for s in g.arrivals(k * 5.0, 5.0):
+            day = (start + pd.Timedelta(minutes=s.spawn_t)).tz_convert("Europe/Brussels").dayofweek
+            n[(s.cls, day)] = n.get((s.cls, day), 0) + 1
+    week = lambda cls: np.mean([n.get((cls, d), 0) for d in range(5)])
+    ratio = n.get(("inland_cargo", 6), 0) / week("inland_cargo")
+    assert ratio == pytest.approx(f[6] / f[0], abs=0.08), ratio
+    assert n.get(("tanker", 6), 0) / week("tanker") == pytest.approx(1.0, abs=0.35)

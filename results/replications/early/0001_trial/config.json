@@ -1,0 +1,16 @@
+{
+  "label": "trial",
+  "reps": 3,
+  "seed": 1,
+  "start": "2026-10-21 00:00",
+  "days": 8.0,
+  "warmup": 2.0,
+  "delays": true,
+  "background": true,
+  "weather": "bootstrap",
+  "containers": "nhpp",
+  "container_rate": 1.0,
+  "bunching": true,
+  "routing": "lanes",
+  "checks": false
+}

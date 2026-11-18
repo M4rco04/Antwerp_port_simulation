@@ -17,6 +17,9 @@ P_CLASS_GIVEN_SOURCE    source -> {class: P}
 RATE_PER_HOUR           class -> {source: mean entries per hour}; the unresolved
                         entries are shared out over the sources in proportion
 HOURLY_FACTOR           class -> 24 multipliers (UTC hour of day, mean 1) for an NHPP
+WEEKDAY_FACTOR          class -> 7 multipliers (local day, Monday first) on RATE_PER_HOUR: one level
+                        Monday to Friday, one Saturday, one Sunday, where the weekend differs (else 1)
+WEEKDAY_TEST            class -> p-value of weekdays against weekends (Welch, daily rates)
 ENTRY_COUNTS            class -> {source: number of entries}, the raw data behind it all
 UNRESOLVED_SHARE        class -> share of entries first seen under way mid-river
 SOURCE_LOCATION         source -> median lat/lon of the first fixes there (a spawn point)
@@ -508,6 +511,25 @@ SOURCE_LOCATION = {'albert_canal': {'lat': 51.24445, 'lon': 4.39688},
  'zeebrugge': {'lat': 51.32094, 'lon': 3.21827},
  'zuid_beveland_canal': {'lat': 51.49996, 'lon': 4.00552}}
 
+# day of the week (fitted on the snapshots up to 2026-11-12 01:29Z)
+WEEKDAY_FACTOR = {'container': [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+ 'bulk_general': [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+ 'tanker': [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+ 'inland_cargo': [1.118, 1.118, 1.118, 1.118, 1.118, 0.74, 0.564],
+ 'inland_tanker': [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+ 'passenger': [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+ 'service': [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+ 'unknown': [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]}
+
+WEEKDAY_TEST = {'container': 0.94061,
+ 'bulk_general': 0.68874,
+ 'tanker': 0.65276,
+ 'inland_cargo': 0.00096,
+ 'inland_tanker': 0.0444,
+ 'passenger': 0.88643,
+ 'service': 0.63734,
+ 'unknown': 0.97438}
+
 
 def p_source(ship_class, category=None):
     """P(source | class) over the resolved sources, optionally within one category ("sea", ...)."""
@@ -529,11 +551,13 @@ def p_class(source):
     return dict(P_CLASS_GIVEN_SOURCE.get(source, {}))
 
 
-def arrival_rate(ship_class, source=None, hour=None):
-    """Mean entries per hour of a class (through one source, at one UTC hour of the day)."""
+def arrival_rate(ship_class, source=None, hour=None, weekday=None):
+    """Mean entries per hour of a class (through one source, at one UTC hour of the day, on one local weekday,
+    Monday = 0)."""
     rates = RATE_PER_HOUR[ship_class]
     rate = sum(rates.values()) if source is None else rates.get(source, 0.0)
-    return rate * (HOURLY_FACTOR[ship_class][hour % 24] if hour is not None else 1.0)
+    rate *= HOURLY_FACTOR[ship_class][hour % 24] if hour is not None else 1.0
+    return rate * (WEEKDAY_FACTOR.get(ship_class, [1.0] * 7)[weekday % 7] if weekday is not None else 1.0)
 
 
 def sample_source(ship_class, rng, category=None):

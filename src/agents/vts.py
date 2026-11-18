@@ -132,7 +132,8 @@ class SimpleVTS:
             reason = None
             if route is None:
                 reason = "destination" if target is None else "no_route"
-                if target is not None and ship.at is not None and not sim.voyage_reachable(ship, ship.at, target):
+                if target is not None and ship.at is not None and not sim.voyage_reachable(ship, ship.at, target) \
+                        and not sim.unreachable_resolved(ship, now):
                     ship.infeasible = "no route at high water"
             if ship.infeasible:
                 ship.note(now, "infeasible", why=ship.infeasible)
@@ -158,6 +159,14 @@ class SimpleVTS:
                 if ship.times.get("vts_wait_reason") != reason:
                     ship.note(now, "vts_hold", reason=reason, at=ship.at, target=ship.target, state=ship.state.value)
                     ship.times["vts_wait_reason"] = reason
+                if (not ship.departing and ship.cls == "container" and ship.terminal and reason in ("destination", "tide")
+                        and ship.state.value == "wait_clearance" and getattr(ship, "at_station", False)):
+                    since = ship.times.setdefault("sea_wait_since", now)
+                    if now - since < sim.container_sea_wait_max_min:
+                        if not ship.times.get("sea_wait_noted"):
+                            ship.times["sea_wait_noted"] = now
+                            ship.note(now, "waits_at_sea", reason=reason)
+                        continue                       # loses the time at sea, not at anchor (engine)
                 if not ship.departing and ship.state.value == "wait_clearance" and getattr(ship, "at_station", False):
                     # to an anchorage; none with room or reachable now: it stays and is sent at a later round
                     # (it used to be left at the station for good, holding its place in the queue)

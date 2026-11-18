@@ -87,9 +87,9 @@ PLANNING_SPEED_KN = {
 # (a third less time than at 10 kn), and the factor also makes up for what the model loses on the way (its path
 # over the mesh is 3 % longer than a track, and a ship behind a slower one waits for room to pass)
 SAILING_FACTOR = {
-    ("container", "arrival", "river"): 1.14, ("container", "departure", "river"): 1.29,
+    ("container", "arrival", "river"): 1.14, ("container", "departure", "river"): 1.35,
     ("container", "arrival", "sea"): 0.90, ("container", "departure", "sea"): 0.95,
-    ("bulk_tanker", "arrival", "river"): 1.06, ("bulk_tanker", "departure", "river"): 1.31,
+    ("bulk_tanker", "arrival", "river"): 1.06, ("bulk_tanker", "departure", "river"): 1.37,
     ("bulk_tanker", "arrival", "sea"): 1.00, ("bulk_tanker", "departure", "sea"): 1.07,
 }
 

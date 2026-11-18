@@ -52,6 +52,15 @@ INLAND_SILENT_H = 6.0               # an inland craft not heard for this long ha
 # sea-going lock passages (a ship that moves from the right bank to the left passes two locks more)
 SEA_CALL_CLASSES = ("bulk_general", "tanker")
 LEAVE = "leave"
+# the exit of a visit also depends on where it came in: a craft leaves by the canal it came in by far more often
+# than its last berth zone alone gives (AIS, inland craft from the Schelde-Rijn canal: 62 % leave by it, 47 % by the
+# berth zone alone; from the Kanaal door Zuid-Beveland 34 against 20 %, from the Ghent canal 30 against 16 %, from
+# the Upper Sea Scheldt 34 against 10 %; validation, MODEL.md §19). Fitted per class and source, and per class,
+# source and last berth zone, where at least this many exits were seen
+MIN_EXITS_PER_SOURCE = 10
+# a sea-going ship in from sea and out to sea with no call heard, but heard on the Ghent-Terneuzen canal: it called
+# up the canal, beyond the area. Its destination is this, a call out of the area from which it comes back
+BEYOND_GHENT_CANAL = "beyond_ghent_terneuzen_canal"
 DRAUGHT_BANDS = (7.0, 10.0, 13.0)   # arrival draught bands of DRAUGHT_CHANGE, m
 
 
@@ -234,10 +243,14 @@ def lock_stops(stops):
                    "p90_h": round(float(g.hours.quantile(0.9)), 2)} for zone, g in lock.groupby("zone")}
 
 
-def destinations(entries, calls, exits):
+def destinations(entries, calls, exits, heard=None):
     """The berth zone of a visit's call, or the exit of one with no call. A sea-going ship in from sea and out
     to sea with no call seen has not simply passed through: such visits last a median of 34 h and reach
-    Vlissingen, so its call was not heard. Its destination counts as unknown (left out), not as the sea."""
+    Vlissingen, so its call was not heard. One that was heard on the Ghent-Terneuzen canal (heard: visit -> the
+    port zones of its fixes; 25 such visits in the record, through the lock and back, 62 to 100 h) called up
+    the canal, out of the area: its destination is BEYOND_GHENT_CANAL. Any other counts as unknown (left out),
+    not as the sea. Until the validation (MODEL.md §19) they were all unknown, and the model had 21 sea-going
+    lock passages a day at Terneuzen for the AIS's 25."""
     dest = pd.Series(index=entries.visit, dtype=object)
     sea = entries.set_index("visit").source.map(lambda s: s in SEA_GATES or str(s).startswith("anchorage"))
     sea_going = entries.set_index("visit")["class"].isin(("bulk_general", "tanker", "container"))
@@ -248,7 +261,95 @@ def destinations(entries, calls, exits):
         elif v in exits.index and exits[v] != UNRESOLVED and not (sea[v] and sea_going[v] and exits[v] in SEA_GATES) \
                 and exits[v] != source[v]:     # out the way it came in, with no call: it went somewhere unseen
             dest[v] = exit_name(exits[v])
+        elif heard is not None and sea[v] and sea_going[v] and v in exits.index and exits[v] in SEA_GATES:
+            if "ghent_terneuzen_canal" in heard.get(v, set()):
+                dest[v] = BEYOND_GHENT_CANAL
     return dest
+
+
+# Stays end less often at weekends (inland craft lie still over Saturday and Sunday): the ends of the berth calls
+# per hour a craft lies at a berth, per local day, on three levels (Monday-Friday, Saturday, Sunday), over the
+# overall rate. A class keeps the factor only if its daily rates differ between weekdays and weekends by Welch's
+# t-test at WEEKDAY_ALPHA over the number of classes tested, as the arrivals (fit_entry_probabilities).
+STAY_WEEK_CLASSES = ("inland_cargo", "inland_tanker", "bulk_general", "tanker", "passenger")
+
+
+def stay_end_factors(calls, windows, classes=STAY_WEEK_CLASSES):
+    """class -> 7 multipliers (local Monday .. Sunday) on the rate at which a berth stay ends, and class -> the
+    test's p-value. `calls`: berth calls with start, end, end_observed and class; `windows`: the observed spans."""
+    from scipy import stats
+    from fit_entry_probabilities import MIN_DAY_H, WEEK_TZ, WEEKDAY_ALPHA, day_exposure
+
+    exposure = day_exposure(windows)
+    days = exposure.index
+    dow = pd.Series(days.dayofweek, index=days)
+    kinds = {"weekday": dow < 5, "saturday": dow == 5, "sunday": dow == 6}
+    full = exposure >= MIN_DAY_H
+    until = max(hi for _, hi in windows)
+    factors, tests = {}, {}
+    for cls in classes:
+        g = calls[calls["class"] == cls]
+        done = g[g.end_observed & (g.end <= until)]
+        ends = done.end.dt.tz_convert(WEEK_TZ).dt.normalize().value_counts().reindex(days, fill_value=0)
+        start, end = g.start.dt.tz_convert(WEEK_TZ), g.end.dt.tz_convert(WEEK_TZ)
+        lying = pd.Series(0.0, index=days)               # hours lying at a berth in the observed part of each day
+        for day in days:
+            overlap = (np.minimum(end, day + pd.Timedelta(days=1)) - np.maximum(start, day)).dt.total_seconds()
+            lying[day] = overlap.clip(lower=0).sum() / 3600 * exposure[day] / 24
+        use = full & (lying > 0)
+        overall = ends[use].sum() / lying[use].sum() if lying[use].sum() else 0.0
+        rate = ends / lying.where(lying > 0)
+        wk, we = rate[use & kinds["weekday"]], rate[use & ~kinds["weekday"]]
+        p = float(stats.ttest_ind(wk, we, equal_var=False).pvalue) if len(wk) >= 2 and len(we) >= 2 and overall else 1.0
+        tests[cls] = round(p, 5) if p == p else 1.0
+        if p == p and p < WEEKDAY_ALPHA / len(classes) and overall:
+            level = {k: ends[use & m].sum() / lying[use & m].sum() / overall for k, m in kinds.items()}
+            factors[cls] = [round(float(level["weekday"]), 3)] * 5 + [round(float(level["saturday"]), 3),
+                                                                     round(float(level["sunday"]), 3)]
+        else:
+            factors[cls] = [1.0] * 7
+    return factors, tests
+
+
+def stay_calls(data, stops, inland_stops):
+    """The berth calls whose stays the model draws: inland craft from the stops with the inland silence rule,
+    the other classes from the ordinary stops (as fit)."""
+    scheldt = data.visits.index[data.visits.scheldt_bound]
+    out = []
+    for frame, inland in ((stops, False), (inland_stops, True)):
+        f = frame[frame.visit.isin(scheldt)].copy()
+        f["class"] = f.visit.map(data.visits["class"])
+        calls = berth_calls(f)
+        out.append(calls[calls["class"].isin(INLAND_CLASSES) == inland])
+    return pd.concat(out)
+
+
+def patch_stay_week(path, factors, tests, until):
+    """Write STAY_END_FACTOR and STAY_END_TEST into an existing generated module, with their docstring lines and
+    stay_end_factor; the module's other tables are not touched."""
+    import pprint
+    import re
+
+    text = path.read_text(encoding="utf-8")
+    for name in ("STAY_END_FACTOR", "STAY_END_TEST"):          # an earlier patch
+        text = re.sub(rf"\n{name} = .*?\n\n", "\n", text, flags=re.S)
+    text = re.sub(r"\n# stays by the day of the week[^\n]*\n", "\n", text)
+    note = f"(fitted on the snapshots up to {until:%Y-%m-%d %H:%M}Z)" if until is not None else ""
+    tables = (f"# stays by the day of the week {note}\n"
+              f"STAY_END_FACTOR = {pprint.pformat(factors, width=110, sort_dicts=False, compact=True)}\n\n"
+              f"STAY_END_TEST = {pprint.pformat(tests, width=110, sort_dicts=False, compact=True)}\n\n")
+    head, sep, tail = text.partition("\n\ndef _choice(")
+    if not sep:
+        raise SystemExit(f"{path}: no functions found to put the tables before")
+    text = head.rstrip("\n") + "\n\n" + tables + "\ndef _choice(" + tail
+    doc = DOCSTRING.split("\nSTAY_END_FACTOR", 1)[1].split("\nANCHORAGE_WAIT_H", 1)[0]
+    if "\nSTAY_END_FACTOR " not in text.split('"""', 2)[1]:
+        text = text.replace("\nANCHORAGE_WAIT_H ", "\nSTAY_END_FACTOR" + doc + "\nANCHORAGE_WAIT_H ", 1)
+    if "def stay_end_factor(" not in text:
+        text = text.rstrip("\n") + "\n\n\ndef stay_end_factor(" + \
+            MODULE_FUNCTIONS.split("def stay_end_factor(", 1)[1].split("\n\n\n", 1)[0].rstrip("\n") + "\n"
+    path.write_text(text, encoding="utf-8")
+    log.info("Wrote STAY_END_FACTOR and STAY_END_TEST into %s", path)
 
 
 def conditional(frame, by, value):
@@ -276,7 +377,9 @@ def fit(data, stops, exits, inland_stops):
     calls = pd.concat([calls[~calls["class"].isin(INLAND_CLASSES + SEA_CALL_CLASSES)], first])
 
     # origin-destination
-    od = entries.assign(destination=entries.visit.map(destinations(entries, calls, exits)))
+    fixes = data.df[data.df.visit.isin(entries.visit) & (data.df.port_zone != "")]
+    heard = fixes.groupby("visit").port_zone.agg(lambda z: set(z.dropna()))
+    od = entries.assign(destination=entries.visit.map(destinations(entries, calls, exits, heard)))
     known = od[od.destination.notna()]
     p_dest = {cls: normalise(g.destination.value_counts().to_dict()) for cls, g in known.groupby("class")}
     p_dest_source = {cls: conditional(g, "source", "destination") for cls, g in known.groupby("class")}
@@ -293,6 +396,16 @@ def fit(data, stops, exits, inland_stops):
     left["exit"] = left.exit.map(exit_name)
     p_exit = {cls: normalise(g.exit.value_counts().to_dict()) for cls, g in left.groupby("class")}
     p_exit_zone = {cls: conditional(g, "zone", "exit") for cls, g in left.groupby("class")}
+    # ... and by where the visit came in (MIN_EXITS_PER_SOURCE)
+    left["source"] = left.index.map(entries.set_index("visit").source)
+    by_source = left[left.source.notna() & (left.source != UNRESOLVED)]
+    p_exit_source, p_exit_source_zone = {}, {}
+    for (cls, source), g in by_source.groupby(["class", "source"]):
+        if len(g) >= MIN_EXITS_PER_SOURCE:
+            p_exit_source.setdefault(cls, {})[source] = normalise(g.exit.value_counts().to_dict())
+        for zone, h in g.groupby("zone"):
+            if len(h) >= MIN_EXITS_PER_SOURCE:
+                p_exit_source_zone.setdefault(cls, {}).setdefault(source, {})[zone] = normalise(h.exit.value_counts().to_dict())
 
     # time at berth: the berth calls whose start was seen
     dwell = pd.concat([calls[~calls["class"].isin(INLAND_CLASSES + SEA_CALL_CLASSES)], inland, several])
@@ -342,6 +455,8 @@ def fit(data, stops, exits, inland_stops):
         "DESTINATION_UNKNOWN_SHARE": unknown_share,
         "P_EXIT_GIVEN_CLASS": p_exit,
         "P_EXIT_GIVEN_CLASS_BERTH": p_exit_zone,
+        "P_EXIT_GIVEN_CLASS_SOURCE": p_exit_source,
+        "P_EXIT_GIVEN_CLASS_SOURCE_BERTH": p_exit_source_zone,
         "BERTH_DWELL_H": berth_dwell,
         "BERTH_DWELL_H_BY_ZONE": by_zone,
         "INLAND_STAY_SCALE": stay_scale,
@@ -351,6 +466,9 @@ def fit(data, stops, exits, inland_stops):
         "LOCK_ZONE_STOP_H": lock_stops(stops),
         "ZONE_LOCATION": location,
     }
+    tables["STAY_END_FACTOR"], tables["STAY_END_TEST"] = stay_end_factors(
+        pd.concat([lying[lying["class"].isin(INLAND_CLASSES)], all_calls[~all_calls["class"].isin(INLAND_CLASSES)]]),
+        data.windows)
     tables["DG_SHARE"] = {cls: round(sum(r[3] is not None for r in rows) / len(rows), 4) if rows else 0.0
                           for cls, rows in tables["ATTRIBUTES"].items()}
     log.info("Destinations known for %d of %d entries; %d berth calls with a seen start; %d anchor stops",
@@ -380,10 +498,16 @@ DESTINATION_COUNTS                class -> {{destination: number of visits}}
 DESTINATION_UNKNOWN_SHARE         class -> share of entries whose destination was not seen (left out)
 P_EXIT_GIVEN_CLASS                class -> {{exit_<sink>: P}} after the last berth stop
 P_EXIT_GIVEN_CLASS_BERTH          class -> berth zone -> {{exit_<sink>: P}}
+P_EXIT_GIVEN_CLASS_SOURCE         class -> entry source -> {{exit_<sink>: P}}, where enough exits were seen
+P_EXIT_GIVEN_CLASS_SOURCE_BERTH   class -> entry source -> berth zone -> {{exit_<sink>: P}}, where enough were seen
 BERTH_DWELL_H                     class (or "all") -> lognormal time at berth in hours:
                                   mu, sigma (of ln hours), median_h, mean_h, n_complete, n_censored
 BERTH_DWELL_H_BY_ZONE             class -> berth zone -> the same, where there are enough stays
 INLAND_STAY_SCALE                 class (inland, bulk_general, tanker) -> the factor their stays were scaled by to give the AIS stock
+STAY_END_FACTOR                   class -> 7 multipliers (local day, Monday first) on the rate at which a berth stay
+                                  ends: Monday-Friday, Saturday, Sunday; 1 every day unless weekdays and weekends
+                                  differ (Welch, daily rates, Bonferroni over the classes tested)
+STAY_END_TEST                     class -> p-value of weekdays against weekends (Welch, daily rates)
 ANCHORAGE_WAIT_H                  class (or "all") -> lognormal time at anchor in hours
 ANCHOR_STAY_SCALE                 bulk_general / tanker -> the factor their anchor stays were scaled by to give the AIS stock
 P_ANCHORAGE_GIVEN_CLASS           class -> {{anchorage: P}} over the anchor stops
@@ -456,10 +580,27 @@ def sample_next_call(ship_class, rng, zone):
     return None if next_zone == "leave" else next_zone
 
 
-def sample_exit(ship_class, rng, berth_zone=None):
+def p_exit(ship_class, berth_zone=None, source=None):
+    """P(exit | class, last berth zone, entry source). The exits seen for that source and zone where there are
+    enough; else, with both a zone's and a source's exits, their product over the class's (the zone and the
+    source taken as independent given the exit); else the zone's, the source's or the class's."""
+    both = P_EXIT_GIVEN_CLASS_SOURCE_BERTH.get(ship_class, {}).get(source, {}).get(berth_zone)
+    if both:
+        return dict(both)
+    by_zone = P_EXIT_GIVEN_CLASS_BERTH.get(ship_class, {}).get(berth_zone)
+    by_source = P_EXIT_GIVEN_CLASS_SOURCE.get(ship_class, {}).get(source)
+    prior = P_EXIT_GIVEN_CLASS[ship_class]
+    if by_zone and by_source:
+        probs = {e: p * (by_source.get(e, 0.0) + 0.01) / (prior.get(e, 0.0) + 0.01) for e, p in by_zone.items()}
+        total = sum(probs.values())
+        if total > 0:
+            return {e: p / total for e, p in probs.items()}
+    return dict(by_zone or by_source or prior)
+
+
+def sample_exit(ship_class, rng, berth_zone=None, source=None):
     """Where a ship leaves after its berth stay (exit_<sink>)."""
-    probs = P_EXIT_GIVEN_CLASS_BERTH.get(ship_class, {}).get(berth_zone) or P_EXIT_GIVEN_CLASS[ship_class]
-    return _choice(rng, probs)
+    return _choice(rng, p_exit(ship_class, berth_zone, source))
 
 
 def berth_dwell_fit(ship_class, zone=None):
@@ -475,6 +616,12 @@ def sample_berth_dwell(ship_class, rng, zone=None):
 def sample_anchorage_wait(ship_class, rng):
     """Hours at anchor (lognormal; per class where fitted, else all classes)."""
     return _lognormal(rng, ANCHORAGE_WAIT_H.get(ship_class) or ANCHORAGE_WAIT_H["all"])
+
+
+def stay_end_factor(ship_class, weekday):
+    """How fast a berth stay of this class runs out on this local day (0 = Monday): its timer counts down at
+    this rate, so the stays end that much more or less often (1 where the class has no weekly pattern)."""
+    return globals().get("STAY_END_FACTOR", {}).get(ship_class, [1.0] * 7)[weekday % 7]
 '''
 
 
@@ -485,11 +632,24 @@ def main():
     parser.add_argument("--charts", type=Path, default=CHARTS)
     parser.add_argument("--berths", type=Path, default=BERTHS)
     parser.add_argument("--out", type=Path, default=REPO_ROOT / "src" / "data" / "background_traffic.py")
+    parser.add_argument("--until", help="with --stay-week-only: fit on the snapshots up to this UTC time only "
+                                        "(the rest is held out), e.g. '2026-11-12 01:29'")
+    parser.add_argument("--stay-week-only", action="store_true",
+                        help="fit only STAY_END_FACTOR / STAY_END_TEST and write them into the existing --out module, "
+                             "leaving every other table as it was fitted")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     data = prepare(args.ais, args.schedule, args.charts, args.berths)
     stops = find_stops(data.df)
+    if args.stay_week_only:
+        until = pd.Timestamp(args.until, tz="UTC") if args.until else None
+        windows = [(lo, min(hi, until)) for lo, hi in data.windows if lo < until] if until is not None else data.windows
+        calls = stay_calls(data, stops, find_stops(data.df, max_gap_h=INLAND_SILENT_H))
+        factors, tests = stay_end_factors(calls, windows)
+        log.info("stay-end factors: %s; p-values: %s", factors, tests)
+        patch_stay_week(args.out, factors, tests, until)
+        return
     exits = visit_exits(data.df, data.visits, data.zones)
     tables = fit(data, stops, exits, find_stops(data.df, max_gap_h=INLAND_SILENT_H))
     times = data.times

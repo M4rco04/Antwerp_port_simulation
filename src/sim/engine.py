@@ -28,9 +28,12 @@ import argparse
 import json
 import logging
 import math
+import os
 import pickle
 import sys
+import tempfile
 import time
+import zlib
 from pathlib import Path
 
 import numpy as np
@@ -50,8 +53,8 @@ from currents import CurrentModel                         # noqa: E402
 from clearance import node_clearance                      # noqa: E402
 from fast_graph import FastGraph, PassabilityCache        # noqa: E402
 from lanes import Lanes                                   # noqa: E402
-from generator import INLAND_TRIP_SCALE, Generator        # noqa: E402
-from locks import ShipRequest                             # noqa: E402
+from generator import INLAND_TRIP_SCALE, WEEK_TZ, Generator   # noqa: E402
+from locks import HOLD_FREE_PRIORITY, LockTimes, ShipRequest, in_next_lockage   # noqa: E402
 from movement import Mover                                # noqa: E402
 from services import PILOT_BOAT_MIN, PilotPool, TugPool, boatmen, pilot_boats   # noqa: E402
 from port_state import PortStateLog                       # noqa: E402
@@ -86,7 +89,18 @@ NORTH_GATE_MARGIN_M = 1.5
 QUAY_GAP_M = 30.0                      # berths this close end to end are one stretch of quay
 MAX_SHIP_LOA_M = 400.0
 INLAND_MAX_CALLS = 12                  # a safeguard on the chain of inland calls
-NEXT_CALL_WAIT_MIN = 360.0             # a ship whose next call has no berth free for this long leaves the port
+# A ship whose next call has no berth free waits for one at the berth it lies at (it was 6 h and then it left the
+# port: with more traffic the calls that found no berth were not made, and the shortage of berths did not show).
+# After this long it leaves all the same, so that two ships waiting for each other's berth do not wait for ever:
+# counted (summary: silent.next_call_dropped), and a run in which it happens more than now and then says so
+NEXT_CALL_WAIT_MIN = 1440.0
+# An inland craft that finds no berth free in its zone lies beside one that is taken, up to this many beside each
+# berth of the zone that it could take (assumed: two abreast). When they are taken too it waits where it is for
+# room (summary: silent.berth_wait, and its time waiting for clearance); it used to lie alongside without limit, so
+# that no number of inland craft could fill a zone. Not for a barge beside a ship (a bunker barge at a terminal)
+ALONGSIDE_PER_BERTH = 1
+# what the model does to keep going where a real port would show a shortage: counted in every run's summary
+SILENT = ("next_call_dropped", "next_call_unfit", "destination_redrawn", "berth_wait", "anchorage_full", "no_anchorage")
 # the deepest a ship may leave at (regs §8: right-bank and Kieldrecht locks 14.5 m, container ships 15.2 m)
 DEPARTURE_MAX_DRAUGHT_M = {"container": 15.2, "bulk_general": 14.5, "tanker": 14.5}
 PORT_PLACES = ("vlissingen", "terneuzen", "breskens")
@@ -96,16 +110,49 @@ INLAND_CALL_PLACES = ("ghent_terneuzen_canal", "zuid_beveland_canal", "schelde_r
 # so does a sea-going ship calling on the Ghent-Terneuzen canal inside the area (Sluiskil): it left the model
 # there and never came back out through the lock (validation: 16 sea-going lock passages a day at Terneuzen
 # where the AIS has 27)
-SEA_CALL_PLACES = ("ghent_terneuzen_canal",)
+# ... and one calling on the Albert canal, the Upper Sea Scheldt or the two Dutch canals (one bulk-carrier call in
+# fourteen in the right-bank docks is followed by a call on the Albert canal): it left the model there too, with
+# the voyage back out through the locks and down the river never made (MODEL.md §19)
+SEA_CALL_PLACES = ("ghent_terneuzen_canal", "zeebrugge", "albert_canal", "upper_sea_scheldt", "schelde_rijn_canal",
+                   "zuid_beveland_canal")
+# A call beyond the area: a sea-going ship up the Ghent-Terneuzen canal to Ghent and back (background_traffic:
+# in from sea and out to sea with no call heard, but heard on the canal). It sails to the canal's end of the model,
+# is away for a stay of its class, and comes back out through the lock; while away it is not in the area
+# (validate.py). Destination -> the place it leaves the area by
+AWAY_CALLS = {"beyond_ghent_terneuzen_canal": "ghent_terneuzen_canal"}
+# Inland craft calling at Vlissingen: one call in eleven is at the town (the inner harbour and the Walcheren canal,
+# 41 of 435 calls in the AIS), 8 km down-river of Vlissingen-Oost where the place lies, and the craft passes the
+# river section off Vlissingen on its way there and back (inland passages there 10.6 a day against 12.7)
+VLISSINGEN_TOWN = (3.5976, 51.4508)
+# The share of the town is the AIS share of the calls, 0.094 (41 of 435). It was set to 0.036 on those passages
+# (with 0.094 they were 16.1 a day): that made up for 83 inland craft a run that left by the sea past Vlissingen
+# because their beam of 22 to 24 m, counted as 25 m, could not "reach" their canal (reachable_between, run 0023).
+# With that put right the passages were 8.9 a day with 0.036 (run 0024)
+VLISSINGEN_TOWN_SHARE = {"inland": 0.094}
 # Inland craft keep off the sea locks at the head of the big docks where another lock will do: the AIS has 43 %
 # of their right-bank lock passages at Zandvliet and Berendrecht (the rest at Boudewijn and Van Cauwelaert) and
 # half of the left bank's at Kieldrecht (the rest at Kallo), where routes by length alone gave 58 % and 60 %
 # (6 km added gave 21 % and 28 %, and 2.5 km 30 % with Boudewijn and Van Cauwelaert overrun: 141 passages a day
 # against 94, 2.7 h to pass). As metres of route added to those locks for an inland craft (calibrated,
 # MODEL.md §19)
-INLAND_SEA_LOCK_COST_M = {"Zandvliet": 1200.0, "Berendrecht": 1200.0, "Kieldrecht": 1000.0}
+# (Kieldrecht 1000 and 1500 m: 59 % of the left bank's at Kieldrecht, 38 a day against 25, Kallo 27 against 23)
+# (Kieldrecht 2000 m: 34 a day against 25; 3500 m: 52 % of the left bank's, as in the AIS. Zandvliet and
+# Berendrecht 1700 m: 36 % of the right bank's against 44 %)
+INLAND_SEA_LOCK_COST_M = {"Zandvliet": 1350.0, "Berendrecht": 1350.0, "Kieldrecht": 3500.0}
 # locks side by side: which one a ship takes is a matter of which is free, not of 500 m of route, so each
 # ship draws one by the AIS shares (LOCK_PASSAGES); the nearer one used to get them all
+# "antwerp_other" is the port away from a charted berth: lock approaches, waiting places, small quays. Nine in ten
+# of the inland craft's calls there, and three in four of the sea-going ships', lie on the river side of the locks
+# (the waiting places at Lillo and off the Zandvliet locks), but nine in ten of the zone's charted berths lie
+# behind them, and the berth drawn by its AIS calls sent 89 % of these calls (44 a day by inland craft) through a
+# dock lock and back: inland craft passed the dock locks 263 times a day where the AIS has 213 (MODEL.md §19).
+# Zone -> the share of its calls on the river side, per group (AIS); the berth is drawn on that side
+ZONE_RIVER_SIDE_SHARE = {"antwerp_other": {"inland": 0.90, "sea_going": 0.74}}
+# ... and where along the river the inland craft's calls of that side lie (AIS, 618 calls): river km from, to, share.
+# Seven in ten at the waiting places off Lillo and Deurganckdok (km 68-72), a fifth off the Zandvliet locks. Drawn
+# by the berths' own AIS calls (which count calls within 150 m of a berth, and this zone is the calls away from
+# one) they went to the quays at the city, and the inland traffic past km 80 rose to 71 a day against 52
+ZONE_RIVER_KM_SHARE = {"antwerp_other": ((63.5, 67.5, 0.20), (67.5, 72.5, 0.71), (75.0, 78.5, 0.05), (78.5, 92.0, 0.04))}
 TWIN_LOCKS = (("Zandvliet", "Berendrecht"), ("Boudewijn", "Van Cauwelaert"))
 # the lock complexes into one dock system: which one a sea-going ship takes is the lock planners' choice, not the
 # shortest route. The routes put no ship through Kallo (it is 3 to 6 km longer to every left-bank berth than
@@ -113,6 +160,11 @@ TWIN_LOCKS = (("Zandvliet", "Berendrecht"), ("Boudewijn", "Van Cauwelaert"))
 # docks: lanes and keep-right); the AIS has one in three and one in five (validation, MODEL.md §19). Each
 # sea-going ship draws a complex per dock system by the AIS shares (LOCK_PASSAGES), as for the twins
 LOCK_COMPLEXES = ((("Zandvliet", "Berendrecht"), ("Boudewijn", "Van Cauwelaert")), (("Kieldrecht",), ("Kallo",)))
+# ... times a factor on the second complex of each system: drawn by the shares alone, 17 % of the right bank's
+# sea-going passages went by Boudewijn and Van Cauwelaert and 27 % of the left bank's by Kallo, where the AIS has
+# 21 % and 33 % (a ship too wide or too deep for the complex it drew takes the other one, and those are all ships
+# that drew the smaller locks). Calibrated (MODEL.md §19)
+LOCK_COMPLEX_FACTOR = {("Boudewijn", "Van Cauwelaert"): 1.32, ("Kallo",): 1.9}     # (Kallo 1.35: -18 %, 1.7: -12 %)
 BERENDRECHT_MIN_BEAM_M = 43.0          # regs §8.9: ships this wide prefer Berendrecht
 SEA_EXITS = ("exit_sea_southwest", "exit_sea_west", "exit_sea_north")
 SEA_EXIT_STATION = {"sea_north": "pilot_station_steenbank"}        # else Wandelaar: the pilot leaves there
@@ -121,18 +173,79 @@ ULCV_HOLD_LOCKS = ("Zandvliet", "Berendrecht", "Terneuzen", "Hansweert")   # tra
 ULCV_HOLD_M = 5000.0                   # ... while a ULCV passes within this of their river side
 ULCV_FALLBACK_AFTER_MIN = 12 * 60.0    # assumed: waited this long for its own quay
 ULCV_FALLBACK = ("PSA Noordzee Terminal", "PSA Europa Terminal", "MPET", "DP World Antwerp Gateway")
+# A container ship that finds its quay taken, or the tide wrong, when it asks for clearance is not sent to anchor
+# at once: a ship with a berth time is told before it is there and loses the time at sea (it waits off the pilot
+# station, counted in the area but not at anchor). After this long it anchors like any other ship. Sent to anchor
+# at once, one in four container ships anchored where the AIS has one in eight
+CONTAINER_SEA_WAIT_MAX_MIN = 18 * 60.0
 BERTH_CHANGE_MIN = 60.0                # berth planning: a ship is planned to leave this long before the next
                                        # one is due on its quay (assumed)
 UNMOORING_PLAN_MIN = 60.0              # planned from the end of the work to the quay being free (assumed)
 LOCK_RESERVE_LEAD_MIN = 60.0           # a ULCV's chamber is reserved this long before it reaches the lock
                                        # when its route does not pass CP
+# A ship waits for a lock at the waiting places away from it (movement.LOCK_WAIT_M before the gate) until it is
+# called: its chamber lies open at its side, or will by the time the ship can be at the gate (LOCK_CALL_LEAD_MIN
+# to spare). Then it sails in at this speed (the AIS speeds in the lock approaches: sea-going ships 2.5 kn, inland
+# craft and sea-going ships no longer than a barge 3.6 kn) and can go into the chamber when it is at the gate.
+# Called as soon as its chamber had closed at the other side, a ship lay 20 min at the gate where the AIS has it
+# pass straight in: inland craft took 64 min through Terneuzen for the AIS's 52 (MODEL.md §19)
+LOCK_SAIL_IN_KN = {"sea_going": 2.5, "inland": 3.6}
+LOCK_CALL_LEAD_MIN = 5.0
+# ... and a sea-going ship takes this much longer to come in at the sea locks of Antwerp (tugs, lines, the change
+# of pilot): it passes them 20 to 35 min slower than an inland craft in the AIS, and the entry and exit times of
+# the chamber alone gave 10. Calibrated per lock on the median passage time of the sea-going ships (MODEL.md §19)
+# (28, 26, 20 and 18 min gave medians 11 to 17 % over the AIS at Zandvliet-Berendrecht, Boudewijn-Van Cauwelaert
+# and Kallo, run 0009, but there a fifth to a third of the ships missed their chamber, locks.CALLED_HOLD_MAX_MIN;
+# with that mended, 18, 15, 18 and 10 min gave them 5 to 13 % under)
+LOCK_SEA_COMING_IN_MIN = {"Zandvliet": 30.0, "Berendrecht": 30.0, "Boudewijn": 20.0, "Van Cauwelaert": 20.0,
+                          "Kieldrecht": 26.0, "Kallo": 14.0}
 # Random streams, each from its own child of the seed (numpy SeedSequence.spawn): what arrives and when, and the
 # weather, do not depend on what happens in the port, so two configurations run with one seed see the same ships
 # in the same weather (common random numbers) and their difference is not blurred by different arrivals.
 #   arrivals    when ships arrive (generator)        attributes  what they are (generator)
 #   weather     the weather sequence                 service     durations: stays, mooring, anchor waits, draught change
 #   choice      berths, exits, next calls, locks     movement    tie-breaks in the right of way
-STREAMS = ("arrivals", "attributes", "weather", "service", "choice", "movement")
+#   speed       each ship's own speed (SPEED_SPREAD)
+#   locks       the holds of the locks               stays       a container call's stay over its line's
+# Choices, durations and speed are drawn per ship (Simulation.ship_rng): each ship has a stream of its own for each,
+# from the seed, the stream and its id (the ids come from the arrivals, which do not depend on the port). With one
+# stream for all ships a change that made one more draw for one ship moved every later draw of every other ship,
+# so two configurations no longer compared like with like (the share of calls at the town of Vlissingen moved
+# Terneuzen's sea-going lock times and the tankers at anchor, runs 0024 / 0028)
+STREAMS = ("arrivals", "attributes", "weather", "service", "choice", "movement", "speed", "locks", "stays")
+SHIP_STREAMS = ("choice", "service", "speed")
+# Ships of one class do not all sail at one speed: each ship's speed through the water is its class's times a
+# factor drawn once, lognormal with this standard deviation of the logarithm (median 1), kept within
+# SPEED_FACTOR_RANGE. With one speed per class the 90th percentiles of the sailing times were 12 to 17 % short of
+# the AIS (3.05 h against 3.50 h from km 8 to km 62) with the medians right. Calibrated (MODEL.md §19)
+SPEED_SPREAD = 0.10
+SPEED_FACTOR_RANGE = (0.75, 1.30)
+# The anchor stay of a ship that enters the area at anchor, as a factor on the fitted one: bulk carriers lay 3.9 at
+# anchor at once where the AIS has 5.6 (some of them stop at the river anchorages on the way, which the model does
+# not do; their time is added here). Calibrated (MODEL.md §19)
+# Taken out again (runs 0015/0016, seeds 401-405): without it 77.4 bulk ships in the area against the AIS 77.4
+# (with 1.30: 81.2) and 4.8 at anchor against 5.6 (within the tolerance); the stops at the river anchorages are
+# not modelled and their time is not added elsewhere
+ANCHOR_WAIT_FACTOR = {}
+# Inland craft anchor on the way (AIS: 130 anchor stops of dry-cargo craft and 33 of tankers in 375 h, nearly all
+# at Everingen, BT.P_ANCHORAGE_GIVEN_CLASS; stays BT.ANCHORAGE_WAIT_H: mean 2.7 h and 10.4 h): about one of each
+# class at anchor at once. Without them the model had none. A craft whose route passes within INLAND_ANCHOR_NEAR_M
+# of one of its class's anchorages stops there with this probability (once a visit), for a fitted anchor stay.
+# Set on the craft at anchor at once (1.07 and 0.87 in the AIS). Calibrated (MODEL.md §19)
+INLAND_ANCHOR_STOP_P = {"inland_cargo": 0.19, "inland_tanker": 0.23}    # (0.15 and 0.18: 0.85 and 0.78 at anchor)
+INLAND_ANCHOR_NEAR_M = 4000.0
+# The calls of a visit of an inland craft from the canals that calls in the area and makes its whole chain of calls
+# (NEXT_CALL): 2.0 in the model (1.75 a visit with the single-call trips among them, screening runs of 15 November
+# 2026). Dividing the stays by the whole trip scale, as when the added trips made the whole chain too, left 9 % too
+# few dry-cargo craft at berths (147 against 161) once they made one call (MODEL.md §19)
+INLAND_CALLS_PER_VISIT = 2.0
+# Virtual arrival with the quay in view: a container ship whose quay will still be taken at its berth time (by the
+# ships lying there and when they are to leave, Terminal.free_intervals) is given the time it comes free, up to
+# this far ahead, and slows down at sea for it. Planned on its berth time alone it entered the area and waited off
+# the pilot station for its quay: container ships in the area 29.2 against 25.9 once their stays had the AIS's
+# long tail (MODEL.md §19)
+VIRTUAL_ARRIVAL_LOOKAHEAD_H = 24.0
+VIRTUAL_ARRIVAL_STEP_MIN = 30.0
 # events that are release valves: a rule given up so that the model keeps moving. Their rate is a result (summary)
 RELEASE_VALVES = ("encounter_rule_overridden", "depth_hold_overridden", "squeeze_past")
 STATION_OF_SOURCE = {"sea_north": "pilot_station_steenbank", "anchorage_other": "pilot_station_steenbank"}      # else Wandelaar
@@ -148,6 +261,86 @@ class Route(list):
     free_from = None
 
 
+class PositionLog:
+    """The ships' positions every step (for the viewer and the validation), kept in a binary file on disk rather
+    than in memory: a row is (step, ship, state, route, value, offset), 21 bytes in the file where a tuple in a list
+    took about 300. Rows are buffered and written in blocks; frame() reads them back. The file is removed when the
+    log is closed or collected."""
+    DTYPE = np.dtype([("step", "<i4"), ("ship", "<i4"), ("state", "u1"), ("route", "<i4"), ("value", "<f8")])
+    BLOCK = 20000
+
+    def __init__(self):
+        fd, self.path = tempfile.mkstemp(prefix="positions_", suffix=".bin")
+        self.fh = open(fd, "wb")
+        self.ships, self.ship_code = [], {}
+        self.states, self.state_code = [], {}
+        self.buf, self.offsets, self.offset_buf = [], None, []
+        self.n = 0
+
+    def append(self, row):
+        step, ship, state, route, value, offset = row
+        s = self.ship_code.get(ship)
+        if s is None:
+            s = self.ship_code[ship] = len(self.ships)
+            self.ships.append(ship)
+        c = self.state_code.get(state)
+        if c is None:
+            c = self.state_code[state] = len(self.states)
+            self.states.append(state)
+        self.buf.append((step, s, c, route, value))
+        self.offset_buf.append(offset)
+        self.n += 1
+        if len(self.buf) >= self.BLOCK:
+            self.flush()
+
+    def flush(self):
+        if self.buf:
+            np.array(self.buf, dtype=self.DTYPE).tofile(self.fh)
+            # the sideways offset is almost always 0: kept apart, as (row, offset) for the rows where it is not
+            nz = [(self.n - len(self.buf) + i, o) for i, o in enumerate(self.offset_buf) if o]
+            if nz:
+                block = np.array(nz, dtype=[("row", "<i8"), ("offset", "<f4")])
+                self.offsets = block if self.offsets is None else np.concatenate([self.offsets, block])
+            self.buf, self.offset_buf = [], []
+            self.fh.flush()
+
+    def __len__(self):
+        return self.n
+
+    def frame(self, step_from=None):
+        """The rows as a DataFrame (step, ship, state, route, value, offset); with step_from, only the rows from that
+        step on and each ship's last row before it (where it was then: a ship lying still has no row while it lies)."""
+        self.flush()
+        a = np.fromfile(self.path, dtype=self.DTYPE)
+        offset = np.zeros(len(a), dtype=np.float32)
+        if self.offsets is not None:
+            offset[self.offsets["row"]] = self.offsets["offset"]
+        keep = None
+        if step_from is not None:
+            keep = a["step"] >= step_from
+            before = np.flatnonzero(~keep)
+            if len(before):                            # the last record of each ship before the cut
+                last = pd.Series(before).groupby(a["ship"][before]).max().to_numpy()
+                keep[last] = True
+        if keep is not None:
+            a, offset = a[keep], offset[keep]
+        ships = np.array(self.ships, dtype=object)
+        states = pd.Categorical.from_codes(a["state"].astype(np.int16), categories=self.states) if self.states else []
+        return pd.DataFrame({"step": a["step"].astype(np.int64), "ship": ships[a["ship"]] if len(a) else np.array([], dtype=object),
+                             "state": np.asarray(states, dtype=object) if len(a) else np.array([], dtype=object),
+                             "route": a["route"].astype(np.int64), "value": a["value"], "offset": offset.astype(np.float64)})
+
+    def close(self):
+        try:
+            self.fh.close()
+            os.remove(self.path)
+        except Exception:                              # already closed, or the interpreter is shutting down
+            pass
+
+    def __del__(self):
+        self.close()
+
+
 class Simulation:
     def __init__(self, start="2026-10-21 00:00", days=7.0, seed=1, delays=True, warmup_days=2.0, background=True,
                  weather_mode="bootstrap", container_mode="replay", container_rate=1.0, bunching=True,
@@ -157,9 +350,9 @@ class Simulation:
         self.start = pd.Timestamp(start, tz="UTC")
         self.n_steps = int(days * 24 * 60 / DT_MIN)
         self.warmup_min = warmup_days * 24 * 60
+        self.seed = int(seed)
         self.streams = dict(zip(STREAMS, (np.random.default_rng(q) for q in np.random.SeedSequence(seed).spawn(len(STREAMS)))))
-        self.rng = self.streams["choice"]
-        self.rng_service = self.streams["service"]
+        self.container_sea_wait_max_min = CONTAINER_SEA_WAIT_MAX_MIN
         self.graph = pickle.load(open(GRAPH, "rb"))["graph"]
         self.fg = FastGraph.load(GRAPH.with_suffix(".arrays.npz"), self.graph)
         fg = self.fg
@@ -207,6 +400,11 @@ class Simulation:
         # resources
         self.locks = {d["name"]: (n, d["lock"]) for n, d in self.graph.nodes(data=True) if d["type"] == "lock"}
         self.lock_of_node = {n: lock for n, lock in self.locks.values()}
+        for _, lock in self.locks.values():            # the durations of the code, not those the graph was built with
+            lock.times = LockTimes()                   # (the cached graph holds each lock's own copy)
+            lock.rng = self.streams["locks"]
+            for c in lock.chambers:
+                c.held = False
         self.anchorages = {name: self.graph.nodes[n]["anchorage"] for name, n in self.graph.graph["anchorages"].items()}
         self.anchorage_node = dict(self.graph.graph["anchorages"])
         self.terminals = {t["name"]: t["resource"] for t in self.graph.graph["terminals"]}
@@ -229,7 +427,7 @@ class Simulation:
         self.vts = SimpleVTS(self)
         self.generator = Generator(self.start, self.streams["arrivals"], delays=delays, background=background,
                                    container_mode=container_mode, rate_factor=container_rate, bunching=bunching,
-                                   rng_attributes=self.streams["attributes"],
+                                   rng_attributes=self.streams["attributes"], rng_stays=self.streams["stays"],
                                    quay_m={name: sum(b - a for a, b in T.suitable_intervals(None, True))
                                            for name, T in self.terminals.items()})
         self.at_sea = []                               # container ships slowed down at sea for their berth time
@@ -253,7 +451,7 @@ class Simulation:
                     self.hold_chainage[name] = float(np.nanmedian(fg.chainage_m[near]))
         river = np.flatnonzero(fg.region == fg.code("region", "river")) if "region" in fg.labels else np.arange(fg.n)
         self.reach_from = int(river[np.argmax(fg.depth_m[river])])      # the deepest cell of the main channel
-        self.events, self.series, self.positions = [], [], []
+        self.events, self.series, self.positions = [], [], PositionLog()
         self.routes_rec, self._last_pos = [], {}
         self.terminal_waiting = {}                     # terminal -> {ship id: since when it waits for quay}   # routes sailed (node lists) and last fixed position per ship
         self.port_log = PortStateLog(self)             # locks, VTS queue and berths over time (the viewer)
@@ -283,6 +481,17 @@ class Simulation:
 
     def pilot_zone(self, node):
         return PILOT_ZONE.get(self.mover.zone_label[node], "river")
+
+    def ship_rng(self, ship, stream):
+        """The ship's own random stream for choices, durations or its speed (SHIP_STREAMS): from the seed, the
+        stream and the ship's id, so that a draw one ship makes or does not make leaves every other ship's draws
+        as they were (common random numbers between two configurations, MODEL.md §1)."""
+        key = "_rng_" + stream
+        g = ship.__dict__.get(key)
+        if g is None:
+            g = np.random.default_rng(np.random.SeedSequence([self.seed, STREAMS.index(stream), zlib.crc32(ship.id.encode())]))
+            ship.__dict__[key] = g
+        return g
 
     # ------------------------------------------------------------------ routes
     @staticmethod
@@ -347,10 +556,11 @@ class Simulation:
                     if ship.beam >= BERENDRECHT_MIN_BEAM_M and "Berendrecht" in complexes[0]:
                         avoid += list(complexes[1])        # Berendrecht only (below)
                         continue
-                    w = np.array([sum(PI.LOCK_PASSAGES.get(l, {}).get(group, 0.0) for l in c) for c in complexes], dtype=float)
+                    w = np.array([sum(PI.LOCK_PASSAGES.get(l, {}).get(group, 0.0) for l in c) * LOCK_COMPLEX_FACTOR.get(c, 1.0)
+                                  for c in complexes], dtype=float)
                     if w.sum() <= 0:
                         continue
-                    pick = int(self.rng.choice(len(complexes), p=w / w.sum()))
+                    pick = int(self.ship_rng(ship, "choice").choice(len(complexes), p=w / w.sum()))
                     avoid += [l for i, c in enumerate(complexes) if i != pick for l in c]
                 # Royers and Kattendijk carry the same penalty as a complex not drawn, so a ship whose drawn complex
                 # does not fit went through them on a tie (0.3 sea-going passages a day; the AIS has none)
@@ -363,7 +573,7 @@ class Simulation:
                     continue
                 if a in avoid or b in avoid:
                     continue                           # its complex is not this ship's
-                avoid.append(b if self.rng.random() < na / max(na + nb, 1e-9) else a)
+                avoid.append(b if self.ship_rng(ship, "choice").random() < na / max(na + nb, 1e-9) else a)
             avoid = ship.avoid_locks = tuple(avoid)
         return avoid
 
@@ -576,11 +786,13 @@ class Simulation:
         """Can the ship get to this berth at all (from the river at Vlissingen)?"""
         return self.reachable_between(self.reach_from, b["nodes"][len(b["nodes"]) // 2], ship)
 
-    def reach(self, ship):
+    def reach(self, ship, exact=False):
         """Nodes a ship of this draught and size can reach from the river at Vlissingen at the usual
-        high water (level_high); one search per draught / size class, cached."""
+        high water (level_high); one search per draught / size class, cached. exact: by its own length and
+        beam (to the metre and the decimetre above), not the class."""
         need, dock = self.needs(ship)
-        key = (need, dock, math.ceil(ship.loa / 50) * 50, math.ceil(ship.beam / 5) * 5)
+        key = ((need, dock, math.ceil(ship.loa), math.ceil(ship.beam * 10 - 1e-9) / 10) if exact else
+               (need, dock, math.ceil(ship.loa / 50) * 50, math.ceil(ship.beam / 5) * 5))
         if key not in self.reachable:
             self.reachable[key] = self.fg.reachable(self.reach_from, need, 0.0, key[2], key[3],
                                                     level=self.plan_level(self.level_high, ship))
@@ -590,6 +802,12 @@ class Simulation:
         """Is there a route a -> b for this ship at high water? Both ends reachable from the river
         (passing rules are the same both ways)."""
         r = self.reach(ship)
+        if r[a] and r[b]:
+            return True
+        # the size class rounds up (beam to 5 m, length to 50 m): a craft of 22 to 24 m beam counted as 25 m and
+        # so as too wide for the 24 m chambers of Kreekrak and Hansweert, which it had just come through; it was
+        # removed for "no exit reachable" (nine a run, run 0021). "No" by the class is asked again by its own size
+        r = self.reach(ship, exact=True)
         return bool(r[a] and r[b])
 
     def choose_target(self, ship):
@@ -683,18 +901,47 @@ class Simulation:
                     ship.note(self.t, "exit_changed", planned=zone, new=alt)
                     ship.destination = zone = alt
                     break
+        if zone in AWAY_CALLS and AWAY_CALLS[zone] in self.places:
+            ship.candidate = {"kind": "place", "node": self.places[AWAY_CALLS[zone]]["node"], "name": zone}
+            return ship.candidate["node"]
         if zone.startswith("exit_") or zone in self.places:
             name = zone[5:] if zone.startswith("exit_") else zone
             if name in self.places:
                 calls = PORT_PLACES + (SEA_CALL_PLACES if ship.sea_going else INLAND_CALL_PLACES)
                 kind = "place" if name in calls and not zone.startswith("exit_") else "exit"
                 node = self.port_node(name, ship) if name in PORT_PLACES else self.places[name]["node"]
+                if name == "vlissingen" and kind == "place":
+                    node = self._vlissingen_node(ship, node)
                 ship.candidate = {"kind": kind, "node": node, "name": name}
                 return ship.candidate["node"]
         dest = self.destinations.get(zone)
         if not dest:
             return None
         ids = dest["berths"]
+        share = ZONE_RIVER_SIDE_SHARE.get(zone)
+        if share:                                      # river side or behind the locks, by the AIS share of the calls
+            drawn = getattr(ship, "call_side", None)
+            if not drawn or drawn[0] != (zone, getattr(ship, "calls", 1)):
+                river = bool(self.ship_rng(ship, "choice").random() < share["sea_going" if ship.sea_going else "inland"])
+                drawn = ship.call_side = ((zone, getattr(ship, "calls", 1)), river)
+            side = [i for i in ids if self.berths[i]["nodes"] and self._behind_locks(self.berths[i]["nodes"][0]) != drawn[1]]
+            where = ZONE_RIVER_KM_SHARE.get(zone)
+            if side and drawn[1] and where and not ship.sea_going:
+                # an inland craft at a waiting place on the river: where the AIS has these calls, lying alongside
+                # (a waiting place holds many craft; it is no berth of the register)
+                if len(drawn) < 3:
+                    km = self.fg.chainage_m / 1000.0
+                    groups = [[self.berths[i]["nodes"][0] for i in side if lo <= km[self.berths[i]["nodes"][0]] < hi]
+                              for lo, hi, _ in where]
+                    w = np.array([p if g else 0.0 for g, (_, _, p) in zip(groups, where)], dtype=float)
+                    g = groups[int(self.ship_rng(ship, "choice").choice(len(groups), p=w / w.sum()))]
+                    drawn = ship.call_side = drawn + (int(g[int(self.ship_rng(ship, "choice").integers(len(g)))]),)
+                node = drawn[2]
+                ship.candidate = {"kind": "berth", "id": None, "node": node, "nodes": [node], "zone": zone}
+                return node
+            if side:
+                ids = side
+                dest = dict(dest, node=self.berths[side[len(side) // 2]]["nodes"][0])
         fits = [b for b in ids if self._berth_fits(self.berths[b], ship)]
         relaxed = not fits
         if relaxed:                                    # nothing fits even empty: relax the tanker rule
@@ -705,8 +952,22 @@ class Simulation:
             # container quay as if they were ships of their own)
             fits = []
         if not fits and ship.sea_going:
-            ship.infeasible = f"no berth in {zone} fits or can be reached"
-            return None
+            # the zone drawn has no berth this ship could ever take (its size and draught are drawn apart from its
+            # destination). It used to be removed, one ship a day; now its next call is not made, or its
+            # destination is drawn again among the zones that have a berth for it
+            if shift:
+                ship.note(self.t, "next_call_unfit", destination=shift)
+                ship.shift = None
+                return self.choose_target(ship)
+            if ship.cls == "container" and self._cap_draught_to_zone(ship, zone, ids):
+                return self.choose_target(ship)
+            other = self._redraw_destination(ship, zone)
+            if other is None:
+                ship.infeasible = f"no berth in {zone} fits or can be reached"
+                return None
+            ship.note(self.t, "destination_redrawn", planned=zone, new=other)
+            ship.destination = ship.berth_zone = other
+            return self.choose_target(ship)
         free = [b for b in fits if b not in self.berth_ship and self.berths_for(b, ship)]
         pick = None
         if prev and prev.get("kind") == "berth" and prev.get("id") in free:
@@ -730,14 +991,99 @@ class Simulation:
                                   "stretch": stretch["id"]}
                 ship.note(self.t, "tank_barge_berth", zone=zone, place=stretch["id"])
                 return node
+            if not relaxed:                            # room beside the zone's berths (ALONGSIDE_PER_BERTH)
+                lying = sum(1 for s in self.ships if s is not ship and (s.berth or {}).get("alongside") == zone)
+                if lying >= ALONGSIDE_PER_BERTH * len(fits):
+                    if not getattr(ship, "berth_wait_noted", None) == zone:
+                        ship.berth_wait_noted = zone
+                        ship.note(self.t, "berth_wait", zone=zone)
+                    return None
             ship.note(self.t, "alongside", zone=zone, why="no berth of its kind" if relaxed else "no free berth")
             node = dest["node"]                        # inland craft: lie alongside at the zone
-            ship.candidate = {"kind": "berth", "id": None, "node": node, "nodes": [node], "zone": zone}
+            ship.candidate = {"kind": "berth", "id": None, "node": node, "nodes": [node], "zone": zone,
+                              "alongside": None if relaxed else zone}
             return node
         b = self.berths[pick]
         ship.candidate = {"kind": "berth", "id": pick, "node": b["nodes"][len(b["nodes"]) // 2], "nodes": b["nodes"], "zone": zone,
                           "across": self.berths_for(pick, ship)}
         return ship.candidate["node"]
+
+    def unreachable_resolved(self, ship, now):
+        """A voyage that has no route at high water, where the cause is a draw made apart from the ship's draught
+        (three ships a run were removed, run 0023). True when it is put right, and the ship plans again:
+        - a further call it cannot reach (a tanker of 9.5 m sent on to the Zuid-Beveland canal): the call is not made;
+        - a sea-going ship entering from a canal deeper than the canal carries (8.8 m from the Schelde-Rijn canal):
+          it came through the canal, so its draught is lowered, in half metres, to what gets it to its target."""
+        shift = getattr(ship, "shift", None)
+        if shift and not getattr(ship, "next_berth", None):
+            ship.note(now, "next_call_unfit", destination=shift, why="no route")
+            ship.shift = None
+            ship.candidate = None
+            return True
+        if (ship.sea_going and not ship.departing and ship.at is not None and ship.target is not None
+                and self.graph.nodes[ship.at].get("region") == "canal"):
+            drawn = ship.draught
+            d = math.ceil(drawn * 2) / 2 - 0.5
+            while d >= 2.5:
+                ship.draught = d
+                if self.voyage_reachable(ship, ship.at, ship.target):
+                    ship.note(now, "draught_capped", drawn=drawn, allowed=d, source=ship.source)
+                    return True
+                d -= 0.5
+            ship.draught = drawn
+        return False
+
+    def _cap_draught_to_zone(self, ship, zone, ids):
+        """A container ship of the schedule bound for a zone (a terminal that is not modelled as a quay) with a
+        draught, drawn from its TEU, that no berth there allows: a real one calls loaded to what the berth and the
+        lock allow (as terminal_draught does at the four terminals). Its draught is lowered, in half metres, to
+        the deepest a berth of the zone takes; False if none takes it at any draught."""
+        drawn = ship.draught
+        d = math.ceil(drawn * 2) / 2 - 0.5
+        while d >= 8.0:
+            ship.draught = d
+            if any(self._berth_fits(self.berths[b], ship, ignore_tanker=True) for b in ids):
+                ship.note(self.t, "draught_capped", drawn=drawn, allowed=d, zone=zone)
+                return True
+            d -= 0.5
+        ship.draught = drawn
+        return False
+
+    def _redraw_destination(self, ship, zone):
+        """Another berth zone for a sea-going ship that no berth of `zone` could take: drawn by its class's
+        destinations (BT.P_DESTINATION_GIVEN_CLASS) among the zones with a berth for it; None if there is none."""
+        names, w = [], []
+        for z, q in BT.P_DESTINATION_GIVEN_CLASS.get(ship.cls, {}).items():
+            d = self.destinations.get(z)
+            if z != zone and d and q > 0 and any(self._berth_fits(self.berths[b], ship, ignore_tanker=True) for b in d["berths"]):
+                names.append(z)
+                w.append(q)
+        if not names:
+            return None
+        return names[int(self.ship_rng(ship, "choice").choice(len(names), p=np.array(w) / sum(w)))]
+
+    def _vlissingen_node(self, ship, node):
+        """Where a call at Vlissingen lies: Vlissingen-Oost (the place), or for a share of the inland craft the
+        town (VLISSINGEN_TOWN_SHARE), drawn once a call."""
+        share = VLISSINGEN_TOWN_SHARE.get("sea_going" if ship.sea_going else "inland", 0.0)
+        if share <= 0.0:
+            return node
+        drawn = getattr(ship, "vlissingen_call", None)
+        if not drawn or drawn[0] != getattr(ship, "calls", 1):
+            drawn = ship.vlissingen_call = (getattr(ship, "calls", 1), bool(self.ship_rng(ship, "choice").random() < share))
+        if not drawn[1]:
+            return node
+        if not hasattr(self, "_vlissingen_town"):
+            from pyproj import Transformer
+            x, y = Transformer.from_crs("EPSG:4326", self.graph.graph["crs"], always_xy=True).transform(*VLISSINGEN_TOWN)
+            ok = np.flatnonzero(~self.mover.special & np.isin(self.mover.zone_label, ("river", "sea", "dock")))
+            self._vlissingen_town = int(ok[np.argmin(np.hypot(self.fg.x[ok] - x, self.fg.y[ok] - y))])
+        town = self._vlissingen_town
+        return town if self.reach(ship)[town] else node
+
+    def _behind_locks(self, node):
+        """Does this cell lie in a dock behind the locks (a basin with a level of its own)?"""
+        return bool(self.graph.nodes[node].get("basin"))
 
     def tank_barge_stretch(self, ship, zone):
         """A free stretch of the zone where inland tank barges may lie (harbour master, "Tankvaart"), allowed for
@@ -766,7 +1112,7 @@ class Simulation:
         old quays nobody uses, some reached only through locks that are hardly used."""
         w = np.array([(self.berths[b].get("calls") or {}).get(ship.cls, 0)
                       + 0.1 * sum((self.berths[b].get("calls") or {}).values()) + 0.05 for b in ids], dtype=float)
-        return ids[int(self.rng.choice(len(ids), p=w / w.sum()))]
+        return ids[int(self.ship_rng(ship, "choice").choice(len(ids), p=w / w.sum()))]
 
     def quay_eta(self, ship):
         """The minute a ship cleared now is planned to need its quay: now for a ship inside the area's
@@ -1001,7 +1347,9 @@ class Simulation:
             b = self.tidal_route(station, nodes[len(nodes) // 2], ship) if nodes else None
             lead = None
             if a is not None and b is not None:
+                own, ship.speed_factor = ship.speed_factor, 1.0     # at its class's speed: the plan is kept per class
                 minutes = sum(float(self.vts._times(ship, np.asarray(r, dtype=np.int64))[-1]) for r in (a, b) if len(r) > 1)
+                ship.speed_factor = own
                 lead = (minutes + BOARDING_MIN + PILOT_CHANGE_MIN * max(len(self.pilot_stretches(b)) - 1, 0)
                         + PI.mooring_minutes(ship.loa, "arrival", "dock" if self.route_has_lock(b) else "tidal"))
             self.lead_min[key] = lead
@@ -1016,7 +1364,21 @@ class Simulation:
             return 0.0
         lead = self.voyage_minutes(ship)
         wait = 60.0 * (getattr(ship, "anchor_wait_h", None) or 0.0)    # it lies at anchor first
-        return 0.0 if lead is None else max(due - lead - wait - now, 0.0)
+        if lead is None:
+            return 0.0
+        return max(self._quay_free_at(ship, max(due, now + lead + wait)) - lead - wait - now, 0.0)
+
+    def _quay_free_at(self, ship, at):
+        """The first minute from `at` at which the ship's quay has room for it, by the ships lying there and when
+        they are to leave (VIRTUAL_ARRIVAL_LOOKAHEAD_H); `at` itself when it has room then or none comes soon."""
+        T = self.terminals.get(ship.terminal)
+        if T is None:
+            return at
+        for k in range(int(VIRTUAL_ARRIVAL_LOOKAHEAD_H * 60 / VIRTUAL_ARRIVAL_STEP_MIN) + 1):
+            t = at + k * VIRTUAL_ARRIVAL_STEP_MIN
+            if T.find_position(ship.loa, draught=ship.draught, sea_going=ship.sea_going, at=t) is not None:
+                return t
+        return at
 
     def enter(self, ship, now):
         """A ship from the generator: into the area now, or kept at sea until it is in time for its berth."""
@@ -1033,6 +1395,7 @@ class Simulation:
         self.n_entered += 1
         self.terminal_draught(ship)
         ship.arrival_draught = ship.draught
+        ship.speed_factor = float(np.clip(math.exp(self.ship_rng(ship, "speed").normal(0.0, SPEED_SPREAD)), *SPEED_FACTOR_RANGE))
         ship.set_state(State.SPAWNED, now, source=ship.source, destination=ship.destination, cls=ship.cls)
         if getattr(ship, "slowed_min", 0.0):
             ship.note(now, "virtual_arrival", minutes=ship.slowed_min)
@@ -1056,7 +1419,8 @@ class Simulation:
                 # it lay at anchor before it asks (AIS: anchor stays of a median 11-24 h; asking at once made
                 # three in four anchor stays last minutes)
                 wait = getattr(ship, "anchor_wait_h", None)
-                ship.anchor_until = now + 60.0 * (wait if wait is not None else BT.sample_anchorage_wait(ship.cls, self.rng_service))
+                ship.anchor_until = now + 60.0 * (wait if wait is not None else ANCHOR_WAIT_FACTOR.get(ship.cls, 1.0)
+                                                  * BT.sample_anchorage_wait(ship.cls, self.ship_rng(ship, "service")))
                 self.vts.request(ship, now)            # it waits at anchor for its clearance like any arrival
             else:                                      # no pilot needed: it weighs anchor and sails
                 self.anchorages[ship.anchorage].leave(ship.id, now)
@@ -1091,7 +1455,7 @@ class Simulation:
         route = self.plan_route(ship, now)
         if route is None:
             if ship.infeasible is None and ship.target is not None and ship.at is not None \
-                    and not self.voyage_reachable(ship, ship.at, ship.target):
+                    and not self.voyage_reachable(ship, ship.at, ship.target) and not self.unreachable_resolved(ship, now):
                 ship.infeasible = "no route at high water"
             if ship.infeasible:                        # never: without this it asked again for the whole run
                 ship.note(now, "infeasible", why=ship.infeasible)
@@ -1121,7 +1485,7 @@ class Simulation:
         if not ship.sea_going or ship.level == 1 or not zone or ship.cls not in BT.NEXT_CALL:
             return None
         ship.calls = getattr(ship, "calls", 1) + 1
-        following = BT.sample_next_call(ship.cls, self.rng, zone) if ship.calls <= INLAND_MAX_CALLS else None
+        following = BT.sample_next_call(ship.cls, self.ship_rng(ship, "choice"), zone) if ship.calls <= INLAND_MAX_CALLS else None
         if following:
             ship.note(now, "next_call", destination=following)
             ship.shift_since = now
@@ -1180,7 +1544,60 @@ class Simulation:
 
     def start_voyage(self, ship, route, now):
         ship.pending_route = None
+        if self._inland_anchor_stop(ship, route, now):
+            return
         self.sail(ship, route, State.SAILING, now)
+
+    def _inland_anchor_stop(self, ship, route, now):
+        """An inland craft whose route passes one of its class's anchorages may stop there on the way
+        (INLAND_ANCHOR_STOP_P, once a visit): it sails to the anchorage, lies there for a fitted anchor stay and
+        then sails on to the same target (_timers). True if it is on its way to anchor."""
+        p = INLAND_ANCHOR_STOP_P.get(ship.cls, 0.0)
+        if p <= 0.0 or ship.sea_going or getattr(ship, "anchor_stopped", False) or route is None or len(route) < 2:
+            return False
+        # the fit's zone names ("anchorage_everingen_a") -> the mesh's anchorages ("Everingen A")
+        key = {"anchorage_" + "".join(ch if ch.isalnum() else "_" for ch in n.lower()): n for n in self.anchorage_node}
+        shares = {key[z]: p_z for z, p_z in BT.P_ANCHORAGE_GIVEN_CLASS.get(ship.cls, {}).items() if z in key}
+        if not shares:
+            return False
+        fg, r = self.fg, np.asarray(route, dtype=np.int64)
+        near = []
+        for a in shares:
+            node = self.anchorage_node[a]
+            if float(np.min(np.hypot(fg.x[r] - fg.x[node], fg.y[r] - fg.y[node]))) <= INLAND_ANCHOR_NEAR_M:
+                near.append(a)
+        if not near:
+            return False
+        ship.anchor_stopped = True                     # one draw a visit, on its first voyage past an anchorage
+        if self.ship_rng(ship, "service").random() >= p:
+            return False
+        w = np.array([shares[a] for a in near], dtype=float)
+        name = near[int(self.ship_rng(ship, "service").choice(len(near), p=w / w.sum()))]
+        a = self.anchorages[name]
+        if not a.has_room(ship.loa, ship.draught):
+            return False
+        to = self.route(route[0], self.anchorage_node[name], ship)
+        if to is None or len(to) < 2:
+            return False
+        ship.anchor_target, ship.after_anchor_target = name, route[-1]
+        ship.inland_anchor_h = float(BT.sample_anchorage_wait(ship.cls, self.ship_rng(ship, "service")))
+        ship.note(now, "inland_anchor_stop", anchorage=name, hours=round(ship.inland_anchor_h, 2))
+        self.sail(ship, to, State.TO_ANCHORAGE, now)
+        return True
+
+    def _inland_anchor_up(self, ship, now):
+        """The anchor stay of an inland craft is over: on to the target it had."""
+        if ship.anchorage:
+            self.anchorages[ship.anchorage].leave(ship.id, now)
+            ship.note(now, "anchor_up", anchorage=ship.anchorage)
+        ship.anchorage, ship.inland_anchor_h = None, None
+        target, ship.after_anchor_target = getattr(ship, "after_anchor_target", None), None
+        ship.set_state(State.WAIT_CLEARANCE, now)
+        r = self.voyage_route(ship, ship.at, target) if target is not None else None
+        if r is None or len(r) < 2:
+            self.go(ship, now)
+            return
+        self.sail(ship, r, State.SAILING, now)
 
     def sail(self, ship, route, state, now):
         free_from = getattr(route, "free_from", None)  # a voyage to a sea exit: the pilot leaves at the station
@@ -1284,6 +1701,8 @@ class Simulation:
         ship.needs_tugs = ship.tugs_needed(departing=True) + WG.extra_tugs(ship, self.weather, self.now_ts(now))
 
     def finish(self, ship, now, how="exited"):
+        for stream in SHIP_STREAMS:                    # its own random streams are not needed any more
+            ship.__dict__.pop("_rng_" + stream, None)
         if ship.anchorage:
             self.anchorages[ship.anchorage].leave(ship.id, now)
             ship.anchorage = None
@@ -1309,19 +1728,28 @@ class Simulation:
             lock_node = ship.full_route[ship.lock_index]
             lock = self.lock_of_node[lock_node]
             side = lock.side_of(ship.route[-1]) or "a"
-            prio = 2 if ship.tide_dependent else 4
-            high = max(float(np.mean(self.level_now[d["nodes"]])) for d in lock.sides.values() if d["nodes"])
+            prio = 2 if ship.tide_dependent else 3 if ship.sea_going else 4     # (3: no lockage with it is held)
+            # the least water over the sills during the passage: the lower of the two sides. (With the higher one a
+            # ship of 7 to 10 m was sent to Terneuzen's 6 m chamber at high water on one side and lay at its gate
+            # until the tide came, up to 7 h, with two deep chambers at work beside it)
+            high = min(float(np.mean(self.level_now[d["nodes"]])) for d in lock.sides.values() if d["nodes"])
+            request = ShipRequest(ship.id, ship.loa, ship.beam, ship.draught, side, prio,
+                                  container=ship.cls == "container", ready_at=math.inf)
             try:
-                lock.request(ShipRequest(ship.id, ship.loa, ship.beam, ship.draught, side, prio,
-                                         container=ship.cls == "container"), now, level_m=high)
+                chamber = lock.request(request, now, level_m=high)
             except ValueError:
                 ship.note(now, "lock_does_not_fit", lock=lock.name)
                 self.finish(ship, now, "lock_does_not_fit")
                 return
             ship.lock = lock.name
-            ship.queue_node = ship.cells[-1] if ship.cells else ship.route[-1]   # where it is drawn while queued
-            self.mover.release(ship)                   # waits at the lock's waiting berths, off the fairway
+            # it waits at the waiting place where it is, off the fairway and away from the lock, until its chamber
+            # is called (_call_to_lock); from then on it lies at the gate
+            ship.lock_request, ship.lock_chamber = request, chamber
+            ship.queue_node = ship.cells[-1] if ship.cells else ship.route[-1]   # where it lies while queued
+            ship.queue_gate = ship.route[-1]
+            self.mover.release(ship)
             ship.set_state(State.LOCK_QUEUE, now, lock=lock.name, side=side)
+            self._call_to_lock(ship, now)
             return
         if ship.state == State.TO_STATION:
             ship.at = ship.route[-1]
@@ -1334,6 +1762,12 @@ class Simulation:
             self.mover.release(ship)
             ship.at = ship.route[-1]
             self.drop_pilots(ship, now)
+            if getattr(ship, "inland_anchor_h", None) is not None:       # an inland craft stopping on its way
+                if self.anchor(ship, ship.anchor_target, now):
+                    ship.anchor_until = now + 60.0 * ship.inland_anchor_h
+                else:                                  # no room after all: sails on
+                    self._inland_anchor_up(ship, now)
+                return
             if not self.anchor(ship, ship.anchor_target, now):
                 ship.set_state(State.WAIT_CLEARANCE, now)
                 if not self.send_to_anchorage(ship, now):
@@ -1392,6 +1826,11 @@ class Simulation:
     def _timers(self, now):
         rising, after_hw = self.tide_phase()
         cranes_stopped = WG.cranes_stopped(self.weather, self.now_ts(now))
+        # a berth stay runs out at its class's rate for the local day (BT.STAY_END_FACTOR): inland cargo craft lie
+        # still over the weekend, so their stays end half as often then
+        ts = self.now_ts(now)
+        weekday = int((ts.tz_localize("UTC") if ts.tzinfo is None else ts).tz_convert(WEEK_TZ).dayofweek)
+        stay_rate = {}
         for ship in list(self.ships):
             st = ship.state
             if st == State.BOARDING:
@@ -1427,7 +1866,7 @@ class Simulation:
                         continue
                     if not self._service_ready(ship, now, "arrival"):
                         continue
-                    ship.timer = PI.mooring_minutes(ship.loa, "arrival", self._berth_area(ship), self.rng_service)
+                    ship.timer = PI.mooring_minutes(ship.loa, "arrival", self._berth_area(ship), self.ship_rng(ship, "service"))
                 ship.timer -= DT_MIN
                 if ship.timer <= 0:
                     self._release_services(ship, now)
@@ -1441,7 +1880,10 @@ class Simulation:
                     self._more_cranes(ship)
                 if ship.terminal and cranes_stopped:   # STS cranes stopped by the wind
                     continue
-                ship.timer -= DT_MIN
+                if (ship.berth or {}).get("kind") == "terminal":
+                    ship.timer -= DT_MIN
+                else:
+                    ship.timer -= DT_MIN * self._stay_rate(stay_rate, ship.cls, weekday)
                 if ship.timer <= 0:
                     self._ready_to_leave(ship, now)
             elif st == State.UNMOORING:
@@ -1451,7 +1893,7 @@ class Simulation:
                         continue
                     if not self._service_ready(ship, now, "departure"):
                         continue
-                    ship.timer = PI.mooring_minutes(ship.loa, "departure", self._berth_area(ship), self.rng_service)
+                    ship.timer = PI.mooring_minutes(ship.loa, "departure", self._berth_area(ship), self.ship_rng(ship, "service"))
                 ship.timer -= DT_MIN
                 if ship.timer <= 0:
                     self._release_services(ship, now)
@@ -1460,7 +1902,7 @@ class Simulation:
                         self._to_next_call(ship)
                     self.start_voyage(ship, ship.pending_route, now)
             elif st == State.DWELL_PORT:
-                ship.timer -= DT_MIN
+                ship.timer -= DT_MIN * self._stay_rate(stay_rate, ship.cls, weekday)
                 if ship.timer <= 0:
                     if self._next_call(ship, now):
                         continue
@@ -1471,11 +1913,20 @@ class Simulation:
                         self.go(ship, now)
                         continue
                     ship.departing = True
-                    ship.exit = BT.sample_exit(ship.cls, self.rng, ship.berth["name"]) if ship.cls in BT.P_EXIT_GIVEN_CLASS else "exit_sea_north"
+                    ship.exit = (BT.sample_exit(ship.cls, self.ship_rng(ship, "choice"), ship.berth["name"], ship.source)
+                                 if ship.cls in BT.P_EXIT_GIVEN_CLASS else "exit_sea_north")
                     ship.berth = None
                     self.go(ship, now)
             elif st == State.WAIT_CLEARANCE and not ship.needs_pilot and now >= getattr(ship, "retry_at", 0):
                 self.go(ship, now)
+            elif st == State.ANCHORED and getattr(ship, "inland_anchor_h", None) is not None and now >= ship.anchor_until:
+                self._inland_anchor_up(ship, now)
+
+    @staticmethod
+    def _stay_rate(cache, cls, weekday):
+        if cls not in cache:
+            cache[cls] = BT.stay_end_factor(cls, weekday) if hasattr(BT, "stay_end_factor") else 1.0
+        return cache[cls]
 
     def _moored(self, ship, now):
         b = ship.berth
@@ -1489,10 +1940,13 @@ class Simulation:
             ship.timer = 60.0 * hours
 
     def dwell_hours(self, ship, zone):
-        """A drawn stay. An inland craft's is divided by the factor its trips were scaled by (generator
-        INLAND_TRIP_SCALE): the AIS stays of the calls it saw also hold the trips it missed."""
-        hours = BT.sample_berth_dwell(ship.cls, self.rng_service, zone)
-        return hours / getattr(ship, "trip_scale", 1.0)
+        """A drawn stay. An inland craft's is shortened for the trips the AIS missed (generator
+        INLAND_TRIP_SCALE): the AIS stays of the calls it saw also hold those trips. The trips added for them make
+        one call (generator: single_call), so the hours they add are one call's, not a visit's: with the trip
+        scale s, the calls per visit grow by (s - 1) / INLAND_CALLS_PER_VISIT and the stays are divided by that."""
+        hours = BT.sample_berth_dwell(ship.cls, self.ship_rng(ship, "service"), zone)
+        scale = getattr(ship, "trip_scale", 1.0)
+        return hours / (1.0 + (scale - 1.0) / INLAND_CALLS_PER_VISIT)
 
     def _start_handling(self, ship, now):
         T = self.terminals[ship.terminal]
@@ -1506,6 +1960,9 @@ class Simulation:
         # scheduled at DP World)
         stay_h = ship.stay_h or DEFAULT_STAY_H
         ship.moves = int(round(stay_h * n * T.moves_per_crane_h))
+        # the hours it lies at the berth: its line's stay times the ratio drawn for it from the AIS calls matched
+        # to their lines (generator: ZONE_OF_TERMINAL). The line's stay less an allowance for leaving, set on the
+        # median, gave the AIS's median and too few ships at the berths: no long stays
         ship.timer = 60.0 * stay_h
         T.ship(ship.id).leaves = now + ship.timer + UNMOORING_PLAN_MIN
         ship.note(now, "handling", cranes=n, moves=ship.moves, hours=round(ship.timer / 60, 1))
@@ -1522,12 +1979,12 @@ class Simulation:
         """An inland craft calls at several places on one visit (NEXT_CALL, AIS): after a call it may sail
         on to the next. True if it did; False if it leaves the port (or its next call cannot be reached
         now, when it leaves too). The unmooring of a hop is taken as part of the fitted stay."""
-        if ship.sea_going:
+        if ship.sea_going or getattr(ship, "single_call", False):
             return False
         b = ship.berth or {}
         zone = b.get("zone") or b.get("name")
         ship.calls = getattr(ship, "calls", 1) + 1
-        following = BT.sample_next_call(ship.cls, self.rng, zone) if zone and ship.calls <= INLAND_MAX_CALLS else None
+        following = BT.sample_next_call(ship.cls, self.ship_rng(ship, "choice"), zone) if zone and ship.calls <= INLAND_MAX_CALLS else None
         if following is None:
             return False
         before = ship.destination, ship.berth_zone
@@ -1549,7 +2006,7 @@ class Simulation:
         leaving."""
         if not ship.sea_going:
             return
-        ratio = min(max(BT.sample_draught_change(ship.cls, self.rng_service, ship.draught), 0.4), 1.6)
+        ratio = min(max(BT.sample_draught_change(ship.cls, self.ship_rng(ship, "service"), ship.draught), 0.4), 1.6)
         before = ship.draught
         draught = round(min(before * ratio, DEPARTURE_MAX_DRAUGHT_M.get(ship.cls, math.inf)), 2)
         berth_limit = self.berths.get((ship.berth or {}).get("id"), {}).get("max_draught_m")
@@ -1571,7 +2028,7 @@ class Simulation:
         ship.departing = True
         zone = (ship.berth or {}).get("zone") or ("antwerp_deurganckdok" if ship.terminal in ("MPET", "DP World Antwerp Gateway") else "antwerp_river_quays")
         cls = ship.cls if ship.cls in BT.P_EXIT_GIVEN_CLASS else "bulk_general"
-        ship.exit = BT.sample_exit(cls, self.rng, zone)
+        ship.exit = BT.sample_exit(cls, self.ship_rng(ship, "choice"), zone, ship.source)
         ship.mark("ready", now)
         ship.set_state(State.WAIT_CLEARANCE, now, departing=True)
         if ship.needs_pilot:
@@ -1612,12 +2069,69 @@ class Simulation:
     def _leave_lock(self, ship, name, t):
         ship.seg_start = ship.lock_index + 1
         self._segment(ship)
-        ship.lock = None
-        ship.set_state(State.SAILING, t, lock_done=name)
+        ship.lock, ship.lock_request, ship.lock_chamber = None, None, None
+        # an inland craft through a lock on its way to anchor (_inland_anchor_stop) is still bound for the anchorage
+        to_anchor = getattr(ship, "inland_anchor_h", None) is not None and not ship.anchorage
+        ship.set_state(State.TO_ANCHORAGE if to_anchor else State.SAILING, t, lock_done=name)
         if not self.mover.place(ship):
             ship.waiting_space = True
 
+    def _call_to_lock(self, ship, now):
+        """A ship waiting for a lock is called when its chamber lies open at its side or is on its way there (it
+        has closed at the other side). It then sails in from the waiting place (LOCK_SAIL_IN_KN) and may enter
+        once it is at the gate."""
+        request, c = getattr(ship, "lock_request", None), getattr(ship, "lock_chamber", None)
+        if request is None or request.ready_at < math.inf:
+            return
+        side = request.from_side
+        lock = self.locks[ship.lock][1]
+        if request.priority <= HOLD_FREE_PRIORITY and not (c.side == side and c.state == "open"):
+            c = self._free_chamber(ship, lock, request, c, now)
+        fg = self.fg
+        kn = LOCK_SAIL_IN_KN["sea_going" if ship.sea_going and ship.loa > lock.times.small_loa_m else "inland"]
+        metres = math.hypot(fg.x[ship.queue_node] - fg.x[ship.queue_gate], fg.y[ship.queue_node] - fg.y[ship.queue_gate])
+        minutes = metres / (kn * 1852.0 / 60.0) + (LOCK_SEA_COMING_IN_MIN.get(ship.lock, 0.0) if ship.sea_going else 0.0)
+        coming = c.side != side and c.state != "open" and lock.minutes_to_open(c) <= minutes + LOCK_CALL_LEAD_MIN
+        # a craft that would go in beside a sea-going ship called to this chamber and still sailing in is called
+        # to be at the gate when that ship is: the barges go in after it. Called at once they went in first and lay
+        # in the chamber while the ship came in, half an hour and more at the sea locks (inland craft 1.34 h to
+        # pass Zandvliet-Berendrecht against 1.17 h, MODEL.md §19)
+        ahead = [s.ready_at for s in c.queue[side] if s is not request and s.priority < request.priority
+                 and now < s.ready_at < math.inf]
+        if ahead and min(ahead) - now > minutes + LOCK_CALL_LEAD_MIN:
+            return
+        if (c.side == side and c.state == "open") or coming:
+            request.ready_at = now + minutes
+            ship.called_at = now
+            ship.note(now, "lock_called", lock=ship.lock, chamber=c.name, sail_in_min=round(request.ready_at - now, 1))
+
+    def _free_chamber(self, ship, lock, request, c, now):
+        """A sea-going ship waiting for a chamber that is away from its side is moved to another chamber of the
+        lock that lies open at its side, takes it at this water and has room for it in its next lockage, as the
+        lock planner does. Its chamber otherwise. (A ship was held to the chamber it was queued at
+        when it asked, and at Terneuzen (three chambers) waited for it while another stood open, sea-going
+        passages 1.71 h at the 90th percentile against 1.33 h, MODEL.md §19.)"""
+        side = request.from_side
+        if request not in c.queue[side]:
+            return c
+        level = min(float(np.mean(self.level_now[d["nodes"]])) for d in lock.sides.values() if d["nodes"])
+        for c2 in lock.chambers:
+            if (c2 is c or c2.side != side or c2.state != "open" or not c2.fits_size(request.loa, request.beam)
+                    or request.draught + lock.ukc_m > c2.sill_depth_m + level
+                    or any(p.ship.from_side != side for p in c2.ships) or not in_next_lockage(lock, c2, request)):
+                continue
+            c.queue[side].remove(request)
+            c2.queue[side].append(request)
+            c2.queue[side].sort(key=lambda s: (s.priority, s.turn))
+            ship.lock_chamber = c2
+            ship.note(now, "lock_chamber_changed", lock=lock.name, old=c.name, new=c2.name)
+            return c2
+        return c
+
     def _locks(self, now):
+        for ship in self.ships:
+            if ship.state == State.LOCK_QUEUE:
+                self._call_to_lock(ship, now)
         holds = {name: self.ulcv_passing(name) for name in self.hold_chainage}
         for name, ships in list(self.held_exits.items()):    # release ships held for a ULCV that has passed
             if not holds.get(name):
@@ -1662,7 +2176,12 @@ class Simulation:
             if zone != ship.pilot_zone:                # dip into another zone (pilot_stretches)
                 self.drop_pilots(ship, now)
                 ship.pilot_change_boat = zone == "river"          # boarding at Vlissingen by pilot boat
-                if self.take_pilots(ship, zone, now, boat=ship.pilot_change_boat):
+                # a change of pilot at a lock is made in the chamber during the lockage: it takes no time of its own
+                # (the ship lay 10 min more beyond the gate, inside the kilometre a lock passage is timed over)
+                at_lock = ship.seg_start > 0 and ship.full_route[ship.seg_start - 1] in self.lock_of_node and ship.head < 1500.0
+                if at_lock and self.take_pilots(ship, zone, now, boat=False):
+                    ship.note(now, "pilot_changed_in_lock", zone=zone)
+                elif self.take_pilots(ship, zone, now, boat=ship.pilot_change_boat):
                     ship.set_state(State.PILOT_CHANGE, now, zone=zone)
                     ship.timer = PILOT_CHANGE_MIN
                 else:
@@ -1804,10 +2323,13 @@ class Simulation:
             node = self._display_node(s)
             if node is None:
                 continue
-            key = (int(node), s.state.value)
+            state = s.state.value
+            if s.state == State.LOCK_QUEUE and now < getattr(s.lock_request, "ready_at", 0.0) < math.inf:
+                state = "lock_sail_in"                 # called to its chamber and sailing in from the waiting place
+            key = (int(node), state)
             if self._last_pos.get(s.id) != key:
                 self._last_pos[s.id] = key
-                self.positions.append((self.k, s.id, s.state.value, -1, int(node), 0.0))
+                self.positions.append((self.k, s.id, state, -1, int(node), 0.0))
 
     def _display_node(self, s):
         """The node a ship off the mesh is drawn at. Every ship gets a record when its state changes, so the
@@ -1822,6 +2344,12 @@ class Simulation:
         if s.state == State.IN_LOCK and s.lock in self.locks:
             return self.locks[s.lock][0]
         if s.state == State.LOCK_QUEUE:
+            # called and sailing in: at whichever end of the way in it is nearer to (the waiting place, then the
+            # gate). Put at the gate from the call, its whole way in from the waiting place (1,200 m, outside the
+            # kilometre the lock times are read over) was counted as time at the lock: 3 min too many at every lock
+            r = getattr(s, "lock_request", None)
+            if r is not None and r.ready_at < math.inf and self.t >= (getattr(s, "called_at", r.ready_at) + r.ready_at) / 2:
+                return getattr(s, "queue_gate", None)
             return getattr(s, "queue_node", None)
         if s.at is None and s.state in MOVING and s.route:  # waiting for room to start (not on the mesh yet)
             return s.route[0]
@@ -1917,6 +2445,20 @@ class Simulation:
         valves["total"] = int(sum(valves.values()))
         valves["per_1000_ships"] = round(1000.0 * valves["total"] / max(len(ships), 1), 1)
         out["release_valves"] = valves
+        # ... and what else keeps it going (SILENT), after the warm-up; why ships were removed; where ships squeezed past
+        notes = [e for s in self.done + self.ships for e in s.log if e["t"] >= self.warmup_min]
+        n = pd.Series([e["event"] for e in notes if e["event"] in SILENT], dtype=object).value_counts()
+        out["silent"] = {k: int(n.get(k, 0)) for k in SILENT}
+        out["removed_why"] = pd.Series([str(e.get("why"))[:40] for e in notes if e["event"] == "infeasible"],
+                                       dtype=object).value_counts().to_dict()
+        where = []
+        for e in notes:
+            if e["event"] == "squeeze_past" and e.get("node") is not None:
+                m = float(self.fg.chainage_m[e["node"]])
+                km = 5 * int(m // 5000) if m == m else None
+                where.append("docks" if self._behind_locks(e["node"]) else "off the river axis" if km is None
+                             else f"km {km}-{km + 5}")
+        out["squeeze_where"] = pd.Series(where, dtype=object).value_counts().to_dict()
         # lock passages a day after the warm-up, inland craft and sea-going ships (to set against the AIS counts,
         # port_infrastructure.LOCK_PASSAGES, and Rijkswaterstaat's)
         days = max(self.t - self.warmup_min, DT_MIN) / 1440.0
@@ -1953,9 +2495,12 @@ class Simulation:
         lv.to_csv(out / "levels.csv.gz", index=False)
         # route = -1: the ship lies at node `value`; else it is `value` m along routes[route] (route.json),
         # `offset` m to starboard of the route's centre line (passing or overtaking in one lane, movement.py)
-        pd.DataFrame(self.positions, columns=["step", "ship", "state", "route", "value", "offset"]).to_csv(
-            out / "positions.csv.gz", index=False)
+        self.positions.frame().to_csv(out / "positions.csv.gz", index=False)
         (out / "routes.json").write_text(json.dumps(self.routes_rec, separators=(",", ":")))
+        # where the nodes of this run's routes lie: the viewer of a run must not take them from a graph built later
+        # (a rebuilt mesh numbers its cells anew, and a viewer made again then drew the ships all over the map)
+        z = np.load(GRAPH.with_suffix(".arrays.npz"), allow_pickle=False)
+        np.savez_compressed(out / "nodes.npz", latitude=z["latitude"], longitude=z["longitude"])
         self.port_log.save(out / "port_state.json.gz")
         summary = self.summary(ships)
         (out / "summary.json").write_text(json.dumps(summary, indent=2, default=str))

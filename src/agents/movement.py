@@ -74,7 +74,19 @@ ENCOUNTER_STALE = 3                     # a ship blocked this many steps does no
 ENCOUNTER_OVERRIDE = 12                 # held this many steps by a rule: the VTS lets it proceed (logged)
 DEADLOCK_AFTER = 12                     # head-on / crossing deadlock with no way round: pass after 1 h
 LANE_FREE_AFTER = 36                    # stuck this long (3 h): detours may ignore the lanes
-LOCK_WAIT_M = 800.0                     # ships bound into a lock join its queue this far before the gate
+# inland craft near a lock: the mean of their AIS speeds under way there (3.6 kn) rather than the median (3.1 kn).
+# The fixes near a lock are mostly of craft slowing to stop, so the median is the speed of the last metres, and a
+# craft sailing the whole approach at it took a quarter longer to pass Hansweert than the AIS. Calibrated (§19)
+INLAND_LOCK_APPROACH_KN = 3.6
+# inland craft sail down the river faster than up it, beyond what the current gives: with one speed both ways they
+# took 1.26 h from km 48 to km 32 where the AIS has 1.17 h, with the way up right (1.17 h). Calibrated (§19)
+INLAND_DOWN_RIVER_FACTOR = 1.08
+# Ships bound into a lock join its queue this far before the gate: at the waiting places of the outer harbour, off
+# the approach channel and more than 1 km from the lock's middle. In the AIS half or more of the waiting for the sea
+# locks is done that far out or further (inland craft lie still 16 min within 1 km of Zandvliet and Berendrecht
+# before they pass and 32 min at 1 to 4 km; MODEL.md §14, §19). It was 800 m, which lies inside that kilometre at the
+# 500 m locks and outside it at the others, so that where the wait was counted was an accident of the geometry
+LOCK_WAIT_M = 1200.0
 LEG = {"sea": "sea", "river": "river", "dock": "river", "canal": "river"}
 WAITING = ("lock_queue", "mooring", "wait_pilot", "pilot_change", "at_berth", "unmooring")
 UNDER_WAY = ("sailing", "to_station", "to_anchorage")
@@ -126,6 +138,11 @@ class Mover:
             if key in inland:
                 m = (self.zone_label == zone) & ~(self.inland_limit_kn <= approach)
                 self.inland_limit_kn[m] = inland[key][NR.SPEED_PERCENTILE]
+        # ... and at the locks the inland craft's own approach speed (AIS 3.1 kn), not the sea-going ships' 2.5 kn:
+        # inland craft took 1.05 h to pass Hansweert where the AIS has 0.67 h (validation, MODEL.md §19)
+        if "lock_approach" in inland:
+            m = np.isin(self.zone_label, ("dock", "canal")) & (fg.speed_limit_kn <= approach)
+            self.inland_limit_kn[m] = max(inland["lock_approach"][NR.SPEED_PERCENTILE], INLAND_LOCK_APPROACH_KN)
         self.vis_cap = None
         self.denied = set()
         self.ships = {}                                        # key -> Ship on the mesh
@@ -404,6 +421,8 @@ class Mover:
             n = np.hypot(dx, dy)
             if n > 0:
                 current = sim.current_sog_u[t_index, sl] * (dx * fg.flow_dir[node, 0] + dy * fg.flow_dir[node, 1]) / n / KNOT
+        if not ship.sea_going and zone == "river" and nxt is not None and fg.chainage_m[nxt] < fg.chainage_m[node]:
+            stw *= INLAND_DOWN_RIVER_FACTOR
         sog = stw + current
         if not np.isnan(limit):
             sog = min(sog, limit)
@@ -627,7 +646,8 @@ class Mover:
                 o = self.ships.get(ko)
                 if o is not None and (ship.id, o.id) not in self.squeezed:
                     self.squeezed.add((ship.id, o.id))
-                    ship.note(self.sim.t, "squeeze_past", other=o.id, knot=not pair)
+                    ship.note(self.sim.t, "squeeze_past", other=o.id, knot=not pair,
+                              node=int(ship.cells[-1]) if ship.cells else None)
 
     def _queueing(self, ship):
         """Waiting behind a ship that is itself waiting (lock, berth, pilot): a queue, not something

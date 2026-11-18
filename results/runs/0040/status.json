@@ -1,0 +1,24 @@
+{
+  "state": "done",
+  "created": "2026-11-14 18:01:19",
+  "progress": 1.0,
+  "id": "0040",
+  "started": "2026-11-14 18:01:19",
+  "error": null,
+  "last_line": "day  7.00 | area  477 done  1561 removed   1 | sailing  53 blocked   0 berth 250 anchored  14 vts  17 lockq 12 | pilots s/r/d 17/14/3 tugs 0 |  476 s wall,  68 s per day",
+  "finished": "2026-11-14 18:09:53",
+  "wall_s": 514,
+  "note": null,
+  "viewer": "viewer.html",
+  "viewer_mb": 16.9,
+  "summary": {
+    "days": 7.0,
+    "stopped_early": false,
+    "stop_reason": null,
+    "ships_generated": 2038,
+    "ships_finished_after_warmup": 1027,
+    "still_in_area": 477,
+    "removed_infeasible": 1,
+    "anchored_mean": 12.49
+  }
+}
