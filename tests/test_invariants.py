@@ -351,3 +351,24 @@ def test_the_position_log_gives_back_what_was_written(monkeypatch):
     path = log.path
     log.close()
     assert not os.path.exists(path)
+
+
+def test_inland_cargo_craft_follow_the_week():
+    """EP.WEEKDAY_FACTOR: inland cargo craft enter less often at the weekend (Sunday about half a weekday), and a
+    class without a weekly pattern enters as often on Sunday as on a weekday."""
+    import entry_probabilities as EP
+    from generator import Generator
+
+    f = EP.WEEKDAY_FACTOR["inland_cargo"]
+    assert f[6] < f[5] < f[0] and EP.WEEKDAY_FACTOR["tanker"] == [1.0] * 7
+    start = pd.Timestamp("2026-10-26 00:00", tz="Europe/Brussels").tz_convert("UTC")        # a Monday
+    g = Generator(start, np.random.default_rng(12), container_mode="nhpp", rng_attributes=np.random.default_rng(13))
+    n = {}
+    for k in range(28 * 288):                                                             # four weeks
+        for s in g.arrivals(k * 5.0, 5.0):
+            day = (start + pd.Timedelta(minutes=s.spawn_t)).tz_convert("Europe/Brussels").dayofweek
+            n[(s.cls, day)] = n.get((s.cls, day), 0) + 1
+    week = lambda cls: np.mean([n.get((cls, d), 0) for d in range(5)])
+    ratio = n.get(("inland_cargo", 6), 0) / week("inland_cargo")
+    assert ratio == pytest.approx(f[6] / f[0], abs=0.08), ratio
+    assert n.get(("tanker", 6), 0) / week("tanker") == pytest.approx(1.0, abs=0.35)

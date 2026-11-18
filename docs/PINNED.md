@@ -32,9 +32,10 @@ Things set aside on 10 November 2026, with what each one waits for.
   the weekly pattern, rare classes and routes, and a part held out for validation all need it.
 - **Weekly pattern of inland traffic.** Measured in the AIS (17 November 2026): at weekends a quarter to two fifths
   fewer inland passages at Hansweert, Terneuzen, Zandvliet-Berendrecht, Kieldrecht and on the river (none at
-  Kreekrak and Kallo). The model runs every day at the mean, so held-out days that are mostly weekend (13-15
-  November) show too many inland craft. Fit a weekday factor on the inland arrivals; it also sets when the lock
-  queues form, which matters for the experiments. Hold out whole weeks.
+  Kreekrak and Kallo). Done in part (18 November 2026): a day-of-week factor on the arrivals, kept only where the
+  entries show it, which is inland cargo craft alone (MODEL.md §19, `0030_weekday`). It barely moves the held-out
+  lock counts and gives Kreekrak a weekend dip it does not have. The lock counts fall at weekends for inland craft as a
+  whole, the entries only for cargo craft: perhaps craft in port move less at weekends (stays, not entries). Hold out whole weeks.
 - **Hold-out split.** Done in part (17 November 2026): the model is fitted on 26 October to 12 November and
   measured again on 13 to 15 November, three whole days (MODEL.md §19). Three days are too few for a score of
   their own; they were used to test calibrated values. Extend the held-out days as the record grows, and do not
@@ -84,7 +85,9 @@ Things set aside on 10 November 2026, with what each one waits for.
 
 As of 17 November 2026, the baseline after the fifth round (`0029_baseline`: 125 of 135 numbers agree on the fitted
 days, emergent 78 of 85, calibrated 36 of 39, input 11 of 11; 98 of 121 on the three days held out). Every calibrated
-value holds on the days held out or is not shown either way there (MODEL.md §19). The fourth round
+value holds on the days held out or is not shown either way there (MODEL.md §19). The baseline is now
+`0030_weekday` (18 November 2026, with the day-of-week factor): 126 of 135 and 95 of 121, the same within the
+noise. The fourth round
 (`0011_round3-barges-after-ship`) had 105 of 113; the fifth took calibration out and did not aim at the score.
 The figures in the items below are the fourth round's unless they name the fifth.
 

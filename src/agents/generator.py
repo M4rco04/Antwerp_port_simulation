@@ -57,6 +57,7 @@ WEEK_MIN = 7 * 24 * 60.0
 WEEK_AHEAD_MIN = 5 * 24 * 60.0             # a week's calls are made this long before it starts (early ships enter before it)
 QUAY_GAP_M = 22.5                          # between two ships at a quay (terminals.MOORING_GAP_M), for the paper check
 SCHEDULE_TZ = "Europe/Brussels"
+WEEK_TZ = SCHEDULE_TZ                    # the day of the week of the background arrivals (EP.WEEKDAY_FACTOR)
 SCHEDULE_YEAR = 2026
 # The AIS delay (actual berthing less the schedule) already holds the wait for a quay; the model then adds its own:
 # the paper berth plan moved the ships 4 h on average and they waited 2 h more, berthing 35 h late where the AIS
@@ -444,11 +445,18 @@ class Generator:
 
     # ------------------------------------------------------------------ background
     def _background(self, t0, dt):
-        hour = int(((self.start + pd.Timedelta(minutes=t0)).hour))
+        now = self.start + pd.Timedelta(minutes=t0)
+        hour = int(now.hour)
+        # the day of the week (local): inland cargo craft enter a tenth more often on a weekday than the mean, a
+        # quarter less on Saturday and nearly half less on Sunday (EP.WEEKDAY_FACTOR; the other classes show no
+        # pattern). Without it every day was the mean day, and days held out at a weekend had a quarter to a half
+        # too many inland craft at the locks (MODEL.md §19)
+        weekday = int(self._utc(now).tz_convert(WEEK_TZ).dayofweek)
         out = []
         for cls in BACKGROUND_CLASSES:
+            day_factor = getattr(EP, "WEEKDAY_FACTOR", {}).get(cls, [1.0] * 7)[weekday]
             for source, rate in EP.RATE_PER_HOUR[cls].items():
-                lam = rate * EP.HOURLY_FACTOR[cls][hour] * dt / 60.0
+                lam = rate * EP.HOURLY_FACTOR[cls][hour] * day_factor * dt / 60.0
                 scale = INLAND_TRIP_SCALE if cls in INLAND_CLASSES and source in INLAND_SCALED_SOURCES else 1.0
                 top = max(scale, INLAND_TRIP_SCALE_ANTWERP or 0.0) if scale != 1.0 else 1.0
                 lam *= top
