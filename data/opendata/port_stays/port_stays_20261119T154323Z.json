@@ -1,0 +1,48 @@
+{
+  "collected_at_utc": "2026-11-19T15:43:14Z",
+  "date_param": "2026-11-19T15:28:05Z",
+  "count_in_response": 673,
+  "count_new_or_changed": 2,
+  "data": [
+    {
+      "etd": "2026-11-19T15:00:00Z",
+      "ship": {
+        "ship_name": "VENETIA",
+        "imo_number": "9400203",
+        "call_sign": "CQGH",
+        "ship_type": "CONTS"
+      },
+      "stay_number": "V316322",
+      "previous_port_of_call": "Vigo",
+      "previous_port_of_call_locode": "ESVGO",
+      "next_port_of_call": "Le Havre",
+      "next_port_of_call_locode": "FRLEH",
+      "agent_name": "HAPAG-LLOYD AG",
+      "agent_code": "HAPAGL",
+      "cbs_entry_point": "BESEA0WESTLKW",
+      "cbs_entry_point_eta": "2026-11-15T19:30:00Z",
+      "stay_start": "2026-11-18T15:16:00Z",
+      "stay_end": "2026-11-19T15:15:00Z",
+      "berth_at_arrival": "BEANR11113LS901",
+      "berth_at_departure": "BEANR11113LS901"
+    },
+    {
+      "ship": {
+        "ship_name": "ROLAND ESSBERGER",
+        "imo_number": "9504217",
+        "call_sign": "CQMZ",
+        "ship_type": "CHTAN"
+      },
+      "stay_number": "V317357",
+      "previous_port_of_call": "Rotterdam",
+      "previous_port_of_call_locode": "NLRTM",
+      "next_port_of_call": "Belgische zee",
+      "next_port_of_call_locode": "BESEA",
+      "agent_name": "VERTOMCORY ANTWERP BV",
+      "agent_code": "VERTOA",
+      "cbs_entry_point": "NLWKP0131JLKN",
+      "cbs_entry_point_eta": "2026-11-22T10:00:00Z",
+      "berth_at_arrival": "BEANR01726L0527"
+    }
+  ]
+}

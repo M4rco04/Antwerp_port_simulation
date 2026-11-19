@@ -1,0 +1,11 @@
+{
+ "budget": {
+  "day": "2026-11-19",
+  "calls": 22
+ },
+ "last_attempt_epoch": 1795102969.4959166,
+ "hashes": {
+  "bridges": "362e25c0e6e403dfeb775dcce91df20450ad6c1085e7af62d8b72b8212bdf1eb",
+  "locks": "aabc5bc4903d581fbb9522bd6ad9c84434310ed3f53d4afcdf635ac038de747a"
+ }
+}

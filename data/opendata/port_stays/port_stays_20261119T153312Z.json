@@ -1,0 +1,65 @@
+{
+  "collected_at_utc": "2026-11-19T15:33:05Z",
+  "date_param": "2026-11-19T15:18:03Z",
+  "count_in_response": 672,
+  "count_new_or_changed": 3,
+  "data": [
+    {
+      "ship": {
+        "ship_name": "WILSON BILBAO",
+        "imo_number": "9014705",
+        "call_sign": "8PAZ8",
+        "ship_type": "CARGO"
+      },
+      "stay_number": "V317108",
+      "previous_port_of_call": "Bremen",
+      "previous_port_of_call_locode": "DEBRE",
+      "next_port_of_call": "Setubal",
+      "next_port_of_call_locode": "PTSET",
+      "agent_name": "EUROCHEM ANTWERPEN",
+      "agent_code": "EUCHEM",
+      "cbs_entry_point": "NLWKP0131JLKN",
+      "cbs_entry_point_eta": "2026-11-19T22:30:00Z",
+      "berth_at_arrival": "BEANR01737L0721"
+    },
+    {
+      "etd": "2026-11-19T23:00:00Z",
+      "ship": {
+        "ship_name": "HARBOUR FIRST",
+        "imo_number": "9473119",
+        "call_sign": "CQKM",
+        "ship_type": "CHTAN"
+      },
+      "stay_number": "V317188",
+      "previous_port_of_call": "Ceuta",
+      "previous_port_of_call_locode": "ESCEU",
+      "next_port_of_call": "Gdynia",
+      "next_port_of_call_locode": "PLGDY",
+      "agent_name": "INCHCAPE SHIPPING SERVICES",
+      "agent_code": "INCHCA",
+      "cbs_entry_point": "BESEA0WESTLKW",
+      "cbs_entry_point_eta": "2026-11-17T23:00:00Z",
+      "stay_start": "2026-11-18T08:20:00Z",
+      "berth_at_arrival": "BEANR01729L0710",
+      "berth_at_departure": "BEANR01729L0710"
+    },
+    {
+      "ship": {
+        "ship_name": "CT ENDEAVOR",
+        "imo_number": "9312195",
+        "call_sign": "5BUU6",
+        "ship_type": "CONTS"
+      },
+      "stay_number": "V317278",
+      "previous_port_of_call": "Belfast",
+      "previous_port_of_call_locode": "GBBEL",
+      "next_port_of_call": "Zeebrugge",
+      "next_port_of_call_locode": "BEZEE",
+      "agent_name": "HERFURTH & CO",
+      "agent_code": "HERFUR",
+      "cbs_entry_point": "BESEA0WESTLKW",
+      "cbs_entry_point_eta": "2026-11-21T23:00:00Z",
+      "berth_at_arrival": "BEANR011160S869"
+    }
+  ]
+}
