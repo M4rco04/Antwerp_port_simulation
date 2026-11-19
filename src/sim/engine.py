@@ -1301,11 +1301,16 @@ class Simulation:
         ship.note(now, "wait_pilot_off_fairway", zone=zone, at=int(node) if node is not None else None)
 
     def take_pilots(self, ship, zone, now, boat=False):
-        if boat and not self.pilot_boats.take(now, PILOT_BOAT_MIN):
+        # the pilots first, the boat only once they are certain: taking the boat first spent it for a transfer
+        # with no pilot to carry, every step a ship waited for one (WAIT_PILOT tries again each step, the
+        # anchorage search once per anchorage), so that a shortage of pilots took the boats too
+        if boat and self.pilot_boats.available(now) == 0:
             return False
         got = self.pilots.take(zone, ship.pilots_needed(zone), ship.id, now)
         if got is None:
             return False
+        if boat:
+            self.pilot_boats.take(now, PILOT_BOAT_MIN)
         ship.pilots, ship.pilot_zone = got, zone
         return True
 

@@ -58,6 +58,10 @@ WEEK_AHEAD_MIN = 5 * 24 * 60.0             # a week's calls are made this long b
 QUAY_GAP_M = 22.5                          # between two ships at a quay (terminals.MOORING_GAP_M), for the paper check
 SCHEDULE_TZ = "Europe/Brussels"
 WEEK_TZ = SCHEDULE_TZ                    # the day of the week of the background arrivals (EP.WEEKDAY_FACTOR)
+# Scenarios: a factor on the arrival rate of every background class (inland craft, bulk carriers, tankers,
+# passenger ships). 1 is today's traffic. Set per run: replicate.py --set generator.BACKGROUND_RATE_FACTOR=1.5;
+# containers are scaled with --containers nhpp --container-rate (the replay and weeks modes cannot be scaled).
+BACKGROUND_RATE_FACTOR = 1.0
 SCHEDULE_YEAR = 2026
 # The AIS delay (actual berthing less the schedule) already holds the wait for a quay; the model then adds its own:
 # the paper berth plan moved the ships 4 h on average and they waited 2 h more, berthing 35 h late where the AIS
@@ -456,7 +460,7 @@ class Generator:
         for cls in BACKGROUND_CLASSES:
             day_factor = getattr(EP, "WEEKDAY_FACTOR", {}).get(cls, [1.0] * 7)[weekday]
             for source, rate in EP.RATE_PER_HOUR[cls].items():
-                lam = rate * EP.HOURLY_FACTOR[cls][hour] * day_factor * dt / 60.0
+                lam = rate * EP.HOURLY_FACTOR[cls][hour] * day_factor * BACKGROUND_RATE_FACTOR * dt / 60.0
                 scale = INLAND_TRIP_SCALE if cls in INLAND_CLASSES and source in INLAND_SCALED_SOURCES else 1.0
                 top = max(scale, INLAND_TRIP_SCALE_ANTWERP or 0.0) if scale != 1.0 else 1.0
                 lam *= top

@@ -218,3 +218,34 @@ def test_inland_cargo_stays_run_out_slower_at_the_weekend(sim):
         assert used["sunday"] == pytest.approx(engine.DT_MIN * f[6])
     finally:
         sim.ships[:] = saved
+
+
+# ------------------------------------------------------------------ pilots and pilot boats
+def test_a_pilot_boat_is_not_spent_when_no_pilot_is_free(sim):
+    """take_pilots takes the pilot boat only once the pilots are certain: a ship waiting for a pilot tries again
+    every step, and taking the boat first spent one for 30 min at each try, so that a shortage of pilots took
+    all the boats too (the stress test at 1.5 times today's traffic, 18 November 2026)."""
+    craft = ship("bulk_general", 180.0, 30.0, 9.0)
+    craft.id = "pilot-boat-test"
+    now = 600.0
+    river = [p for p in sim.pilots.pilots if p.zone == "river"]
+    saved = [(p.ship, p.free_at, dict(p.bookings)) for p in river]
+    boats = list(sim.pilot_boats.busy_until)
+    try:
+        for p in river:
+            p.ship = "someone-else"
+        free_before = sim.pilot_boats.available(now)
+        assert free_before > 0
+        for _ in range(3):                                          # three steps of waiting
+            assert not sim.take_pilots(craft, "river", now, boat=True)
+        assert sim.pilot_boats.available(now) == free_before        # no boat spent
+        river[0].ship = None
+        river[0].free_at = 0.0
+        river[0].bookings.clear()
+        assert sim.take_pilots(craft, "river", now, boat=True)       # a pilot is free: it goes, with a boat
+        assert sim.pilot_boats.available(now) == free_before - 1
+    finally:
+        for p, (s, f, b) in zip(river, saved):
+            p.ship, p.free_at, p.bookings = s, f, b
+        sim.pilot_boats.busy_until[:] = boats
+        craft.pilots = []
