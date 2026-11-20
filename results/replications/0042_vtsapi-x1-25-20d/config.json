@@ -1,0 +1,23 @@
+{
+  "label": "vtsapi-x1.25-20d",
+  "reps": 1,
+  "seed": 401,
+  "start": "2026-10-15 01:00",
+  "days": 20.0,
+  "warmup": 11.0,
+  "delays": true,
+  "background": true,
+  "weather": "bootstrap",
+  "containers": "nhpp",
+  "container_rate": 1.25,
+  "bunching": true,
+  "routing": "lanes",
+  "checks": false,
+  "measure_until": null,
+  "holdout": null,
+  "set": [
+    "generator.BACKGROUND_RATE_FACTOR=1.25"
+  ],
+  "vts": "baseline",
+  "vts_options": {}
+}

@@ -47,6 +47,9 @@ DEFAULTS = {
     "delays": True,                    # replay: draw the AIS delay against the schedule
     "background": True,                # non-container traffic
     "routing": "lanes",                # lanes: hold the starboard side of the buoyed fairway; shortest: shortest path
+    "vts": "baseline",                 # the VTS strategy (src/strategies, docs/VTS_API.md): a name, "module:Class"
+                                       # or "path/file.py:Class"
+    "vts_options": {},                 # options passed to the strategy (its constructor)
     "max_minutes": 60.0,               # stop (and save) after this much wall-clock time
     "progress_hours": 2.0,             # simulated hours between status lines
 }
@@ -64,6 +67,11 @@ def clean_config(cfg: dict) -> dict:
     for k in ("bunching", "delays", "background"):
         out[k] = out[k] if isinstance(out[k], bool) else str(out[k]).lower() in ("1", "true", "yes", "on")
     out["label"] = str(out["label"])[:80]
+    out["vts"] = str(out["vts"]).strip() or "baseline"
+    if isinstance(out["vts_options"], str):
+        out["vts_options"] = json.loads(out["vts_options"]) if out["vts_options"].strip() else {}
+    if not isinstance(out["vts_options"], dict):
+        raise ValueError("vts_options must be a dict of the strategy's options")
     import pandas as pd
     out["start"] = str(pd.Timestamp(out["start"]).strftime("%Y-%m-%d %H:%M"))
     if out["weather"] not in ("bootstrap", "replay"):
@@ -171,7 +179,8 @@ def execute(path: Path) -> dict:
         import engine
         sim = engine.Simulation(cfg["start"], cfg["days"], cfg["seed"], cfg["delays"], cfg["warmup"], cfg["background"],
                                 weather_mode=cfg["weather"], container_mode=cfg["containers"],
-                                container_rate=cfg["container_rate"], bunching=cfg["bunching"], routing=cfg["routing"])
+                                container_rate=cfg["container_rate"], bunching=cfg["bunching"], routing=cfg["routing"],
+                                vts=cfg["vts"], vts_options=cfg["vts_options"])
         write_status(path, state="running")
         stop = path / STOP_FILE
         sim.run(cfg["progress_hours"], cfg["max_minutes"], should_stop=stop.exists)
@@ -234,18 +243,33 @@ def write_index():
         link = f'<a href="{r["id"]}/viewer.html">open viewer</a>' if r["viewer"] else ""
         rows.append(f"<tr><td>{r['id']}</td><td>{html.escape(c.get('label', ''))}</td><td>{html.escape(s.get('state', ''))}</td>"
                     f"<td>{html.escape(str(c.get('start', '')))}</td><td>{c.get('days', '')}</td><td>{c.get('seed', '')}</td>"
-                    f"<td>{html.escape(str(c.get('containers', '')))}</td><td>{sm.get('ships_generated', '')}</td>"
+                    f"<td>{html.escape(str(c.get('containers', '')))}</td><td>{html.escape(str(c.get('vts', 'baseline')))}</td>"
+                    f"<td>{sm.get('ships_generated', '')}</td>"
                     f"<td>{s.get('created', '')}</td><td>{link}</td></tr>")
     page = ("<!doctype html><meta charset='utf-8'><title>Simulation runs</title>"
             "<style>body{font:14px system-ui,sans-serif;margin:24px}table{border-collapse:collapse}"
             "td,th{padding:4px 10px;border-bottom:1px solid #ddd;text-align:left}</style>"
             "<h1>Simulation runs</h1><p>Start new runs from the setup page: <code>py src/ui/app.py</code></p>"
             "<table><tr><th>Id</th><th>Label</th><th>State</th><th>Start</th><th>Days</th><th>Seed</th>"
-            "<th>Containers</th><th>Ships</th><th>Created</th><th></th></tr>" + "".join(rows) + "</table>")
+            "<th>Containers</th><th>VTS</th><th>Ships</th><th>Created</th><th></th></tr>" + "".join(rows) + "</table>")
     (RUNS / "index.html").write_text(page, encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------------------------
+
+def parse_options(items):
+    """["key=value", ...] -> {key: value}, each value read as JSON where it can be (numbers, lists, true/false)."""
+    out = {}
+    for item in items or ():
+        key, sep, value = str(item).partition("=")
+        if not sep or not key.strip():
+            raise ValueError(f"a strategy option is KEY=VALUE, not {item!r}")
+        try:
+            out[key.strip()] = json.loads(value)
+        except json.JSONDecodeError:
+            out[key.strip()] = value
+    return out
+
 
 def parser():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -266,6 +290,10 @@ def parser():
     p.add_argument("--no-bunching", action="store_true", help="nhpp: plain Poisson, without the daily gamma factor")
     p.add_argument("--routing", choices=("lanes", "shortest"), default=DEFAULTS["routing"],
                    help="lanes: ships hold the starboard side of the buoyed fairway; shortest: the shortest allowed path")
+    p.add_argument("--vts", default=DEFAULTS["vts"],
+                   help="the VTS strategy: a name from src/strategies, module:Class or file.py:Class (docs/VTS_API.md)")
+    p.add_argument("--vts-option", action="append", default=[], metavar="KEY=VALUE",
+                   help="an option for the strategy (VALUE read as JSON where it can be); may be given several times")
     p.add_argument("--progress-hours", type=float, default=DEFAULTS["progress_hours"], help="simulated hours between status lines")
     p.add_argument("--max-minutes", type=float, default=DEFAULTS["max_minutes"], help="stop (and save) after this much wall-clock time")
     p.add_argument("--run-dir", type=Path, help="run an existing, queued run folder (used by the setup page)")
@@ -283,7 +311,7 @@ def main():
         cfg = {"label": a.label, "start": a.start, "days": a.days, "warmup": a.warmup, "seed": a.seed,
                "weather": a.weather, "containers": a.containers, "container_rate": a.container_rate,
                "bunching": not a.no_bunching, "delays": not a.no_delays, "background": not a.no_background,
-               "routing": a.routing,
+               "routing": a.routing, "vts": a.vts, "vts_options": parse_options(a.vts_option),
                "max_minutes": a.max_minutes, "progress_hours": a.progress_hours}
         path = new_run(clean_config(cfg))
         logging.getLogger("pipeline").info("run %s: %s", path.name, path)

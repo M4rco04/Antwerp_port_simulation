@@ -423,6 +423,9 @@ class Mover:
                 current = sim.current_sog_u[t_index, sl] * (dx * fg.flow_dir[node, 0] + dy * fg.flow_dir[node, 1]) / n / KNOT
         if not ship.sea_going and zone == "river" and nxt is not None and fg.chainage_m[nxt] < fg.chainage_m[node]:
             stw *= INLAND_DOWN_RIVER_FACTOR
+        ordered = getattr(ship, "vts_speed_kn", None)  # a speed the VTS ordered (vts_api.Control.set_speed)
+        if ordered is not None:
+            stw = min(stw, ordered)
         sog = stw + current
         if not np.isnan(limit):
             sog = min(sog, limit)
@@ -484,6 +487,34 @@ class Mover:
                         if 0 < ahead * my_dir < gap:
                             return i - 1
             own |= set(st)
+        return i_to
+
+    def _restriction_limit(self, ship, i_from, i_to, directions, restrictions, inside):
+        """Last route index in (i_from, i_to] the VTS's restrictions let the ship reach: it stops before the first
+        cell of a restricted stretch it may not enter now (closed; one-way against it; no-meet with a ship it
+        applies to coming the other way inside). A ship already inside carries on. An order of the VTS: there is
+        no release valve, the restriction ends when it runs out or is lifted."""
+        route = ship.route
+        my_dir = directions.get(ship.id, 0)
+        for r in restrictions:
+            if not r.applies(ship) or route[i_from] in r.cells:
+                continue
+            first = next((i for i in range(i_from + 1, i_to + 1) if route[i] in r.cells), None)
+            if first is None:
+                continue
+            if r.kind == "closed":
+                stop = True
+            elif r.kind == "one_way":
+                stop = my_dir != 0 and my_dir != r.direction
+            else:                                      # no_meet
+                stop = my_dir != 0 and any(o is not ship and r.applies(o) and directions.get(o.id, 0) not in (0, my_dir)
+                                           for o in inside.get(r.id, ()))
+            if stop:
+                held = getattr(ship, "vts_restricted", None)
+                if held != r.id:
+                    ship.vts_restricted = r.id
+                    ship.note(self.sim.t, "hold_vts_restriction", restriction=r.id, kind=r.kind, name=r.name)
+                i_to = min(i_to, first - 1)
         return i_to
 
     def _depth_limit(self, ship, i_from, i_to):
@@ -671,6 +702,12 @@ class Mover:
             for name in self.stretches.get(ship.cells[-1], ()):
                 inside.setdefault(name, []).append(ship)
         self.vis_cap = WG.speed_cap_kn(self.sim.weather, self.sim.now_ts())
+        # restrictions the VTS has put on stretches of water (vts_api.Control.restrict), and who is inside each
+        restrictions = self.sim.vts.active_restrictions(self.sim.t)
+        inside_r = {}
+        for r in restrictions:
+            inside_r[r.id] = [s for s in self.ships.values() if s.cells and s.cells[-1] in r.cells
+                              and s.state.value in UNDER_WAY and s.blocked_steps < ENCOUNTER_STALE]
         want = {}
         for ship in sailing:
             i = int(np.searchsorted(ship.s, ship.head, side="right")) - 1
@@ -703,6 +740,8 @@ class Mover:
                 i0 = int(np.searchsorted(ship.s, ship.head, side="right")) - 1
                 i_want = int(np.searchsorted(ship.s, want[ship.id], side="right")) - 1
                 i_ok = self._stretch_limit(ship, i0, i_want, directions, inside) if i_want > i0 else i0
+                if i_ok > i0 and restrictions:
+                    i_ok = self._restriction_limit(ship, i0, i_ok, directions, restrictions, inside_r)
                 if i_ok > i0:
                     i_ok = self._depth_limit(ship, i0, i_ok)
                 heads = ([want[ship.id]] if i_ok == i_want else []) + [float(ship.s[i]) for i in range(i_ok, i0, -1)]

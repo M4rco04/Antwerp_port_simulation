@@ -26,6 +26,14 @@ Things set aside on 10 November 2026, with what each one waits for.
   file lies after the AIS record so far. Re-fit when the AIS record covers it. Still open: whether delays at a
   terminal go together (too few calls per terminal to tell), and why the schedule runs a day and a half early.
 
+## Waiting for the new lock and inland data
+
+New data on the locks and on inland movement is being gathered (18 November 2026). Until it is in, the lock and
+inland items below are left as they are, and nothing more is fitted to them: the rest of the weekly pattern
+(Zandvliet-Berendrecht still +34 % on the held-out days, Kreekrak, Kallo's low days), Hansweert's passage time,
+the lock times and lock holds, Zandvliet-Berendrecht's 90th percentiles, the small sea-going ships on the canals,
+the canal scaling per canal and Rijkswaterstaat's lock counts. Re-fit and re-validate them on the new data.
+
 ## Traffic data
 
 - **AIS record.** Only live data can be collected, so the record grows by waiting. Re-fit when it is longer:

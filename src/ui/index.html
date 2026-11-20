@@ -97,6 +97,7 @@ a { color: var(--accent); }
       <legend>Navigation</legend>
       <div class="field"><label for="routing">Routes</label>
         <select id="routing"><option value="lanes">Hold the starboard side of the buoyed fairway</option><option value="shortest">Shortest path (keep right only as a preference)</option></select></div>
+      <div class="field"><label for="vts">VTS strategy</label><input type="text" id="vts" placeholder="baseline" title="a strategy from src/strategies (baseline, container_first, ...) or module:Class: docs/VTS_API.md"></div>
     </fieldset>
     <fieldset>
       <legend>Weather</legend>
@@ -123,7 +124,7 @@ a { color: var(--accent); }
 "use strict";
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const FIELDS = ["label", "start", "days", "warmup", "seed", "containers", "container_rate", "bunching", "delays", "background", "routing", "weather", "max_minutes"];
+const FIELDS = ["label", "start", "days", "warmup", "seed", "containers", "container_rate", "bunching", "delays", "background", "routing", "vts", "weather", "max_minutes"];
 let DEF = {};
 function fill(cfg) {
   for (const k of FIELDS) { const el = $(k); if (!el || cfg[k] === undefined) continue;
@@ -164,7 +165,8 @@ function stateCell(s) { const st = s || "unknown"; const cls = st === "done" ? "
 function settings(c) {
   const parts = [`${c.days} d from ${esc(c.start)}`, `seed ${c.seed}`,
     c.containers === "nhpp" ? `containers: Poisson ×${c.container_rate}${c.bunching ? "" : ", no bunching"}` : `containers: schedule${c.delays ? " + delays" : ""}`,
-    c.background ? "" : "no other traffic", c.routing === "shortest" ? "shortest routes" : "fairway lanes", `weather: ${c.weather}`];
+    c.background ? "" : "no other traffic", c.routing === "shortest" ? "shortest routes" : "fairway lanes",
+    c.vts && c.vts !== "baseline" ? `VTS: ${esc(c.vts)}` : "", `weather: ${c.weather}`];
   return parts.filter(Boolean).join(" · ");
 }
 let logFor = null;

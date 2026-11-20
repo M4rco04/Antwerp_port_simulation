@@ -249,3 +249,45 @@ def test_a_pilot_boat_is_not_spent_when_no_pilot_is_free(sim):
             p.ship, p.free_at, p.bookings = s, f, b
         sim.pilot_boats.busy_until[:] = boats
         craft.pilots = []
+
+
+def test_a_booking_keeps_a_pilot_only_from_ships_that_asked_later():
+    # first come, first served: a booking made for a later stretch kept a free pilot from a ship that needed one
+    # now, even one that had asked the VTS days before (a gridlock at twice the traffic)
+    from services import PilotPool
+
+    pool = PilotPool(sizes={"river": 1})
+    assert pool.book("river", 1, "B", at=60.0, now=0.0, rank=10.0)          # B asked at minute 10
+    assert pool.available("river", 1, 0.0, "A", rank=5.0)                   # A asked before B: the pilot is free
+    assert not pool.available("river", 1, 0.0, "C", rank=20.0)              # C asked after B: kept for B
+    assert not pool.available("river", 1, 0.0, "C")                         # no rank: every booking counts
+    assert pool.available("river", 1, 0.0, "B", rank=10.0)                  # its own booking
+    pool.cancel("B")
+    assert pool.available("river", 1, 0.0, "C", rank=20.0)
+
+
+def test_a_quay_is_not_planned_on_while_its_ship_waits_to_be_cleared(sim):
+    # a container ship ready but not yet cleared kept a planned departure in the past, so every arrival was planned
+    # onto its quay and lay alongside holding a pilot and tugs while it waited for a pilot (a gridlock)
+    import engine
+
+    name, T = next(iter(sim.terminals.items()))
+    c = ship("container", 300.0, 45.0, 13.0, destination=name, terminal=name)
+    assert c.needs_pilot
+    s0 = T.find_position(c.loa)
+    assert s0 is not None
+    T.moor(c.id, c.loa, 0.0, s0=s0)
+    c.berth = {"kind": "terminal", "s0": s0, "zone": None}
+    T.ship(c.id).leaves = 100.0
+    sim.ships.append(c)
+    try:
+        assert T.find_position(c.loa, near_s=s0, at=200.0) == s0              # planned to have left by then
+        sim._ready_to_leave(c, 120.0)
+        assert c.departing and T.ship(c.id).leaves is None
+        assert T.find_position(c.loa, near_s=s0, at=200.0) != s0              # not planned on while it waits
+        sim.start_unmooring(c, 300.0)
+        assert T.ship(c.id).leaves == 300.0 + engine.UNMOORING_PLAN_MIN
+    finally:
+        sim.vts.withdraw(c)
+        T.unmoor(c.id, 0.0)
+        sim.ships.remove(c)

@@ -11,6 +11,9 @@ Lock object holding everything the plan needs:
     request()     queue a ship at the chamber that suits it best (it gets a turn number)
     reserve()     keep a chamber empty for one ship from a given time (ULCV, regs §8.9)
     step()        advance every chamber by one simulation step and report what happened
+    planner       optional (set by the engine: the VTS, agents/vts.py): planner.chamber(lock, request, options,
+                  default) may pick another chamber for a ship, planner.keep_open(lock, chamber, t, default)
+                  decides whether an open chamber with nothing to load waits for more ships or starts its lockage
 
 Type B (level-changing) chamber cycle, as countdown timers in minutes (PLAN.md §0):
 
@@ -262,6 +265,9 @@ class Lock:
         ship.turn, ship.requested_at = self.next_turn, now
         self.next_turn += 1
         best = min(options, key=lambda c: self._chamber_order(c, ship))
+        planner = getattr(self, "planner", None)       # the VTS strategy may choose another (agents/vts.py)
+        if planner is not None:
+            best = planner.chamber(self, ship, options, best)
         best.queue[ship.from_side].append(ship)
         best.queue[ship.from_side].sort(key=lambda s: (s.priority, s.turn))
         if ship.exclusive:
@@ -368,7 +374,11 @@ class Lock:
                 c.task, c.timer_min = ("enter", ship), (ALONGSIDE_ENTRY_MIN if beside else self.times.small_entry_min
                                                         if small else self.times.entry_min)
                 return True
-            if self._hold_open(c, t):
+            hold = self._hold_open(c, t)
+            planner = getattr(self, "planner", None)   # the VTS strategy: wait for more ships, or go now
+            if planner is not None and (c.ships or c.queue[there] or hold):
+                hold = planner.keep_open(self, c, t, hold)
+            if hold:
                 return False
             if (c.ships or c.queue[there]) and not c.held:
                 c.held = True

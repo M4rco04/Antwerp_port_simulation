@@ -3,7 +3,8 @@
     1. environment     water level at every node (tide), current along the estuary
     2. arrivals        new ships from the generator (containers: schedule replay or fitted NHPP;
                        background NHPP)
-    3. VTS             clearance every 3 steps (agents/vts.py, the simple version)
+    3. VTS             the planning round every 3 steps; every voyage asks the VTS first (agents/vts.py, a strategy
+                       from src/strategies: docs/VTS_API.md)
     4. resources       locks step, timers of boarding / pilot change / mooring / handling / dwell
     5. movement        two-phase moves on the mesh (agents/movement.py)
     6. arrivals at the end of a route: station, anchorage, lock, berth, port, exit
@@ -44,6 +45,8 @@ ROOT = Path(__file__).resolve().parents[2]
 for sub in ("src/environment", "src/agents", "src/data", "src/sim"):
     if str(ROOT / sub) not in sys.path:
         sys.path.insert(0, str(ROOT / sub))
+if str(ROOT / "src") not in sys.path:                     # the strategies package (src/strategies), last
+    sys.path.append(str(ROOT / "src"))
 
 import background_traffic as BT                           # noqa: E402
 import navigation_rules as NR                             # noqa: E402
@@ -60,7 +63,8 @@ from services import PILOT_BOAT_MIN, PilotPool, TugPool, boatmen, pilot_boats   
 from port_state import PortStateLog                       # noqa: E402
 from ship import State                                    # noqa: E402
 from tide import TideModel                                # noqa: E402
-from vts import PLAN_EVERY, SimpleVTS                     # noqa: E402
+from vts import PLAN_EVERY, VTS                           # noqa: E402
+import strategies                                         # noqa: E402
 from weather import Weather                               # noqa: E402
 import weather_gates as WG                                # noqa: E402
 
@@ -207,12 +211,14 @@ LOCK_SEA_COMING_IN_MIN = {"Zandvliet": 30.0, "Berendrecht": 30.0, "Boudewijn": 2
 #   choice      berths, exits, next calls, locks     movement    tie-breaks in the right of way
 #   speed       each ship's own speed (SPEED_SPREAD)
 #   locks       the holds of the locks               stays       a container call's stay over its line's
+#   vts         the VTS strategy's own draws (View.rng)
 # Choices, durations and speed are drawn per ship (Simulation.ship_rng): each ship has a stream of its own for each,
 # from the seed, the stream and its id (the ids come from the arrivals, which do not depend on the port). With one
 # stream for all ships a change that made one more draw for one ship moved every later draw of every other ship,
 # so two configurations no longer compared like with like (the share of calls at the town of Vlissingen moved
 # Terneuzen's sea-going lock times and the tankers at anchor, runs 0024 / 0028)
-STREAMS = ("arrivals", "attributes", "weather", "service", "choice", "movement", "speed", "locks", "stays")
+# (a stream is a child of the seed by its place in this list: new ones go at the end, so the others stay as they were)
+STREAMS = ("arrivals", "attributes", "weather", "service", "choice", "movement", "speed", "locks", "stays", "vts")
 SHIP_STREAMS = ("choice", "service", "speed")
 # Ships of one class do not all sail at one speed: each ship's speed through the water is its class's times a
 # factor drawn once, lognormal with this standard deviation of the logarithm (median 1), kept within
@@ -344,9 +350,12 @@ class PositionLog:
 class Simulation:
     def __init__(self, start="2026-10-21 00:00", days=7.0, seed=1, delays=True, warmup_days=2.0, background=True,
                  weather_mode="bootstrap", container_mode="replay", container_rate=1.0, bunching=True,
-                 routing="lanes", checks=False):
+                 routing="lanes", checks=False, vts="baseline", vts_options=None):
         t0 = time.time()
         self.checks = checks                           # check the invariants every step (check_invariants)
+        self.dt_min = DT_MIN
+        strategy = strategies.load(vts, vts_options)   # the VTS strategy (src/strategies, docs/VTS_API.md): early,
+                                                       # so a wrong name fails before the model is loaded
         self.start = pd.Timestamp(start, tz="UTC")
         self.n_steps = int(days * 24 * 60 / DT_MIN)
         self.warmup_min = warmup_days * 24 * 60
@@ -424,7 +433,9 @@ class Simulation:
         self.tugs.bind(lambda n: (float(fg.x[n]), float(fg.y[n])))
         # agents
         self.mover = Mover(self)
-        self.vts = SimpleVTS(self)
+        self.vts = VTS(self, strategy)
+        for _, lock in self.locks.values():            # the lock planners' choices go through the VTS strategy
+            lock.planner = self.vts
         self.generator = Generator(self.start, self.streams["arrivals"], delays=delays, background=background,
                                    container_mode=container_mode, rate_factor=container_rate, bunching=bunching,
                                    rng_attributes=self.streams["attributes"], rng_stays=self.streams["stays"],
@@ -457,8 +468,10 @@ class Simulation:
         self.port_log = PortStateLog(self)             # locks, VTS queue and berths over time (the viewer)
         self.t, self.k = 0.0, 0
         self.level_now = self._levels(0)
-        log.info("simulation ready in %.0f s: %d steps, pilots %s, %d pilot boats, %d boatmen crews, %d tugs",
-                 time.time() - t0, self.n_steps, self.pilots.sizes, self.pilot_boats.n, self.boatmen.n, len(self.tugs.tugs))
+        self.vts.start()
+        log.info("simulation ready in %.0f s: %d steps, pilots %s, %d pilot boats, %d boatmen crews, %d tugs, VTS %s",
+                 time.time() - t0, self.n_steps, self.pilots.sizes, self.pilot_boats.n, self.boatmen.n, len(self.tugs.tugs),
+                 strategy.name)
 
     # ------------------------------------------------------------------ environment
     def _levels(self, k):
@@ -574,7 +587,8 @@ class Simulation:
                 if a in avoid or b in avoid:
                     continue                           # its complex is not this ship's
                 avoid.append(b if self.ship_rng(ship, "choice").random() < na / max(na + nb, 1e-9) else a)
-            avoid = ship.avoid_locks = tuple(avoid)
+            # drawn first in every case (the ship's draws stay the same whatever the strategy), then offered to it
+            avoid = ship.avoid_locks = tuple(self.vts.avoid_locks(ship, tuple(avoid)))
         return avoid
 
     def tidal_route(self, start, target, ship):
@@ -820,7 +834,7 @@ class Simulation:
             ship.shift = shift = None                  # no berth there for hours: it leaves instead
         if ship.departing and not shift:
             options = [ship.exit or "exit_sea_north"] + [e for e in SEA_EXITS if e != ship.exit]
-            for exit_ in options:
+            for exit_ in self.vts.exit_order(ship, options):
                 name = exit_[5:]
                 if name == "sea_north" and ship.needs_pilot and not self.north_gate_ok(ship):
                     continue
@@ -879,6 +893,7 @@ class Simulation:
                 queue.setdefault(ship.id, self.t)      # an earlier ship has waited a day: it goes first
                 return None
             queue.pop(ship.id, None)
+            s0 = self.vts.choose_quay_position(ship, T, s0)       # where along the quay (the strategy may choose)
             # the cell to sail to: on a suitable slot under the ship, reachable, nearest its middle
             ok = {b for b, r in T.berths.items() if (r.get("max_draught") is None or r["max_draught"] >= ship.draught)
                   and (not ship.sea_going or r.get("category") in (None, "zeevaart"))}
@@ -979,6 +994,9 @@ class Simulation:
                      and self.berths_for(b, ship)]
             if loose:
                 pick = self.draw_berth(loose, ship)
+                free = loose
+        if pick is not None:                           # drawn first in every case, then offered to the strategy
+            pick = self.vts.choose_berth(ship, free, pick)
         # an inland craft with no free berth of its kind lies alongside (below) rather than on a berth of the other
         # kind: inland tankers took container quay as bunker barges, 120 calls in 12 days
         if pick is None:
@@ -1258,14 +1276,15 @@ class Simulation:
         ship would wait for the VTS forever, as departures from Vlissingen did)."""
         return max(eta - PILOT_BOOK_MARGIN_MIN, now)
 
-    def pilot_available(self, ship, start_node, now, route=None):
+    def pilot_available(self, ship, start_node, now, route=None, first_zone=None):
         """A pilot for the first stretch now (and a pilot boat for a boarding at sea / Vlissingen), and,
-        with the route, pilots that can be booked for every later stretch when the ship gets there."""
+        with the route, pilots that can be booked for every later stretch when the ship gets there.
+        first_zone: the first stretch's zone when no route is given (a clearance without booking ahead)."""
         if not ship.needs_pilot:
             return True
-        zone = self.first_pilot_zone(route) if route is not None else self.pilot_zone(start_node)
+        zone = first_zone or (self.first_pilot_zone(route) if route is not None else self.pilot_zone(start_node))
         boat = ship.state in (State.WAIT_CLEARANCE, State.ANCHORED) and not ship.departing and zone in ("sea", "river")
-        if not (self.pilots.available(zone, ship.pilots_needed(zone), now, ship.id)
+        if not (self.pilots.available(zone, ship.pilots_needed(zone), now, ship.id, self._pilot_rank(ship, now))
                 and (not boat or self.pilot_boats.available(now) > 0)):
             return False
         if route is not None:
@@ -1277,7 +1296,8 @@ class Simulation:
     def book_pilots(self, ship, route, now):
         """Book the pilots for the later stretches; False (and nothing booked) if one cannot be."""
         for z, eta in self.pilot_plan(ship, route, now):
-            if not self.pilots.book(z, ship.pilots_needed(z), ship.id, self.book_time(eta, now), now):
+            if not self.pilots.book(z, ship.pilots_needed(z), ship.id, self.book_time(eta, now), now,
+                                    self._pilot_rank(ship, now)):
                 self.pilots.cancel(ship.id)
                 return False
             ship.note(now, "pilot_booked", zone=z, eta_min=round(eta - now))
@@ -1306,13 +1326,20 @@ class Simulation:
         # anchorage search once per anchorage), so that a shortage of pilots took the boats too
         if boat and self.pilot_boats.available(now) == 0:
             return False
-        got = self.pilots.take(zone, ship.pilots_needed(zone), ship.id, now)
+        got = self.pilots.take(zone, ship.pilots_needed(zone), ship.id, now, self._pilot_rank(ship, now),
+                               choose=self.vts.pilot_chooser(ship, zone))
         if got is None:
             return False
         if boat:
             self.pilot_boats.take(now, PILOT_BOAT_MIN)
         ship.pilots, ship.pilot_zone = got, zone
         return True
+
+    @staticmethod
+    def _pilot_rank(ship, now):
+        """Its place in the VTS queue (when it asked): the bookings of ships that asked after it do not keep a
+        free pilot from it (services.PilotPool._clash)."""
+        return ship.request_t if ship.request_t is not None else now
 
     def drop_pilots(self, ship, now):
         if ship.pilots:
@@ -1386,8 +1413,9 @@ class Simulation:
         return at
 
     def enter(self, ship, now):
-        """A ship from the generator: into the area now, or kept at sea until it is in time for its berth."""
-        wait = self.slow_down_min(ship, now)
+        """A ship from the generator: into the area now, or kept at sea until it is in time for its berth (the
+        virtual arrival of container ships, or what the VTS strategy decides: arrival_delay)."""
+        wait = self.vts.arrival_delay(ship, self.slow_down_min(ship, now))
         if wait >= DT_MIN:
             ship.slowed_min = round(wait, 1)
             ship.spawn_t = now + wait
@@ -1426,7 +1454,7 @@ class Simulation:
                 wait = getattr(ship, "anchor_wait_h", None)
                 ship.anchor_until = now + 60.0 * (wait if wait is not None else ANCHOR_WAIT_FACTOR.get(ship.cls, 1.0)
                                                   * BT.sample_anchorage_wait(ship.cls, self.ship_rng(ship, "service")))
-                self.vts.request(ship, now)            # it waits at anchor for its clearance like any arrival
+                self.vts.request(ship, now, "go")      # it waits at anchor for its clearance like any arrival
             else:                                      # no pilot needed: it weighs anchor and sails
                 self.anchorages[ship.anchorage].leave(ship.id, now)
                 ship.anchorage = None
@@ -1451,11 +1479,16 @@ class Simulation:
         self.go(ship, now)
 
     def go(self, ship, now):
-        """Ask the VTS (pilot ships) or just leave (others)."""
+        """Ask the VTS for the next voyage from where the ship lies (every ship: docs/VTS_API.md). A pilot ship
+        waits for the planning round; one without a pilot is cleared as the strategy decides (the baseline: at
+        once, free_go)."""
         if ship.needs_pilot:
             ship.set_state(State.WAIT_CLEARANCE, now) if ship.state != State.ANCHORED else None
-            self.vts.request(ship, now)
-            return
+        self.vts.request(ship, now, "go")
+
+    def free_go(self, ship, now):
+        """A ship without a pilot, cleared by the VTS: plan its voyage and start it (True), or not (False: no route
+        or no destination free now; ship.retry_at is when the baseline tries again, backing off)."""
         ship.infeasible = None
         route = self.plan_route(ship, now)
         if route is None:
@@ -1465,19 +1498,20 @@ class Simulation:
             if ship.infeasible:                        # never: without this it asked again for the whole run
                 ship.note(now, "infeasible", why=ship.infeasible)
                 self.finish(ship, now, "infeasible")
-                return
+                return False
             ship.retries = getattr(ship, "retries", 0) + 1
             if ship.retries == 1 or ship.retries % 10 == 0:
                 ship.note(now, "no_route_or_berth", tries=ship.retries)
             ship.retry_at = now + min(30.0 * 2 ** min(ship.retries - 1, 4), 480.0)
             if ship.state != State.WAIT_CLEARANCE:
                 ship.set_state(State.WAIT_CLEARANCE, now)
-            return
+            return False
         self.reserve_destination(ship, now)
         if getattr(ship, "shift", None):
             self._leave_berth(ship, now)
             self._to_next_call(ship)
         self.start_voyage(ship, route, now)
+        return True
 
     def _to_next_call(self, ship):
         """The ship has left its berth for its next call: from here on it is a ship on its way to a berth."""
@@ -1518,8 +1552,10 @@ class Simulation:
         ship.note(now, "lock_reserved", lock=lock.name, chamber=chamber.name, from_min=round(start, 1),
                   from_cp=bool(at_cp))
 
-    def clear(self, ship, route, now):
-        """The VTS cleared the ship: reserve, take the pilot(s), board / unmoor, then sail."""
+    def clear(self, ship, route, now, book_ahead=True):
+        """The VTS cleared the ship: reserve, take the pilot(s), board / unmoor, then sail. False if a pilot went to
+        another ship this round after all (the ship asks again). book_ahead=False: the pilots of the later
+        stretches are not booked (they are taken on the way, or the ship waits for one off the fairway)."""
         ship.lock_voyage = self.route_has_lock(route)
         if ship.ulcv and ship.lock_voyage:
             self.reserve_ulcv_lock(ship, route, now)
@@ -1533,19 +1569,20 @@ class Simulation:
             route = self.voyage_route(ship, ship.at, ship.target) or route
         zone = self.first_pilot_zone(route)
         boat = not ship.departing and zone in ("sea", "river")
-        if ship.needs_pilot and not self.book_pilots(ship, route, now):
+        if ship.needs_pilot and book_ahead and not self.book_pilots(ship, route, now):
             self.vts.request(ship, now)                # a later pilot went to another ship this round
-            return
+            return False
         if ship.needs_pilot and not self.take_pilots(ship, zone, now, boat=boat):
             self.pilots.cancel(ship.id)
             self.vts.request(ship, now)                # lost the pilot to another ship this round
-            return
+            return False
         ship.pending_route = route
         if ship.departing:
             self.start_unmooring(ship, now)
         else:
             ship.set_state(State.BOARDING, now, zone=zone)
             ship.timer = BOARDING_MIN
+        return True
 
     def start_voyage(self, ship, route, now):
         ship.pending_route = None
@@ -1591,7 +1628,12 @@ class Simulation:
         return True
 
     def _inland_anchor_up(self, ship, now):
-        """The anchor stay of an inland craft is over: on to the target it had."""
+        """The anchor stay of an inland craft is over: it asks the VTS to sail on (free_resume)."""
+        self.vts.request(ship, now, "resume")
+
+    def free_resume(self, ship, now):
+        """An inland craft cleared to weigh anchor: on to the target it had (True), or, with no route there now,
+        a voyage planned afresh from where it lies (free_go)."""
         if ship.anchorage:
             self.anchorages[ship.anchorage].leave(ship.id, now)
             ship.note(now, "anchor_up", anchorage=ship.anchorage)
@@ -1600,9 +1642,10 @@ class Simulation:
         ship.set_state(State.WAIT_CLEARANCE, now)
         r = self.voyage_route(ship, ship.at, target) if target is not None else None
         if r is None or len(r) < 2:
-            self.go(ship, now)
-            return
+            ship.vts_kind = "go"                       # from now on a voyage from where it lies
+            return self.free_go(ship, now)
         self.sail(ship, r, State.SAILING, now)
+        return True
 
     def sail(self, ship, route, state, now):
         free_from = getattr(route, "free_from", None)  # a voyage to a sea exit: the pilot leaves at the station
@@ -1667,9 +1710,10 @@ class Simulation:
         pool = choose_anchorage(self.anchorages, ship.loa, ship.draught, dangerous_signals=ship.dg == "A",
                                 tide_dependent=ship.tide_dependent, level_m=0.0)
         here = ship.at
-        for a in sorted(pool, key=lambda a: (not a.sea_anchorage,
-                                             math.hypot(self.fg.x[self.anchorage_node[a.name]] - self.fg.x[here],
-                                                        self.fg.y[self.anchorage_node[a.name]] - self.fg.y[here]))):
+        order = sorted(pool, key=lambda a: (not a.sea_anchorage,
+                                            math.hypot(self.fg.x[self.anchorage_node[a.name]] - self.fg.x[here],
+                                                       self.fg.y[self.anchorage_node[a.name]] - self.fg.y[here])))
+        for a in self.vts.anchorage_order(ship, order):    # the strategy may reorder or leave some out
             node = self.anchorage_node[a.name]
             r = self.route(here, node, ship) or self.route(here, node, ship, tide_bound=True)
             if r is None or not self.vts.tide_ok(ship, r, now):
@@ -1701,6 +1745,8 @@ class Simulation:
         return True
 
     def start_unmooring(self, ship, now):
+        if (ship.berth or {}).get("kind") == "terminal":               # cleared: its quay can be planned on again
+            self.terminals[ship.terminal].ship(ship.id).leaves = now + UNMOORING_PLAN_MIN
         ship.set_state(State.UNMOORING, now)
         ship.timer = None                              # set once tugs and boatmen are there
         ship.needs_tugs = ship.tugs_needed(departing=True) + WG.extra_tugs(ship, self.weather, self.now_ts(now))
@@ -1729,11 +1775,14 @@ class Simulation:
     # ------------------------------------------------------------------ per-step handlers
     def _arrive_end(self, ship, now):
         """The ship reached the end of its route part."""
+        if ship.lock_index < 0:
+            ship.vts_speed_kn = None                   # a speed the VTS ordered holds for the voyage, through locks
         if ship.lock_index >= 0:
             lock_node = ship.full_route[ship.lock_index]
             lock = self.lock_of_node[lock_node]
             side = lock.side_of(ship.route[-1]) or "a"
             prio = 2 if ship.tide_dependent else 3 if ship.sea_going else 4     # (3: no lockage with it is held)
+            prio = self.vts.lock_priority(ship, lock, prio)
             # the least water over the sills during the passage: the lower of the two sides. (With the higher one a
             # ship of 7 to 10 m was sent to Terneuzen's 6 m chamber at high water on one side and lay at its gate
             # until the tide came, up to 7 h, with two deep chambers at work beside it)
@@ -1761,7 +1810,7 @@ class Simulation:
             self.mover.release(ship)
             ship.set_state(State.WAIT_CLEARANCE, now)
             ship.at_station = True
-            self.vts.request(ship, now)
+            self.vts.request(ship, now, "go")
             return
         if ship.state == State.TO_ANCHORAGE:
             self.mover.release(ship)
@@ -1807,7 +1856,7 @@ class Simulation:
         """Tugs and boatmen for mooring / unmooring; True when the manoeuvre can start."""
         x, y = float(self.fg.x[ship.at]), float(self.fg.y[ship.at])
         if getattr(ship, "needs_tugs", 0) and not ship.tugs:
-            tugs, ready = self.tugs.request(ship.needs_tugs, x, y, ship.id, now)
+            tugs, ready = self.tugs.request(ship.needs_tugs, x, y, ship.id, now, choose=self.vts.tug_chooser(ship))
             if tugs is None:
                 return False
             ship.tugs, ship.tugs_ready_at = tugs, ready
@@ -1922,9 +1971,11 @@ class Simulation:
                                  if ship.cls in BT.P_EXIT_GIVEN_CLASS else "exit_sea_north")
                     ship.berth = None
                     self.go(ship, now)
-            elif st == State.WAIT_CLEARANCE and not ship.needs_pilot and now >= getattr(ship, "retry_at", 0):
-                self.go(ship, now)
-            elif st == State.ANCHORED and getattr(ship, "inland_anchor_h", None) is not None and now >= ship.anchor_until:
+            elif st in (State.WAIT_CLEARANCE, State.ANCHORED) and self.vts.due(ship, now):
+                self.vts.recheck(ship, now)            # a recheck the strategy set (the baseline: the back-off of a
+                                                       # ship without a pilot that could not go, ship.retry_at)
+            elif (st == State.ANCHORED and getattr(ship, "inland_anchor_h", None) is not None and now >= ship.anchor_until
+                  and not getattr(ship, "vts_req", False)):
                 self._inland_anchor_up(ship, now)
 
     @staticmethod
@@ -1993,13 +2044,35 @@ class Simulation:
         if following is None:
             return False
         before = ship.destination, ship.berth_zone
-        ship.destination, ship.berth_zone, ship.berth = following, None, None
-        route = self.plan_route(ship, now)
-        ship.berth = b
+        route = self._hop_route(ship, following, b, now)
         if route is None or len(route) < 2:
             ship.destination, ship.berth_zone = before
             ship.candidate = None
             return False
+        # the hop is a voyage: the VTS clears it (the baseline at once, free_hop); left waiting, the craft keeps its
+        # berth and this next call until it is cleared
+        ship.vts_hop = (following, route, now)
+        self.vts.request(ship, now, "hop")
+        return True
+
+    def _hop_route(self, ship, following, b, now):
+        """The route of an inland craft's hop to its next call (its destination set to it), planned as from
+        nowhere (no berth held) so that a berth there is chosen; the berth it lies at stays its own."""
+        ship.destination, ship.berth_zone, ship.berth = following, None, None
+        route = self.plan_route(ship, now)
+        ship.berth = b
+        return route
+
+    def free_hop(self, ship, now):
+        """An inland craft cleared for its hop: it leaves its berth for the next call (True); cleared later than it
+        asked, the route is planned again, and with no berth free there now it waits (False)."""
+        following, route, asked = ship.vts_hop
+        if asked != now:
+            route = self._hop_route(ship, following, ship.berth or {}, now)
+            if route is None or len(route) < 2:
+                ship.retry_at = now + 30.0
+                return False
+        ship.vts_hop = None
         self._leave_berth(ship, now)
         ship.note(now, "next_call", destination=following)
         self.reserve_destination(ship, now)
@@ -2028,7 +2101,13 @@ class Simulation:
             return
         self._cargo_worked(ship, now)
         if (ship.berth or {}).get("kind") == "terminal":
-            self.terminals[ship.terminal].assign_cranes(ship.id, 0)     # work done: the cranes go to the next ship
+            T = self.terminals[ship.terminal]
+            T.assign_cranes(ship.id, 0)                # work done: the cranes go to the next ship
+            # its quay is not planned on again until it is cleared to leave (start_unmooring): a ship ready but
+            # not yet cleared kept its planned departure, by then in the past, so every arrival was cleared onto
+            # its quay, came in with a river pilot and tugs and waited alongside, while the ship in its way
+            # waited for a river pilot held by those same arrivals (a gridlock at twice the traffic)
+            T.ship(ship.id).leaves = None
         ship.shift = self._further_call(ship, (ship.berth or {}).get("zone"), now)
         ship.departing = True
         zone = (ship.berth or {}).get("zone") or ("antwerp_deurganckdok" if ship.terminal in ("MPET", "DP World Antwerp Gateway") else "antwerp_river_quays")
@@ -2036,16 +2115,20 @@ class Simulation:
         ship.exit = BT.sample_exit(cls, self.ship_rng(ship, "choice"), zone, ship.source)
         ship.mark("ready", now)
         ship.set_state(State.WAIT_CLEARANCE, now, departing=True)
-        if ship.needs_pilot:
-            self.vts.request(ship, now)
-        else:
-            route = self.plan_route(ship, now)
-            if route is None:
-                ship.retry_at = now + 30
-                return
-            ship.pending_route = route
-            self.reserve_destination(ship, now)        # (the berth of a further call; nothing for a ship leaving)
-            self.start_unmooring(ship, now)
+        self.vts.request(ship, now, "unmoor")
+
+    def free_unmoor(self, ship, now):
+        """A ship without a pilot cleared to leave its berth: it unmoors (True), or, with no route or next berth
+        now, waits (False) and is tried again as a voyage from where it lies (free_go), as it always was."""
+        route = self.plan_route(ship, now)
+        if route is None:
+            ship.retry_at = now + 30
+            ship.vts_kind = "go"
+            return False
+        ship.pending_route = route
+        self.reserve_destination(ship, now)            # (the berth of a further call; nothing for a ship leaving)
+        self.start_unmooring(ship, now)
+        return True
 
     def _leave_berth(self, ship, now):
         b = ship.berth or {}
@@ -2194,7 +2277,8 @@ class Simulation:
         if (not ship.departing and ship.berth and ship.berth.get("kind") in ("terminal", "berth") and not ship.tugs
                 and ship.tugs_needed() and ship.lock_index < 0 and ship.remaining_m < TUG_ORDER_M):
             x, y = float(self.fg.x[ship.berth["node"]]), float(self.fg.y[ship.berth["node"]])
-            tugs, ready = self.tugs.request(ship.tugs_needed(), x, y, ship.id, now)
+            tugs, ready = self.tugs.request(ship.tugs_needed(), x, y, ship.id, now,
+                                            choose=self.vts.tug_chooser(ship))
             if tugs:
                 ship.tugs, ship.tugs_ready_at = tugs, ready
                 ship.note(now, "tugs_ordered", n=len(tugs))
@@ -2474,6 +2558,7 @@ class Simulation:
                 if e["event"] == "in_lock" and e["t"] >= self.warmup_min:
                     passed[f"{e['lock']}.{kind}"] = passed.get(f"{e['lock']}.{kind}", 0) + 1
         out["locks"] = {k: round(v / days, 1) for k, v in sorted(passed.items())}
+        out["vts"] = self.vts.summary()                # the strategy, its levers, what it changed and what was refused
         # container ships against their berth time (the schedule and its delay)
         c = done[(done["class"] == "container") & done.moored_min.notna() & done.planned_berth_min.notna()]
         if len(c):

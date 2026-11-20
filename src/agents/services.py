@@ -71,6 +71,7 @@ class PilotPool:
                      for z, d in demand.items()}
         self.sizes = sizes
         self.pilots = [Pilot(f"{z}_{i + 1}", z) for z, n in sizes.items() for i in range(n)]
+        self.rank = {}                              # ship id -> when it asked the VTS, for the ships with bookings
 
     def _job_min(self, zone):
         return PILOT_LEG_MIN[zone] + PILOT_RETURN_MIN[zone]
@@ -80,33 +81,42 @@ class PilotPool:
             for k in [k for k, t in p.bookings.items() if now > t + BOOKING_EXPIRY_MIN]:
                 del p.bookings[k]
 
-    def _clash(self, p, start, end, ship_id=None):
-        """Another ship's booking of p would fall inside [start, end) or begin within one job of it."""
+    def _clash(self, p, start, end, ship_id=None, rank=None):
+        """Another ship's booking of p would fall inside [start, end) or begin within one job of it. With rank
+        (when the ship taking a pilot now asked the VTS), only the bookings of ships that asked before it count:
+        first come, first served. Bookings counted whoever made them, so a ship that needed a pilot now lost
+        every free one to the later stretches of ships cleared after it; at twice the traffic a ship ready to
+        leave a quay waited days for a river pilot while the arrival booked onto its quay lay alongside holding
+        one (a gridlock)."""
         job = self._job_min(p.zone)
-        return any(k != ship_id and start - job < t < end for k, t in p.bookings.items())
+        return any(k != ship_id and start - job < t < end
+                   and (rank is None or self.rank.get(k, float("-inf")) <= rank) for k, t in p.bookings.items())
 
-    def free(self, zone, now, ship_id=None):
+    def free(self, zone, now, ship_id=None, rank=None):
         """Pilots of the zone free now for ship_id: not on board, back from their last job, booked by
         this ship or with no other ship's booking before this job (time on board + return) ends."""
         self._expire(now)
         job = self._job_min(zone)
         return [p for p in self.pilots if p.zone == zone and p.ship is None and p.free_at <= now
-                and (ship_id in p.bookings or not self._clash(p, now, now + job, ship_id))]
+                and (ship_id in p.bookings or not self._clash(p, now, now + job, ship_id, rank))]
 
-    def available(self, zone, n, now, ship_id=None):
-        return len(self.free(zone, now, ship_id)) >= n
+    def available(self, zone, n, now, ship_id=None, rank=None):
+        return len(self.free(zone, now, ship_id, rank)) >= n
 
-    def take(self, zone, n, ship_id, now):
-        free = self.free(zone, now, ship_id)
+    def take(self, zone, n, ship_id, now, rank=None, choose=None):
+        """n free pilots of the zone for ship_id, its own booked pilots first, or None. choose(free, n) -> the n
+        to take (the VTS strategy's assign_pilots), or None for this order."""
+        free = self.free(zone, now, ship_id, rank)
         free.sort(key=lambda p: ship_id not in p.bookings)       # its own booked pilots first
         if len(free) < n:
             return None
-        for p in free[:n]:
+        got = free[:n] if choose is None else choose(free, n)
+        for p in got:
             p.ship, p.since = ship_id, now
         for p in self.pilots:                       # its other bookings in this zone are used up: a booked
             if p.zone == zone:                      # pilot it did not take would else stay blocked for hours
                 p.bookings.pop(ship_id, None)
-        return free[:n]
+        return got
 
     def release(self, pilots, now):
         for p in pilots:
@@ -128,7 +138,7 @@ class PilotPool:
         self._expire(now)
         return len(self._bookable(zone, at, now, ship_id)) >= n
 
-    def book(self, zone, n, ship_id, at, now):
+    def book(self, zone, n, ship_id, at, now, rank=None):
         """Book n pilots of the zone for ship_id from time `at`; False (nothing booked) if not enough."""
         self._expire(now)
         got = self._bookable(zone, at, now, ship_id)
@@ -136,11 +146,14 @@ class PilotPool:
             return False
         for p in got[:n]:
             p.bookings[ship_id] = at
+        if rank is not None:
+            self.rank[ship_id] = rank
         return True
 
     def cancel(self, ship_id):
         for p in self.pilots:
             p.bookings.pop(ship_id, None)
+        self.rank.pop(ship_id, None)
 
     def booked(self, zone, now):
         return sum(len(p.bookings) for p in self.pilots if p.zone == zone)
@@ -231,13 +244,14 @@ class TugPool:
         for t in self.tugs:
             t.x, t.y = self.base_xy[t.base]
 
-    def request(self, n, x, y, ship_id, now):
-        """The n nearest free tugs; returns (tugs, ready time) or (None, None)."""
+    def request(self, n, x, y, ship_id, now, choose=None):
+        """The n nearest free tugs; returns (tugs, ready time) or (None, None). choose(free, n) -> the n to send
+        (free nearest first; the VTS strategy's assign_tugs), or None for the nearest."""
         free = [t for t in self.tugs if t.ship is None and t.free_at <= now]
         if len(free) < n:
             return None, None
         free.sort(key=lambda t: math.hypot(t.x - x, t.y - y))
-        chosen = free[:n]
+        chosen = free[:n] if choose is None else choose(free, n)
         ready = now
         for t in chosen:
             t.ship = ship_id

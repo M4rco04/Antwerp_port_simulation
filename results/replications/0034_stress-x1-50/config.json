@@ -1,0 +1,24 @@
+{
+  "label": "stress-x1.50",
+  "reps": 3,
+  "seed": 401,
+  "start": "2026-10-15 01:00",
+  "days": 31.72,
+  "warmup": 11.0,
+  "delays": true,
+  "background": true,
+  "weather": "bootstrap",
+  "containers": "nhpp",
+  "container_rate": 1.5,
+  "bunching": true,
+  "routing": "lanes",
+  "checks": false,
+  "measure_until": 28.0,
+  "holdout": [
+    28.9583,
+    31.7188
+  ],
+  "set": [
+    "generator.BACKGROUND_RATE_FACTOR=1.50"
+  ]
+}

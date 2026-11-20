@@ -60,7 +60,28 @@ def flatten(summary):
         for k, v in (summary.get(group) or {}).items():
             if isinstance(v, (int, float)) and not isinstance(v, bool):
                 row[f"{group}.{k}"] = v
+    v = summary.get("vts") or {}                       # the VTS strategy: what it did, changed and had refused
+    for k in ("cleared", "cleared_without_pilot", "restrictions_made"):
+        if k in v:
+            row[f"vts.{k}"] = v[k]
+    for group in ("rejected", "overrides"):
+        for k, n in (v.get(group) or {}).items():
+            row[f"vts.{group}.{k}"] = n
     return row
+
+
+def parse_options(items):
+    """["key=value", ...] -> {key: value}, each value read as JSON where it can be (as pipeline.parse_options)."""
+    out = {}
+    for item in items or ():
+        key, sep, value = str(item).partition("=")
+        if not sep or not key.strip():
+            raise SystemExit(f"--vts-option is KEY=VALUE, not {item!r}")
+        try:
+            out[key.strip()] = json.loads(value)
+        except json.JSONDecodeError:
+            out[key.strip()] = value
+    return out
 
 
 def apply_overrides(items):
@@ -93,7 +114,8 @@ def one(job):
     sim = engine.Simulation(start=cfg["start"], days=cfg["days"], seed=seed, delays=cfg["delays"],
                             warmup_days=cfg["warmup"], background=cfg["background"], weather_mode=cfg["weather"],
                             container_mode=cfg["containers"], container_rate=cfg["container_rate"],
-                            bunching=cfg["bunching"], routing=cfg["routing"], checks=cfg["checks"])
+                            bunching=cfg["bunching"], routing=cfg["routing"], checks=cfg["checks"],
+                            vts=cfg.get("vts", "baseline"), vts_options=cfg.get("vts_options"))
     sim.run(progress_hours=1e9)
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
@@ -180,6 +202,10 @@ def main():
     p.add_argument("--measure-until", type=float, help="day of the run at which the validation numbers (v.*) end; default: its end")
     p.add_argument("--holdout", type=float, nargs=2, metavar=("FROM", "TO"),
                    help="days of the run measured as a second window (h.*: validate.py compare --prefix h.)")
+    p.add_argument("--vts", default="baseline",
+                   help="the VTS strategy: a name from src/strategies, module:Class or file.py:Class (docs/VTS_API.md)")
+    p.add_argument("--vts-option", action="append", default=[], metavar="KEY=VALUE",
+                   help="an option for the strategy (VALUE read as JSON where it can be); may be given several times")
     p.add_argument("--set", action="append", default=[], metavar="module.NAME=json",
                    help="set a constant of the model for this run (apply_overrides); may be given several times")
     a = p.parse_args()
@@ -188,7 +214,8 @@ def main():
     cfg = {"label": a.label, "reps": a.reps, "seed": a.seed, "start": a.start, "days": a.days, "warmup": a.warmup,
            "delays": not a.no_delays, "background": not a.no_background, "weather": a.weather,
            "containers": a.containers, "container_rate": a.container_rate, "bunching": not a.no_bunching,
-           "routing": a.routing, "checks": a.checks, "measure_until": a.measure_until, "holdout": a.holdout, "set": a.set}
+           "routing": a.routing, "checks": a.checks, "measure_until": a.measure_until, "holdout": a.holdout, "set": a.set,
+           "vts": a.vts, "vts_options": parse_options(a.vts_option)}
     out = next_folder(a.label)
     out.mkdir(parents=True)
     (out / "config.json").write_text(json.dumps(cfg, indent=2))
