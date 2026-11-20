@@ -1,0 +1,73 @@
+{
+  "collected_at_utc": "2026-11-20T22:10:35Z",
+  "date_param": "2026-11-20T21:55:33Z",
+  "count_in_response": 668,
+  "count_new_or_changed": 3,
+  "data": [
+    {
+      "etd": "2026-11-20T19:00:00Z",
+      "ship": {
+        "ship_name": "JAZZ",
+        "imo_number": "9804849",
+        "call_sign": "9V5491",
+        "ship_type": "CHTAN"
+      },
+      "stay_number": "V315638",
+      "previous_port_of_call": "Le Havre",
+      "previous_port_of_call_locode": "FRLEH",
+      "next_port_of_call": "Rotterdam",
+      "next_port_of_call_locode": "NLRTM",
+      "agent_name": "INCHCAPE SHIPPING SERVICES",
+      "agent_code": "INCHCA",
+      "cbs_entry_point": "BESEA0WESTLKW",
+      "cbs_entry_point_eta": "2026-11-12T19:00:00Z",
+      "stay_start": "2026-11-13T02:28:00Z",
+      "stay_end": "2026-11-20T21:51:00Z",
+      "berth_at_arrival": "BEANR09004L1127",
+      "berth_at_departure": "BEANR01721L0499"
+    },
+    {
+      "etd": "2026-11-20T19:30:00Z",
+      "ship": {
+        "ship_name": "WILSON THAMES",
+        "imo_number": "9177894",
+        "call_sign": "8PAM7",
+        "ship_type": "CARGO"
+      },
+      "stay_number": "V317232",
+      "previous_port_of_call": "Esbjerg",
+      "previous_port_of_call_locode": "DKEBJ",
+      "next_port_of_call": "Glomfjord",
+      "next_port_of_call_locode": "NOGLO",
+      "agent_name": "PROMAR AGENCIES (BELGIUM) NV",
+      "agent_code": "PROMAR",
+      "cbs_entry_point": "NLWKP0131JLKN",
+      "cbs_entry_point_eta": "2026-11-18T03:20:00Z",
+      "stay_start": "2026-11-18T23:02:00Z",
+      "stay_end": "2026-11-20T21:44:00Z",
+      "berth_at_arrival": "BEANR01726L0509",
+      "berth_at_departure": "BEANR01726L0509"
+    },
+    {
+      "etd": "2026-11-21T13:00:00Z",
+      "ship": {
+        "ship_name": "WILSON BLYTH",
+        "imo_number": "9124419",
+        "call_sign": "C6IX2",
+        "ship_type": "CARGO"
+      },
+      "stay_number": "V317297",
+      "previous_port_of_call": "Gent (Ghent)",
+      "previous_port_of_call_locode": "BEGNE",
+      "next_port_of_call": "Le Legue",
+      "next_port_of_call_locode": "FRLLG",
+      "agent_name": "EUROCHEM ANTWERPEN",
+      "agent_code": "EUCHEM",
+      "cbs_entry_point": "BEGNE05305GEN",
+      "cbs_entry_point_eta": "2026-11-20T12:30:00Z",
+      "stay_start": "2026-11-20T18:36:00Z",
+      "berth_at_arrival": "BEANR01752L0373",
+      "berth_at_departure": "BEANR01752L0373"
+    }
+  ]
+}
