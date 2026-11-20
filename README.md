@@ -79,6 +79,108 @@ py src/data/ais_collector.py --once --no-push       # 60 s test run, no git
 py src/data/ais_collector.py                        # run forever, push every 5 min
 ```
 
+## Port of Antwerp-Bruges Open Data (NxtPort)
+
+`src/data/opendata/` collects data from the Port of Antwerp-Bruges Open Data APIs
+([NxtPort docs](https://documentation.nxtport.com/opendata/)) and publishes it to the `opendata` branch.
+Each collector runs forever, stays inside the API limits and writes only data it has not saved before.
+
+| Script | API | Default interval | Output (`data/opendata/...`) | Saves a file when |
+|---|---|---|---|---|
+| `meteo_collector.py` | Meteo (`/readings`) | 20 min | `meteo/meteo_<UTC>.csv` | a station has a new `poa_ingest_time_utc` |
+| `bridges_locks_collector.py` | Bridges and Locks (`/bridges/state`, `/locks/state`) | 5 min | `bridges/bridges_state_<UTC>.json`, `locks/locks_state_<UTC>.json` | the state differs from the last saved one |
+| `port_stays_collector.py` | Port Stays (`/stays`) | 10 min | `port_stays/port_stays_<UTC>.json` | a stay is new or changed |
+| `git_publisher.py` | (git) | 60 min | branch `opendata` | there are new files |
+
+`opendata_common.py` holds what they share (token, HTTP client, state, run loop). File names carry the
+collection time in UTC, e.g. `meteo_20261119T101500Z.csv`.
+
+### Setup and running
+
+```
+pip install requests
+```
+
+Put the credentials received from the Open Data support in `.env` (gitignored):
+
+```
+NXTPORT_CLIENT_ID=...
+NXTPORT_CLIENT_SECRET=...
+METEO_API_KEY=...
+BRIDGESANDLOCKS_API_KEY=...
+PORTSTAYS_API_KEY=...
+```
+
+Start each script in its own terminal or process, from the project root:
+
+```
+py src/data/opendata/meteo_collector.py
+py src/data/opendata/bridges_locks_collector.py
+py src/data/opendata/port_stays_collector.py
+py src/data/opendata/git_publisher.py
+```
+
+Every request carries a Bearer token (OAuth2 client credentials) and the API's `Ocp-Apim-Subscription-Key`.
+The gateway answers an HTML `403 Forbidden` to the default `python-requests` User-Agent, so the scripts
+send `Mozilla/5.0` (`NXTPORT_USER_AGENT` overrides it).
+
+### What the collectors do
+
+- **Limits:** Meteo allows 100 calls per day per company, so it polls every 20 min with a persistent cap of
+  90 calls per UTC day (`METEO_DAILY_CAP`). Bridges and Locks and Port Stays have no documented limit; on
+  `403` / `429` they pause with a growing back-off (15 min up to 2 h).
+- **No repeats:** Meteo remembers the last reading per station, Bridges and Locks hash the full state, Port
+  Stays hash every stay. The Port Stays `date` parameter (at most 6 h in the past) is the last successful poll
+  minus 5 min, never older than 5.5 h, so nothing is missed between polls.
+- **Formats:** Meteo is a flat CSV (one row per new reading, fixed columns, extra API fields appended).
+  The others are JSON: `collected_at_utc`, `source`, `count` and `data` (Port Stays also `date_param`).
+- **Errors:** network errors, timeouts, 5xx, invalid JSON, token problems, a full disk or a corrupt state file
+  never stop a collector; it retries with back-off (30 s up to 30 min). Files are written atomically.
+  Only a missing configuration or a second copy of the same collector (blocked by a lock) ends the process.
+- **Files:** state and the daily call counter in `data/opendata/_state/`, logs (UTC, rotating) in
+  `logs/<name>_collector.log`. `Ctrl+C` / `SIGTERM` stops cleanly.
+
+### Publishing to the `opendata` branch
+
+`git_publisher.py` pushes new files from `data/opendata/` to the `opendata` branch, which holds only this
+data and is merged into `main` later.
+
+- It keeps its own clone in `.opendata_repo/` (excluded through `.git/info/exclude`), so your working tree,
+  index and current branch are never touched. The clone is partial and sparse: only `data/opendata` is
+  downloaded and checked out.
+- Each cycle it fetches, rebases on commits pushed by others, copies the files that are not in the clone yet,
+  makes one commit and pushes. A rejected push is retried once after a rebase.
+- **Only `data/opendata/**` is ever committed:** the index is reset before each commit and the commit is
+  refused if anything else is staged. Files are added with `-f`, so a `.gitignore` that ignores `data/` does
+  not matter. Layout in the branch: `data/opendata/<dataset>/<file>`.
+- If the branch does not exist yet it is created from `main` (not as an orphan), so merging it later needs no
+  `--allow-unrelated-histories`.
+- Credentials come from your git setup; prompts are disabled so it never hangs. On a server use a token in
+  `OPENDATA_GIT_REMOTE` or an SSH key without passphrase. Needs git 2.35 or newer.
+- If you merge `opendata` into `main` in the same working tree the collectors write to, add `data/` to
+  `.gitignore` there (or merge in a separate clone), otherwise git refuses to overwrite untracked files.
+
+### Settings (`.env`, all optional)
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `METEO_INTERVAL_SECONDS` | 1200 | Meteo poll interval |
+| `METEO_DAILY_CAP` | 90 | max Meteo calls per UTC day (0 = no cap) |
+| `BRIDGESANDLOCKS_INTERVAL_SECONDS` | 300 | Bridges and Locks poll interval |
+| `PORTSTAYS_INTERVAL_SECONDS` | 600 | Port Stays poll interval |
+| `<API>_DAILY_CAP` | 0 | optional call cap for the other two APIs |
+| `<API>_BASE_URL` | NxtPort gateway | override the API base URL (`METEO`, `BRIDGESANDLOCKS`, `PORTSTAYS`) |
+| `NXTPORT_TOKEN_URL`, `NXTPORT_SCOPE` | NxtPort production | token endpoint and scope |
+| `OPENDATA_DATA_DIR` | `data/opendata` | where the collectors write |
+| `OPENDATA_GIT_INTERVAL_SECONDS` | 3600 | publish interval |
+| `OPENDATA_GIT_BRANCH` | `opendata` | target branch |
+| `OPENDATA_GIT_REMOTE` | `origin` of the project | repository URL |
+| `OPENDATA_GIT_BASE_BRANCH` | remote default / `main` | start point if the branch must be created |
+| `OPENDATA_GIT_REPO_DIR` | `.opendata_repo` | location of the publisher's clone |
+| `OPENDATA_GIT_DATASETS` | `meteo,bridges,locks,port_stays` | folders to publish |
+| `OPENDATA_GIT_MAX_FILES` | 5000 | files per commit (the rest follows right after) |
+| `OPENDATA_GIT_USER_NAME`, `OPENDATA_GIT_USER_EMAIL` | `opendata-bot` | commit identity if git has none |
+
 ## Schedules with TEU data
 
 `data/schedules` contains csv files with data regarding Vessel, TEU, Voyage, Arrival, Departure, Terminal.
@@ -104,10 +206,11 @@ py src/data/fit_entry_probabilities.py --plot entries.png
 
 ```python
 import entry_probabilities as E
-E.p_source("container")                  # P(source | class), Scheldt-bound traffic
-E.p_category("tanker")                   # P(sea / anchorage / port_channel / non_scheldt | class)
-E.arrival_rate("inland_cargo", "albert_canal", hour=14)   # entries per hour
-E.sample_source("bulk_general", rng)     # rng: numpy Generator or random.Random
+
+E.p_source("container")  # P(source | class), Scheldt-bound traffic
+E.p_category("tanker")  # P(sea / anchorage / port_channel / non_scheldt | class)
+E.arrival_rate("inland_cargo", "albert_canal", hour=14)  # entries per hour
+E.sample_source("bulk_general", rng)  # rng: numpy Generator or random.Random
 ```
 
 ## Background traffic and container calls from AIS
@@ -129,10 +232,13 @@ py src/data/fit_container_calls.py      # -> src/data/container_calls.py
 
 ```python
 import background_traffic as B, container_calls as C
-B.sample_destination("tanker", rng, source="sea_north")   # e.g. "antwerp_right_bank_docks"
-B.sample_berth_dwell("inland_tanker", rng)                 # hours
-C.dimensions_for_teu(14000, rng)                           # {"loa": ..., "beam": ..., "draught": ...}
-C.sample_arrival_delay(rng)                                # hours late against the schedule
+
+B.sample_destination(
+    "tanker", rng, source="sea_north"
+)  # e.g. "antwerp_right_bank_docks"
+B.sample_berth_dwell("inland_tanker", rng)  # hours
+C.dimensions_for_teu(14000, rng)  # {"loa": ..., "beam": ..., "draught": ...}
+C.sample_arrival_delay(rng)  # hours late against the schedule
 ```
 
 
@@ -169,8 +275,14 @@ py src/environment/antwerp_port.py --no-browser      # ~3 min; --refresh-osm re-
 
 ```python
 from antwerp_port import find_route, nearest_node
-path = find_route(G, nearest_node(G, 2.62, 51.42), G.graph["terminals"][0]["access_node"],
-                  draught_m=14.0, ukc_m=0.5)      # never uses an edge shallower than 14.5 m
+
+path = find_route(
+    G,
+    nearest_node(G, 2.62, 51.42),
+    G.graph["terminals"][0]["access_node"],
+    draught_m=14.0,
+    ukc_m=0.5,
+)  # never uses an edge shallower than 14.5 m
 ```
 
 ### Locks
@@ -184,8 +296,13 @@ first fit, biggest at the front), the ULCV empty-chamber rule and the level-chan
 
 ```python
 lock = G.nodes[G.graph["locks"]["Berendrecht"]]["lock"]
-lock.request(ShipRequest("MSC X", loa=366, beam=51, draught=14.0, from_side="b", container=True), now=0)
-events = lock.step(now=0, dt=5, levels={"a": 4.3, "b": 4.5})   # water levels above datum, m
+lock.request(
+    ShipRequest("MSC X", loa=366, beam=51, draught=14.0, from_side="b", container=True),
+    now=0,
+)
+events = lock.step(
+    now=0, dt=5, levels={"a": 4.3, "b": 4.5}
+)  # water levels above datum, m
 ```
 
 ### Anchorages
@@ -215,11 +332,25 @@ across a border has `coarse_edge`, so a reservation on a coarse edge covers thos
 
 ```python
 import coarse_graph as CG
+
 C = graph.graph["coarse"]
-cpath = CG.coarse_route(C, graph.nodes[a]["coarse_node"], graph.nodes[b]["coarse_node"],
-                        draught_m, ukc_m, loa_m, beam_m, G=graph, level=water_level)
-fine = CG.refine(graph, C, cpath, a, b, draught_m, ukc_m, loa_m, beam_m, water_level=water_level)
-cache = CG.RouteCache(C, graph)      # coarse routes by (start, end, draught class, size class)
+cpath = CG.coarse_route(
+    C,
+    graph.nodes[a]["coarse_node"],
+    graph.nodes[b]["coarse_node"],
+    draught_m,
+    ukc_m,
+    loa_m,
+    beam_m,
+    G=graph,
+    level=water_level,
+)
+fine = CG.refine(
+    graph, C, cpath, a, b, draught_m, ukc_m, loa_m, beam_m, water_level=water_level
+)
+cache = CG.RouteCache(
+    C, graph
+)  # coarse routes by (start, end, draught class, size class)
 ```
 
 The coarse search is optimistic (`crossing_depth_m`: the deepest edge across a region border).
@@ -344,10 +475,15 @@ Last run: all 704 berths with a permitted draught and graph cells are reachable 
 
 ```python
 from fast_graph import FastGraph, PassabilityCache
-fg = FastGraph.load(A.DEFAULT_OUTPUT.with_suffix(".arrays.npz"), graph).bind_tide(tide_model)
-level = fg.levels(tide_model.levels(times))[k]          # every node, m above LAT
+
+fg = FastGraph.load(A.DEFAULT_OUTPUT.with_suffix(".arrays.npz"), graph).bind_tide(
+    tide_model
+)
+level = fg.levels(tide_model.levels(times))[k]  # every node, m above LAT
 path = fg.route(a, b, draught_m, ukc_m, loa_m, beam_m, level=level)
-fine = CG.refine(graph, C, cpath, a, b, draught_m, ukc_m, loa_m, beam_m, fast=fg, level=level)
+fine = CG.refine(
+    graph, C, cpath, a, b, draught_m, ukc_m, loa_m, beam_m, fast=fg, level=level
+)
 ```
 
 - **Routing** follows the same rules as `find_route` and gives the same paths, but takes 20–110 ms instead of 0.5–3 s.
@@ -371,8 +507,11 @@ to drive the surge in the simulation. `src/environment/tide.py` gives levels in 
 
 ```python
 from tide import TideModel, node_level, tidal_window
+
 model = TideModel.load()
-levels = model.levels(times, weather)            # per gauge: tide + surge (weather: hourly, or None)
+levels = model.levels(
+    times, weather
+)  # per gauge: tide + surge (weather: hourly, or None)
 weather = model.sample_weather("2026-11-01", 24 * 14, rng)
 ok = tidal_window(G, path, model, departures, speed_kn=12, draught_m=15.5, ukc_m=1.55)
 ```
@@ -408,9 +547,12 @@ py src/environment/fit_currents.py --plot currents.png      # then Western Schel
 
 ```python
 from currents import CurrentModel
-field = CurrentModel(G, model).compute(times, weather)          # m/s per 500 m slice, + = flood
-field.speed_over_ground(G, u, v, i_time, stw_kn=12)            # kn over the ground on edge u -> v
-ok = tidal_window(G, path, model, departures, 12, 15.5, 1.55, currents=CurrentModel(G, model))
+
+field = CurrentModel(G, model).compute(times, weather)  # m/s per 500 m slice, + = flood
+field.speed_over_ground(G, u, v, i_time, stw_kn=12)  # kn over the ground on edge u -> v
+ok = tidal_window(
+    G, path, model, departures, 12, 15.5, 1.55, currents=CurrentModel(G, model)
+)
 ```
 
 ## Simulation and agents

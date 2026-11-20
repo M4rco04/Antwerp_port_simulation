@@ -519,15 +519,17 @@ class Runtime:
     def __init__(
         self,
         name: str,
-        api: str,
+        api: Optional[str],
         interval: int,
         cap: int,
         log: logging.Logger,
         state: JsonState,
         lock: SingleInstance,
+        env_prefix: Optional[str] = None,
     ):
         self.name = name
         self.api = api
+        self.env_prefix = env_prefix or api or name.upper()
         self.interval = interval
         self.log = log
         self.state = state
@@ -535,7 +537,7 @@ class Runtime:
         self.out_dir = data_root() / name
         self.out_label = str(self.out_dir)  # shown in the start-up log
         self.budget = DailyBudget(state, cap)
-        self.client = NxtPortClient(api, log, self.budget)
+        self.client = NxtPortClient(api, log, self.budget) if api else None
         self.stop = threading.Event()
         self.backoff_base = env_number("OPENDATA_BACKOFF_BASE", 30.0, 1.0, float, log)
         self.backoff_max = env_number("OPENDATA_BACKOFF_MAX", 1800.0, 1.0, float, log)
@@ -621,7 +623,7 @@ class Runtime:
                     exc,
                     delay,
                     failures,
-                    self.api,
+                    self.env_prefix,
                 )
             except BadRequest as exc:
                 self.log.error("%s (will retry at the normal interval)", exc)
@@ -656,12 +658,21 @@ class Runtime:
         self.log.info("stopped")
 
 
-def start(name: str, api: str, default_interval: int, default_cap: int = 0) -> Runtime:
+def start(
+    name: str,
+    api: Optional[str],
+    default_interval: int,
+    default_cap: int = 0,
+    env_prefix: Optional[str] = None,
+) -> Runtime:
     """Common start-up: env, logging, config validation, single-instance lock, state."""
     load_env()
     log = setup_logging(name)
 
-    required = ["NXTPORT_CLIENT_ID", "NXTPORT_CLIENT_SECRET", API_KEY_ENV[api]]
+    prefix = env_prefix or api or name.upper()
+    required = (
+        ["NXTPORT_CLIENT_ID", "NXTPORT_CLIENT_SECRET", API_KEY_ENV[api]] if api else []
+    )
     missing = [key for key in required if not os.environ.get(key)]
     if missing:
         log.critical(
@@ -675,7 +686,7 @@ def start(name: str, api: str, default_interval: int, default_cap: int = 0) -> R
         log.critical("another %s collector instance is already running - exiting", name)
         sys.exit(3)
 
-    interval = env_number(f"{api}_INTERVAL_SECONDS", default_interval, 5, int, log)
-    cap = env_number(f"{api}_DAILY_CAP", default_cap, 0, int, log)
+    interval = env_number(f"{prefix}_INTERVAL_SECONDS", default_interval, 5, int, log)
+    cap = env_number(f"{prefix}_DAILY_CAP", default_cap, 0, int, log)
     state = JsonState(state_dir / f"{name}.json", log)
-    return Runtime(name, api, interval, cap, log, state, lock)
+    return Runtime(name, api, interval, cap, log, state, lock, prefix)
