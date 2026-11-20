@@ -1,0 +1,123 @@
+{
+  "collected_at_utc": "2026-11-20T12:32:01Z",
+  "date_param": "2026-11-20T12:16:56Z",
+  "count_in_response": 667,
+  "count_new_or_changed": 6,
+  "data": [
+    {
+      "ship": {
+        "ship_name": "ORCHID LEADER",
+        "imo_number": "9985411",
+        "call_sign": "5LLD7",
+        "ship_type": "VEHCA"
+      },
+      "stay_number": "V316437",
+      "previous_port_of_call": "Sagunto",
+      "previous_port_of_call_locode": "ESSAG",
+      "next_port_of_call": "Zeebrugge",
+      "next_port_of_call_locode": "BEZEE",
+      "agent_name": "INTERNATIONAL CAR OPERATORS NV",
+      "agent_code": "ICO",
+      "cbs_entry_point": "BESEA0WESTLKW",
+      "cbs_entry_point_eta": "2026-11-23T07:00:00Z",
+      "berth_at_arrival": "BEANR09006L1303"
+    },
+    {
+      "etd": "2026-11-20T14:00:00Z",
+      "ship": {
+        "ship_name": "ATLANTIS ANTIBES",
+        "imo_number": "9508108",
+        "call_sign": "9HYJ9",
+        "ship_type": "CHTAN"
+      },
+      "stay_number": "V317024",
+      "previous_port_of_call": "Hamburg",
+      "previous_port_of_call_locode": "DEHAM",
+      "next_port_of_call": "Bremerhaven",
+      "next_port_of_call_locode": "DEBRV",
+      "agent_name": "JORDEX AGENCIES BELGIUM BV",
+      "agent_code": "JOAGBE",
+      "cbs_entry_point": "NLWKP0131JLKN",
+      "cbs_entry_point_eta": "2026-11-19T02:00:00Z",
+      "stay_start": "2026-11-19T08:24:00Z",
+      "berth_at_arrival": "BEANR01729L712C",
+      "berth_at_departure": "BEANR01729L712C"
+    },
+    {
+      "etd": "2026-11-20T13:00:00Z",
+      "ship": {
+        "ship_name": "AMUR STAR",
+        "imo_number": "9480368",
+        "call_sign": "9HA2141",
+        "ship_type": "CHTAN"
+      },
+      "stay_number": "V317140",
+      "previous_port_of_call": "Immingham",
+      "previous_port_of_call_locode": "GBIMM",
+      "next_port_of_call": "Belgische zee",
+      "next_port_of_call_locode": "BESEA",
+      "agent_name": "VERTOMCORY ANTWERP BV",
+      "agent_code": "VERTOA",
+      "cbs_entry_point": "NLWKP0131JLKN",
+      "cbs_entry_point_eta": "2026-11-16T15:00:00Z",
+      "stay_start": "2026-11-18T21:39:00Z",
+      "berth_at_arrival": "BEANR01726L512B",
+      "berth_at_departure": "BEANR01726L512B"
+    },
+    {
+      "etd": "2026-11-20T12:30:00Z",
+      "ship": {
+        "ship_name": "BJORG",
+        "imo_number": "9231834",
+        "call_sign": "V2PW8",
+        "ship_type": "CONTS"
+      },
+      "stay_number": "V317170",
+      "previous_port_of_call": "Hamburg",
+      "previous_port_of_call_locode": "DEHAM",
+      "next_port_of_call": "Rotterdam",
+      "next_port_of_call_locode": "NLRTM",
+      "agent_name": "NEWMAN SHIPPING & AGENCY CO NV",
+      "agent_code": "NEWMAN",
+      "cbs_entry_point": "NLWKP0131JLKN",
+      "cbs_entry_point_eta": "2026-11-19T05:00:00Z",
+      "stay_start": "2026-11-19T14:14:00Z",
+      "berth_at_arrival": "BEANR01729L0718",
+      "berth_at_departure": "BEANR01729L0718"
+    },
+    {
+      "ship": {
+        "ship_name": "DANSHIP SYMPHONY",
+        "imo_number": "9464560",
+        "call_sign": "V7A5757",
+        "ship_type": "CHTAN"
+      },
+      "stay_number": "V317394",
+      "previous_port_of_call": "Swinoujscie",
+      "previous_port_of_call_locode": "PLSWI",
+      "agent_name": "SEA-INVEST SHIPPING AGENCY",
+      "agent_code": "SISA",
+      "cbs_entry_point": "BESEA0WESTLKW",
+      "cbs_entry_point_eta": "2026-11-20T09:00:00Z",
+      "berth_at_arrival": "BEANR0172400302"
+    },
+    {
+      "ship": {
+        "ship_name": "NYK METEOR",
+        "imo_number": "9337638",
+        "call_sign": "3ENA9",
+        "ship_type": "CONTS"
+      },
+      "stay_number": "V317396",
+      "previous_port_of_call": "Southampton",
+      "previous_port_of_call_locode": "GBSOU",
+      "next_port_of_call": "Rotterdam",
+      "next_port_of_call_locode": "NLRTM",
+      "agent_name": "OCEAN NETWORK EXPRESS (EUROPE) LTD. ONE",
+      "agent_code": "ONEA",
+      "cbs_entry_point": "BESEA0WESTLKW",
+      "cbs_entry_point_eta": "2026-12-01T23:00:00Z",
+      "berth_at_arrival": "BEANR011170S913"
+    }
+  ]
+}

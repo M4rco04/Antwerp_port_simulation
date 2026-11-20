@@ -1,0 +1,198 @@
+{
+  "collected_at_utc": "2026-11-20T12:42:06Z",
+  "date_param": "2026-11-20T12:27:01Z",
+  "count_in_response": 667,
+  "count_new_or_changed": 9,
+  "data": [
+    {
+      "etd": "2026-11-20T16:45:00Z",
+      "ship": {
+        "ship_name": "GREEN PLANET",
+        "imo_number": "9669914",
+        "call_sign": "D5FK2",
+        "ship_type": "CHTAN"
+      },
+      "stay_number": "V316801",
+      "previous_port_of_call": "Houston",
+      "previous_port_of_call_locode": "USHOU",
+      "next_port_of_call": "Rotterdam",
+      "next_port_of_call_locode": "NLRTM",
+      "agent_name": "VERTOMCORY ANTWERP BV",
+      "agent_code": "VERTOA",
+      "cbs_entry_point": "BESEA0WESTLKW",
+      "cbs_entry_point_eta": "2026-11-09T07:00:00Z",
+      "stay_start": "2026-11-10T01:20:00Z",
+      "berth_at_arrival": "BEANR01724L306C",
+      "berth_at_departure": "BEANR01728L0618"
+    },
+    {
+      "etd": "2026-11-21T15:00:00Z",
+      "ship": {
+        "ship_name": "FATIH",
+        "imo_number": "9381421",
+        "call_sign": "3EJP6",
+        "ship_type": "CARGO"
+      },
+      "stay_number": "V316834",
+      "previous_port_of_call": "Dunkerque",
+      "previous_port_of_call_locode": "FRDKK",
+      "next_port_of_call": "Rota-Izmit Bay",
+      "next_port_of_call_locode": "TRRZY",
+      "agent_name": "DE KEYSER-THORNTON NAXCO (BELGIUM) NV",
+      "agent_code": "DKT",
+      "cbs_entry_point": "BESEA0WESTLKW",
+      "cbs_entry_point_eta": "2026-11-17T06:00:00Z",
+      "stay_start": "2026-11-17T17:07:00Z",
+      "berth_at_arrival": "BEANR01725L0476",
+      "berth_at_departure": "BEANR01725L0500"
+    },
+    {
+      "etd": "2026-11-20T15:45:00Z",
+      "ship": {
+        "ship_name": "ATLANTIS ANTIBES",
+        "imo_number": "9508108",
+        "call_sign": "9HYJ9",
+        "ship_type": "CHTAN"
+      },
+      "stay_number": "V317024",
+      "previous_port_of_call": "Hamburg",
+      "previous_port_of_call_locode": "DEHAM",
+      "next_port_of_call": "Bremerhaven",
+      "next_port_of_call_locode": "DEBRV",
+      "agent_name": "JORDEX AGENCIES BELGIUM BV",
+      "agent_code": "JOAGBE",
+      "cbs_entry_point": "NLWKP0131JLKN",
+      "cbs_entry_point_eta": "2026-11-19T02:00:00Z",
+      "stay_start": "2026-11-19T08:24:00Z",
+      "berth_at_arrival": "BEANR01729L712C",
+      "berth_at_departure": "BEANR01729L712C"
+    },
+    {
+      "etd": "2026-11-22T04:00:00Z",
+      "ship": {
+        "ship_name": "WONDER MAIA",
+        "imo_number": "9676515",
+        "call_sign": "V7A3817",
+        "ship_type": "CHTAN"
+      },
+      "stay_number": "V317102",
+      "previous_port_of_call": "Rotterdam",
+      "previous_port_of_call_locode": "NLRTM",
+      "next_port_of_call": "Belgische zee",
+      "next_port_of_call_locode": "BESEA",
+      "agent_name": "LBH BELGIUM NV",
+      "agent_code": "LBHLIQ",
+      "cbs_entry_point": "BESEA0WESTLKW",
+      "cbs_entry_point_eta": "2026-11-18T16:15:00Z",
+      "stay_start": "2026-11-18T22:48:00Z",
+      "berth_at_arrival": "BEANR01726L512C",
+      "berth_at_departure": "BEANR01726L512C"
+    },
+    {
+      "etd": "2026-11-20T15:30:00Z",
+      "ship": {
+        "ship_name": "AMUR STAR",
+        "imo_number": "9480368",
+        "call_sign": "9HA2141",
+        "ship_type": "CHTAN"
+      },
+      "stay_number": "V317140",
+      "previous_port_of_call": "Immingham",
+      "previous_port_of_call_locode": "GBIMM",
+      "next_port_of_call": "Belgische zee",
+      "next_port_of_call_locode": "BESEA",
+      "agent_name": "VERTOMCORY ANTWERP BV",
+      "agent_code": "VERTOA",
+      "cbs_entry_point": "NLWKP0131JLKN",
+      "cbs_entry_point_eta": "2026-11-16T15:00:00Z",
+      "stay_start": "2026-11-18T21:39:00Z",
+      "berth_at_arrival": "BEANR01726L512B",
+      "berth_at_departure": "BEANR01726L512B"
+    },
+    {
+      "etd": "2026-11-20T16:00:00Z",
+      "ship": {
+        "ship_name": "BJORG",
+        "imo_number": "9231834",
+        "call_sign": "V2PW8",
+        "ship_type": "CONTS"
+      },
+      "stay_number": "V317170",
+      "previous_port_of_call": "Hamburg",
+      "previous_port_of_call_locode": "DEHAM",
+      "next_port_of_call": "Rotterdam",
+      "next_port_of_call_locode": "NLRTM",
+      "agent_name": "NEWMAN SHIPPING & AGENCY CO NV",
+      "agent_code": "NEWMAN",
+      "cbs_entry_point": "NLWKP0131JLKN",
+      "cbs_entry_point_eta": "2026-11-19T05:00:00Z",
+      "stay_start": "2026-11-19T14:14:00Z",
+      "berth_at_arrival": "BEANR01729L0718",
+      "berth_at_departure": "BEANR01729L0718"
+    },
+    {
+      "etd": "2026-11-20T10:00:00Z",
+      "ship": {
+        "ship_name": "HARBOUR FIRST",
+        "imo_number": "9473119",
+        "call_sign": "CQKM",
+        "ship_type": "CHTAN"
+      },
+      "stay_number": "V317188",
+      "previous_port_of_call": "Ceuta",
+      "previous_port_of_call_locode": "ESCEU",
+      "next_port_of_call": "Gdynia",
+      "next_port_of_call_locode": "PLGDY",
+      "agent_name": "INCHCAPE SHIPPING SERVICES",
+      "agent_code": "INCHCA",
+      "cbs_entry_point": "BESEA0WESTLKW",
+      "cbs_entry_point_eta": "2026-11-17T23:00:00Z",
+      "stay_start": "2026-11-18T08:20:00Z",
+      "stay_end": "2026-11-20T12:39:00Z",
+      "berth_at_arrival": "BEANR01729L0710",
+      "berth_at_departure": "BEANR01729L0710"
+    },
+    {
+      "etd": "2026-11-20T17:15:00Z",
+      "ship": {
+        "ship_name": "WILSON THAMES",
+        "imo_number": "9177894",
+        "call_sign": "8PAM7",
+        "ship_type": "CARGO"
+      },
+      "stay_number": "V317232",
+      "previous_port_of_call": "Esbjerg",
+      "previous_port_of_call_locode": "DKEBJ",
+      "next_port_of_call": "Glomfjord",
+      "next_port_of_call_locode": "NOGLO",
+      "agent_name": "PROMAR AGENCIES (BELGIUM) NV",
+      "agent_code": "PROMAR",
+      "cbs_entry_point": "NLWKP0131JLKN",
+      "cbs_entry_point_eta": "2026-11-18T03:20:00Z",
+      "stay_start": "2026-11-18T23:02:00Z",
+      "berth_at_arrival": "BEANR01726L0509",
+      "berth_at_departure": "BEANR01726L0509"
+    },
+    {
+      "etd": "2026-11-20T16:15:00Z",
+      "ship": {
+        "ship_name": "BALTIC STAR",
+        "imo_number": "9969534",
+        "call_sign": "PDLW",
+        "ship_type": "CARGO"
+      },
+      "stay_number": "V317283",
+      "previous_port_of_call": "Goole",
+      "previous_port_of_call_locode": "GBGOO",
+      "next_port_of_call": "Lindo Havn",
+      "next_port_of_call_locode": "DKLIN",
+      "agent_name": "SEABREAK NV",
+      "agent_code": "SEABRE",
+      "cbs_entry_point": "NLWKP0131JLKN",
+      "cbs_entry_point_eta": "2026-11-19T10:00:00Z",
+      "stay_start": "2026-11-19T20:42:00Z",
+      "berth_at_arrival": "BEANR01715L0353",
+      "berth_at_departure": "BEANR01715L0353"
+    }
+  ]
+}

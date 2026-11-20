@@ -1,0 +1,45 @@
+{
+  "collected_at_utc": "2026-11-20T12:21:56Z",
+  "date_param": "2026-11-20T12:06:54Z",
+  "count_in_response": 667,
+  "count_new_or_changed": 2,
+  "data": [
+    {
+      "ship": {
+        "ship_name": "STEN SKAGEN",
+        "imo_number": "9460239",
+        "call_sign": "CQ2435",
+        "ship_type": "CHTAN"
+      },
+      "stay_number": "V316976",
+      "previous_port_of_call": "Mongstad",
+      "previous_port_of_call_locode": "NOMON",
+      "next_port_of_call": "Belgische zee",
+      "next_port_of_call_locode": "BESEA",
+      "agent_name": "GRAYPEN ANTWERP",
+      "agent_code": "GRAYPE",
+      "cbs_entry_point": "NLWKP0131JLKN",
+      "cbs_entry_point_eta": "2026-11-20T07:00:00Z",
+      "stay_start": "2026-11-20T12:15:00Z",
+      "berth_at_arrival": "BEANR01731L767B"
+    },
+    {
+      "ship": {
+        "ship_name": "STAVFJORD",
+        "imo_number": "9401544",
+        "call_sign": "LAHA7",
+        "ship_type": "CHTAN"
+      },
+      "stay_number": "V317258",
+      "previous_port_of_call": "Rotterdam",
+      "previous_port_of_call_locode": "NLRTM",
+      "next_port_of_call": "Grangemouth",
+      "next_port_of_call_locode": "GBGRG",
+      "agent_name": "JORDEX AGENCIES BELGIUM BV",
+      "agent_code": "JOAGBE",
+      "cbs_entry_point": "NLWKP0131JLKN",
+      "cbs_entry_point_eta": "2026-11-18T11:00:00Z",
+      "berth_at_arrival": "BEANR01721L0248"
+    }
+  ]
+}

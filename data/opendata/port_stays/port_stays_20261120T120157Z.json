@@ -1,0 +1,206 @@
+{
+  "collected_at_utc": "2026-11-20T12:01:48Z",
+  "date_param": "2026-11-20T11:46:40Z",
+  "count_in_response": 668,
+  "count_new_or_changed": 11,
+  "data": [
+    {
+      "ship": {
+        "ship_name": "CMA CGM TARRAGONA",
+        "imo_number": "9471214",
+        "call_sign": "9HA5743",
+        "ship_type": "CONTS"
+      },
+      "stay_number": "V316364",
+      "previous_port_of_call": "Dunkerque",
+      "previous_port_of_call_locode": "FRDKK",
+      "next_port_of_call": "Vlissingen",
+      "next_port_of_call_locode": "NLVLI",
+      "agent_name": "CMA CGM BELGIUM NV",
+      "agent_code": "CMACGM",
+      "cbs_entry_point": "BESEA0WESTLKW",
+      "cbs_entry_point_eta": "2026-11-23T10:00:00Z",
+      "berth_at_arrival": "BEANR09101L1704"
+    },
+    {
+      "ship": {
+        "ship_name": "MSC MARIACRISTINA",
+        "imo_number": "9968279",
+        "call_sign": "5LRU6",
+        "ship_type": "CONTS"
+      },
+      "stay_number": "V316390",
+      "previous_port_of_call": "Rotterdam",
+      "previous_port_of_call_locode": "NLRTM",
+      "next_port_of_call": "Gdansk",
+      "next_port_of_call_locode": "PLGDN",
+      "agent_name": "MSC BELGIUM NV",
+      "agent_code": "MSCBEL",
+      "cbs_entry_point": "NLWKP0131JLKN",
+      "cbs_entry_point_eta": "2026-11-22T23:00:00Z",
+      "berth_at_arrival": "BEANR09103L1728"
+    },
+    {
+      "ship": {
+        "ship_name": "MSC MILI F",
+        "imo_number": "9430155",
+        "call_sign": "A8NF7",
+        "ship_type": "CONTS"
+      },
+      "stay_number": "V316724",
+      "previous_port_of_call": "Brevik",
+      "previous_port_of_call_locode": "NOBVK",
+      "next_port_of_call": "Oslo",
+      "next_port_of_call_locode": "NOOSL",
+      "agent_name": "MSC BELGIUM NV",
+      "agent_code": "MSCBEL",
+      "cbs_entry_point": "NLWKP0131JLKN",
+      "cbs_entry_point_eta": "2026-11-22T23:00:00Z",
+      "berth_at_arrival": "BEANR09103L1726"
+    },
+    {
+      "ship": {
+        "ship_name": "MSC CATANIA",
+        "imo_number": "9964247",
+        "call_sign": "5LSZ3",
+        "ship_type": "CONTS"
+      },
+      "stay_number": "V316726",
+      "previous_port_of_call": "Bremerhaven",
+      "previous_port_of_call_locode": "DEBRV",
+      "next_port_of_call": "Felixstowe",
+      "next_port_of_call_locode": "GBFXT",
+      "agent_name": "MSC BELGIUM NV",
+      "agent_code": "MSCBEL",
+      "cbs_entry_point": "NLWKP0131JLKN",
+      "cbs_entry_point_eta": "2026-11-23T05:00:00Z",
+      "berth_at_arrival": "BEANR09103L1728"
+    },
+    {
+      "etd": "2026-11-23T13:00:00Z",
+      "ship": {
+        "ship_name": "WILSON BILBAO",
+        "imo_number": "9014705",
+        "call_sign": "8PAZ8",
+        "ship_type": "CARGO"
+      },
+      "stay_number": "V317108",
+      "previous_port_of_call": "Bremen",
+      "previous_port_of_call_locode": "DEBRE",
+      "next_port_of_call": "Setubal",
+      "next_port_of_call_locode": "PTSET",
+      "agent_name": "EUROCHEM ANTWERPEN",
+      "agent_code": "EUCHEM",
+      "cbs_entry_point": "NLWKP0131JLKN",
+      "cbs_entry_point_eta": "2026-11-19T22:30:00Z",
+      "stay_start": "2026-11-20T05:29:00Z",
+      "berth_at_arrival": "BEANR01737L0719",
+      "berth_at_departure": "BEANR01752L0371"
+    },
+    {
+      "etd": "2026-11-20T22:00:00Z",
+      "ship": {
+        "ship_name": "THUN RESOURCE",
+        "imo_number": "9970507",
+        "call_sign": "PGTT",
+        "ship_type": "CHTAN"
+      },
+      "stay_number": "V317174",
+      "previous_port_of_call": "Kalmar",
+      "previous_port_of_call_locode": "SEKLR",
+      "next_port_of_call": "Nynashamn",
+      "next_port_of_call_locode": "SENYN",
+      "agent_name": "GAC BELGIUM NV",
+      "agent_code": "GACBE",
+      "cbs_entry_point": "NLWKP0131JLKN",
+      "cbs_entry_point_eta": "2026-11-19T09:30:00Z",
+      "stay_start": "2026-11-19T19:41:00Z",
+      "berth_at_arrival": "BEANR01720L0277",
+      "berth_at_departure": "BEANR01720L0277"
+    },
+    {
+      "ship": {
+        "ship_name": "MSC YOSHEEN",
+        "imo_number": "9322011",
+        "call_sign": "5BNG2",
+        "ship_type": "CONTS"
+      },
+      "stay_number": "V317196",
+      "previous_port_of_call": "Kobenhavn",
+      "previous_port_of_call_locode": "DKCPH",
+      "next_port_of_call": "Halmstad",
+      "next_port_of_call_locode": "SEHAD",
+      "agent_name": "MSC BELGIUM NV",
+      "agent_code": "MSCBEL",
+      "cbs_entry_point": "NLWKP0131JLKN",
+      "cbs_entry_point_eta": "2026-11-22T23:00:00Z",
+      "berth_at_arrival": "BEANR09101L1740"
+    },
+    {
+      "ship": {
+        "ship_name": "AKRISIOS",
+        "imo_number": "9953456",
+        "call_sign": "V7B3480",
+        "ship_type": "CHTAN"
+      },
+      "stay_number": "V317229",
+      "previous_port_of_call": "Dunkerque",
+      "previous_port_of_call_locode": "FRDKK",
+      "next_port_of_call": "Lagos",
+      "next_port_of_call_locode": "NGLOS",
+      "agent_name": "KISA NV",
+      "agent_code": "KISAGA",
+      "cbs_entry_point": "BESEA0WESTLKW",
+      "cbs_entry_point_eta": "2026-11-17T23:41:00Z",
+      "berth_at_arrival": "BEANR01721L0242"
+    },
+    {
+      "ship": {
+        "ship_name": "FJELLSTRAUM",
+        "imo_number": "9140815",
+        "call_sign": "LAWF7",
+        "ship_type": "CHTAN"
+      },
+      "stay_number": "V317336",
+      "previous_port_of_call": "Gent (Ghent)",
+      "previous_port_of_call_locode": "BEGNE",
+      "next_port_of_call": "Rafnes",
+      "next_port_of_call_locode": "NORAF",
+      "agent_name": "EURO NORDIC AGENCIES BELGIUM NV",
+      "agent_code": "EUNOAB",
+      "cbs_entry_point": "BEGNE05305GEN",
+      "cbs_entry_point_eta": "2026-11-23T11:00:00Z",
+      "berth_at_arrival": "BEANR01728L0619"
+    },
+    {
+      "ship": {
+        "ship_name": "DANSHIP SYMPHONY",
+        "imo_number": "9464560",
+        "call_sign": "V7A5757",
+        "ship_type": "CHTAN"
+      },
+      "stay_number": "V317394",
+      "agent_name": "SEA-INVEST SHIPPING AGENCY",
+      "agent_code": "SISA",
+      "cbs_entry_point": "BESEA0WESTLKW",
+      "cbs_entry_point_eta": "2026-11-20T09:00:00Z",
+      "berth_at_arrival": "BEANR0172400302"
+    },
+    {
+      "ship": {
+        "ship_name": "LINDA",
+        "imo_number": "9354325",
+        "call_sign": "OJML",
+        "ship_type": "CONTS"
+      },
+      "stay_number": "V317395",
+      "previous_port_of_call": "Hamburg",
+      "previous_port_of_call_locode": "DEHAM",
+      "agent_name": "CMA CGM BELGIUM NV",
+      "agent_code": "CMACGM",
+      "cbs_entry_point": "NLWKP0131JLKN",
+      "cbs_entry_point_eta": "2026-11-21T22:00:00Z",
+      "berth_at_arrival": "BEANR011170S913"
+    }
+  ]
+}

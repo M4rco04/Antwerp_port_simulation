@@ -1,0 +1,68 @@
+{
+  "collected_at_utc": "2026-11-20T12:52:15Z",
+  "date_param": "2026-11-20T12:37:06Z",
+  "count_in_response": 667,
+  "count_new_or_changed": 3,
+  "data": [
+    {
+      "etd": "2026-11-20T17:00:00Z",
+      "ship": {
+        "ship_name": "HAFNIA AZURITE",
+        "imo_number": "9727560",
+        "call_sign": "9V8432",
+        "ship_type": "CHTAN"
+      },
+      "stay_number": "V316672",
+      "previous_port_of_call": "Port-Jerome",
+      "previous_port_of_call_locode": "FRPJE",
+      "next_port_of_call": "Houston",
+      "next_port_of_call_locode": "USHOU",
+      "agent_name": "INCHCAPE SHIPPING SERVICES",
+      "agent_code": "INCHCA",
+      "cbs_entry_point": "BESEA0WESTLKW",
+      "cbs_entry_point_eta": "2026-11-14T17:00:00Z",
+      "stay_start": "2026-11-18T05:49:00Z",
+      "berth_at_arrival": "BEANR01715L0303",
+      "berth_at_departure": "BEANR01715L0303"
+    },
+    {
+      "etd": "2026-11-21T14:00:00Z",
+      "ship": {
+        "ship_name": "LILLY BOLTEN",
+        "imo_number": "9406063",
+        "call_sign": "V7A2622",
+        "ship_type": "BULKC"
+      },
+      "stay_number": "V316747",
+      "previous_port_of_call": "Milos (Adamas)",
+      "previous_port_of_call_locode": "GRMLO",
+      "next_port_of_call": "Belgische zee",
+      "next_port_of_call_locode": "BESEA",
+      "agent_name": "SEA-INVEST SHIPPING AGENCY",
+      "agent_code": "SISA",
+      "cbs_entry_point": "BESEA0WESTLKW",
+      "cbs_entry_point_eta": "2026-11-17T07:00:00Z",
+      "stay_start": "2026-11-17T20:55:00Z",
+      "berth_at_arrival": "BEANR01724L0316",
+      "berth_at_departure": "BEANR01724L0322"
+    },
+    {
+      "ship": {
+        "ship_name": "LORD LUPO",
+        "imo_number": "9930002",
+        "call_sign": "ICAR",
+        "ship_type": "CHTAN"
+      },
+      "stay_number": "V317192",
+      "previous_port_of_call": "Rotterdam",
+      "previous_port_of_call_locode": "NLRTM",
+      "next_port_of_call": "Port-Jerome",
+      "next_port_of_call_locode": "FRPJE",
+      "agent_name": "INCHCAPE SHIPPING SERVICES",
+      "agent_code": "INCHCA",
+      "cbs_entry_point": "NLWKP0131JLKN",
+      "cbs_entry_point_eta": "2026-11-23T06:00:00Z",
+      "berth_at_arrival": "BEANR01720L0277"
+    }
+  ]
+}
