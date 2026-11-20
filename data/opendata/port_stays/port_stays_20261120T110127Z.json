@@ -1,0 +1,40 @@
+{
+  "collected_at_utc": "2026-11-20T11:01:17Z",
+  "date_param": "2026-11-20T10:46:17Z",
+  "count_in_response": 662,
+  "count_new_or_changed": 2,
+  "data": [
+    {
+      "ship": {
+        "ship_name": "CMA CGM RUNDALE",
+        "imo_number": "9961300",
+        "call_sign": "9HA6015",
+        "ship_type": "CONTS"
+      },
+      "stay_number": "V316368",
+      "previous_port_of_call": "Zeebrugge",
+      "previous_port_of_call_locode": "BEZEE",
+      "next_port_of_call": "Rotterdam",
+      "next_port_of_call_locode": "NLRTM",
+      "agent_name": "CMA CGM BELGIUM NV",
+      "agent_code": "CMACGM",
+      "cbs_entry_point": "BEZEE07503ZEE",
+      "cbs_entry_point_eta": "2026-11-23T13:00:00Z",
+      "berth_at_arrival": "BEANR09101L1704"
+    },
+    {
+      "ship": {
+        "ship_name": "OCEAN BREEZE",
+        "imo_number": "9987794",
+        "call_sign": "HOA5774",
+        "ship_type": "VEHCA"
+      },
+      "stay_number": "V317388",
+      "agent_name": "AGZ PORT SERVICES NV",
+      "agent_code": "P2FSHI",
+      "cbs_entry_point": "BESEA0WESTLKW",
+      "cbs_entry_point_eta": "2027-01-02T23:00:00Z",
+      "berth_at_arrival": "BEANR01724L0336"
+    }
+  ]
+}

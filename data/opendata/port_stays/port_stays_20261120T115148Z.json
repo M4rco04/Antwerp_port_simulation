@@ -1,0 +1,137 @@
+{
+  "collected_at_utc": "2026-11-20T11:51:40Z",
+  "date_param": "2026-11-20T11:36:38Z",
+  "count_in_response": 666,
+  "count_new_or_changed": 7,
+  "data": [
+    {
+      "ship": {
+        "ship_name": "CMA CGM AQUILA",
+        "imo_number": "9410741",
+        "call_sign": "9HA5018",
+        "ship_type": "CONTS"
+      },
+      "stay_number": "V316372",
+      "previous_port_of_call": "Rotterdam",
+      "previous_port_of_call_locode": "NLRTM",
+      "next_port_of_call": "Le Havre",
+      "next_port_of_call_locode": "FRLEH",
+      "agent_name": "CMA CGM BELGIUM NV",
+      "agent_code": "CMACGM",
+      "cbs_entry_point": "NLWKP0131JLKN",
+      "cbs_entry_point_eta": "2026-12-01T02:00:00Z",
+      "berth_at_arrival": "BEANR0910101700"
+    },
+    {
+      "ship": {
+        "ship_name": "TRANS ADRIATIC",
+        "imo_number": "9263928",
+        "call_sign": "C6YQ3",
+        "ship_type": "CHTAN"
+      },
+      "stay_number": "V316669",
+      "previous_port_of_call": "Teesport",
+      "previous_port_of_call_locode": "GBTEE",
+      "next_port_of_call": "Brunsbuttel",
+      "next_port_of_call_locode": "DEBRB",
+      "agent_name": "EURO NORDIC AGENCIES BELGIUM NV",
+      "agent_code": "EUNOAB",
+      "cbs_entry_point": "NLWKP0131JLKN",
+      "cbs_entry_point_eta": "2026-11-21T22:00:00Z",
+      "berth_at_arrival": "BEANR01726L0527"
+    },
+    {
+      "ship": {
+        "ship_name": "CMA CGM PREGOLIA",
+        "imo_number": "9745500",
+        "call_sign": "9HA4748",
+        "ship_type": "CONTS"
+      },
+      "stay_number": "V316679",
+      "previous_port_of_call": "Vlissingen",
+      "previous_port_of_call_locode": "NLVLI",
+      "next_port_of_call": "Tanger Med",
+      "next_port_of_call_locode": "MAPTM",
+      "agent_name": "CMA CGM BELGIUM NV",
+      "agent_code": "CMACGM",
+      "cbs_entry_point": "NLVLI00132VSL",
+      "cbs_entry_point_eta": "2026-11-26T23:00:00Z",
+      "berth_at_arrival": "BEANR0910101700"
+    },
+    {
+      "etd": "2026-11-20T21:00:00Z",
+      "ship": {
+        "ship_name": "MORNING PILOT",
+        "imo_number": "9669031",
+        "call_sign": "V7ER7",
+        "ship_type": "VEHCA"
+      },
+      "stay_number": "V316868",
+      "previous_port_of_call": "Wallhamn",
+      "previous_port_of_call_locode": "SEWAL",
+      "next_port_of_call": "Southampton",
+      "next_port_of_call_locode": "GBSOU",
+      "agent_name": "WILHELMSEN PORT SERVICES BELGIUM NV",
+      "agent_code": "WILSSA",
+      "cbs_entry_point": "NLWKP0131JLKN",
+      "cbs_entry_point_eta": "2026-11-19T15:00:00Z",
+      "stay_start": "2026-11-19T20:32:00Z",
+      "berth_at_arrival": "BEANR09006L1305",
+      "berth_at_departure": "BEANR09006L1305"
+    },
+    {
+      "ship": {
+        "ship_name": "TIAN ZHEN",
+        "imo_number": "9722728",
+        "call_sign": "BOAV",
+        "ship_type": "CARGO"
+      },
+      "stay_number": "V317111",
+      "previous_port_of_call": "Rotterdam",
+      "previous_port_of_call_locode": "NLRTM",
+      "next_port_of_call": "Cuxhaven",
+      "next_port_of_call_locode": "DECUX",
+      "agent_name": "NEWMAN SHIPPING & AGENCY CO NV",
+      "agent_code": "NEWMAN",
+      "cbs_entry_point": "NLWKP0131JLKN",
+      "cbs_entry_point_eta": "2026-11-21T02:00:00Z",
+      "berth_at_arrival": "BEANR09005L1215"
+    },
+    {
+      "ship": {
+        "ship_name": "AGNES ESSBERGER",
+        "imo_number": "9327047",
+        "call_sign": "CQAJ6",
+        "ship_type": "CHTAN"
+      },
+      "stay_number": "V317335",
+      "previous_port_of_call": "Butzfleth",
+      "previous_port_of_call_locode": "DEBUZ",
+      "next_port_of_call": "Belgische zee",
+      "next_port_of_call_locode": "BESEA",
+      "agent_name": "VERTOMCORY ANTWERP BV",
+      "agent_code": "VERTOA",
+      "cbs_entry_point": "NLWKP0131JLKN",
+      "cbs_entry_point_eta": "2026-11-22T21:00:00Z",
+      "berth_at_arrival": "BEANR01737L751A"
+    },
+    {
+      "ship": {
+        "ship_name": "MARLA SAMURAI",
+        "imo_number": "1050868",
+        "call_sign": "V7A4043",
+        "ship_type": "BULKC"
+      },
+      "stay_number": "V317393",
+      "previous_port_of_call": "Phu My",
+      "previous_port_of_call_locode": "VNPHU",
+      "next_port_of_call": "Belgische zee",
+      "next_port_of_call_locode": "BESEA",
+      "agent_name": "GANS CARGO OPERATIONS BELGIUM",
+      "agent_code": "GANS",
+      "cbs_entry_point": "BESEA0WESTLKW",
+      "cbs_entry_point_eta": "2026-11-24T03:00:00Z",
+      "berth_at_arrival": "BEANR09005L1227"
+    }
+  ]
+}
