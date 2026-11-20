@@ -1,0 +1,120 @@
+{
+  "collected_at_utc": "2026-11-20T11:41:38Z",
+  "date_param": "2026-11-20T11:26:31Z",
+  "count_in_response": 665,
+  "count_new_or_changed": 6,
+  "data": [
+    {
+      "etd": "2026-11-20T20:30:00Z",
+      "ship": {
+        "ship_name": "BALTIC ENABLER",
+        "imo_number": "9884681",
+        "call_sign": "SBTP",
+        "ship_type": "RORO"
+      },
+      "stay_number": "V316910",
+      "previous_port_of_call": "Zeebrugge",
+      "previous_port_of_call_locode": "BEZEE",
+      "next_port_of_call": "Travemunde",
+      "next_port_of_call_locode": "DETRV",
+      "agent_name": "PROMAR AGENCIES (BELGIUM) NV",
+      "agent_code": "PROMAR",
+      "cbs_entry_point": "BEZEE07503ZEE",
+      "cbs_entry_point_eta": "2026-11-18T21:00:00Z",
+      "stay_start": "2026-11-19T02:01:00Z",
+      "berth_at_arrival": "BEANR09005L1217",
+      "berth_at_departure": "BEANR09102L1712"
+    },
+    {
+      "etd": "2026-11-21T04:30:00Z",
+      "ship": {
+        "ship_name": "HENRIKE SCHEPERS",
+        "imo_number": "9404091",
+        "call_sign": "V2HS5",
+        "ship_type": "CONTS"
+      },
+      "stay_number": "V317052",
+      "previous_port_of_call": "Brest",
+      "previous_port_of_call_locode": "FRBES",
+      "next_port_of_call": "Brest",
+      "next_port_of_call_locode": "FRBES",
+      "agent_name": "MSC BELGIUM NV",
+      "agent_code": "MSCBEL",
+      "cbs_entry_point": "BESEA0WESTLKW",
+      "cbs_entry_point_eta": "2026-11-16T23:00:00Z",
+      "stay_start": "2026-11-20T11:39:00Z",
+      "berth_at_arrival": "BEANR09103L1726",
+      "berth_at_departure": "BEANR09103L1726"
+    },
+    {
+      "ship": {
+        "ship_name": "HANSA MUNKSUND",
+        "imo_number": "9429223",
+        "call_sign": "CQ2824",
+        "ship_type": "CONTS"
+      },
+      "stay_number": "V317197",
+      "previous_port_of_call": "Cork",
+      "previous_port_of_call_locode": "IEORK",
+      "next_port_of_call": "Zeebrugge",
+      "next_port_of_call_locode": "BEZEE",
+      "agent_name": "MSC BELGIUM NV",
+      "agent_code": "MSCBEL",
+      "cbs_entry_point": "BESEA0WESTLKW",
+      "cbs_entry_point_eta": "2026-11-22T03:00:00Z",
+      "berth_at_arrival": "BEANR09103L1726"
+    },
+    {
+      "ship": {
+        "ship_name": "AGNES ESSBERGER",
+        "imo_number": "9327047",
+        "call_sign": "CQAJ6",
+        "ship_type": "CHTAN"
+      },
+      "stay_number": "V317335",
+      "previous_port_of_call": "Butzfleth",
+      "previous_port_of_call_locode": "DEBUZ",
+      "next_port_of_call": "Belgische zee",
+      "next_port_of_call_locode": "BESEA",
+      "agent_name": "VERTOMCORY ANTWERP BV",
+      "agent_code": "VERTOA",
+      "cbs_entry_point": "NLWKP0131JLKN",
+      "cbs_entry_point_eta": "2026-11-22T05:00:00Z",
+      "berth_at_arrival": "BEANR01737L751A"
+    },
+    {
+      "etd": "2026-11-21T08:00:00Z",
+      "ship": {
+        "ship_name": "AMADEUS AMETHIST",
+        "imo_number": "9223435",
+        "call_sign": "PDDW",
+        "ship_type": "CARGO"
+      },
+      "stay_number": "V317390",
+      "previous_port_of_call": "Genk",
+      "previous_port_of_call_locode": "BEGNK",
+      "next_port_of_call": "Rotterdam",
+      "next_port_of_call_locode": "NLRTM",
+      "agent_name": "PROMAR AGENCIES (BELGIUM) NV",
+      "agent_code": "PROMAR",
+      "cbs_entry_point": "BEANR02053ALB",
+      "cbs_entry_point_eta": "2026-11-21T01:00:00Z",
+      "berth_at_arrival": "BEANR01716L0160",
+      "berth_at_departure": "BEANR01716L0160"
+    },
+    {
+      "ship": {
+        "ship_name": "CYMONA LIFE",
+        "imo_number": "1099400",
+        "call_sign": "V7B2935",
+        "ship_type": "BULKC"
+      },
+      "stay_number": "V317392",
+      "agent_name": "BOECKMANS BELGIE NV",
+      "agent_code": "BOEBEL",
+      "cbs_entry_point": "NLWKP0131JLKN",
+      "cbs_entry_point_eta": "2026-11-27T23:00:00Z",
+      "berth_at_arrival": "BEANR09005L1227"
+    }
+  ]
+}
