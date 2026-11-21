@@ -426,12 +426,14 @@ ok = tidal_window(G, path, model, departures, 12, 15.5, 1.55, currents=CurrentMo
 
 It writes `results/<run>/`:
 - `events.csv`: every state change and rule event;
-- `ships.csv`: one row per ship, with the minutes spent in each state;
-- `timeseries.csv`: queues and the use of pilots, tugs, boatmen and quays;
+- `ships.csv`: one row per ship, with the minutes spent in each state and its fuel and emissions (kg: fuel, CO2,
+  NOx, SOx, PM10, and the fuel by activity: sailing, manoeuvring, waiting, berth);
+- `timeseries.csv`: queues, the use of pilots, tugs, boatmen and quays, and the fuel and emissions of each step;
 - `positions.csv.gz`: ship positions every step: under way as (route, distance of the bow along it, sideways
   offset from the centre line, + = starboard), lying still as a node (an anchored ship at its own spot in the
   anchorage, a ship in a lock queue at its waiting place, in a lock at the lock);
-- `summary.json`.
+- `summary.json`, with the block `emissions`: tonnes of fuel and exhaust after the warm-up, a day, by activity and
+  by class, per call, and for the whole run (docs/MODEL.md §17.1, `src/sim/emissions.py`).
 
 `--no-delays` berths containers at their scheduled time; `--no-background` runs containers only.
 
