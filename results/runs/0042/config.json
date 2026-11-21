@@ -1,0 +1,18 @@
+{
+  "label": "emissions-mrv seed 1",
+  "start": "2026-10-21 00:00",
+  "days": 14.0,
+  "warmup": 2.0,
+  "seed": 1,
+  "weather": "bootstrap",
+  "containers": "replay",
+  "container_rate": 1.0,
+  "bunching": true,
+  "delays": true,
+  "background": true,
+  "routing": "lanes",
+  "vts": "baseline",
+  "vts_options": {},
+  "max_minutes": 150.0,
+  "progress_hours": 2.0
+}
