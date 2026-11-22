@@ -12,6 +12,8 @@ a second window, synced to the playhead, with:
               order the VTS treats it, with what each ship waits for), and every berth with the
               ship that is coming to it, lies at it or is leaving it
     Charts    ships by activity, water level, pilots, tugs and boats, queues, wind and visibility
+    Fuel      on the map: the fuel burnt and the exhaust emitted in the area up to the playhead (src/sim/emissions.py);
+              in the statistics: fuel by activity over time and by ship class
     Analysis  time in the area by phase and class, container delays against the schedule, why
               ships waited for the VTS, lock passages, rule events, free quay at the terminals,
               and a searchable table of every ship
@@ -38,6 +40,8 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE = Path(__file__).with_name("viewer_template.html")
+EM_KEYS = ("fuel", "co2", "nox", "sox", "pm")                       # src/sim/emissions.py
+EM_ACTIVITIES = ("sailing", "manoeuvring", "waiting", "berth")
 STATS_JS = Path(__file__).with_name("viewer_stats.js")      # the statistics window's script, inlined
 GRAPH = ROOT / "cache" / "antwerp_scheldt_graph.pkl"
 LAYER_CACHE = ROOT / "cache" / "viewer_layers.json"
@@ -270,6 +274,11 @@ def pack_ships(ships, events, warmup_min, end_min):
         "after_warmup": (ships.spawn_min >= warmup_min).tolist(),
         "phase": {k: v.round(2).tolist() for k, v in phase.items()},
     }
+    # fuel and exhaust emissions of each ship in the area (tonnes; src/sim/emissions.py), runs saved before it: none
+    if "fuel_kg" in ships:
+        cols["em"] = {k: (ships[f"{k}_kg"].fillna(0) / 1000.0).round(4).tolist() for k in EM_KEYS if f"{k}_kg" in ships}
+        cols["em_fuel_by"] = {a: (ships[f"fuel_kg_{a}"].fillna(0) / 1000.0).round(4).tolist() for a in EM_ACTIVITIES
+                              if f"fuel_kg_{a}" in ships}
     # events per ship: [t, event code, detail]
     names = sorted(events.event.dropna().unique())
     code = {n: i for i, n in enumerate(names)}
@@ -380,6 +389,10 @@ def pack_timeseries(ts):
         if c in ts:
             out[c] = [clean(v) for v in ts[c]]
     out["free_quay"] = {c[len("free_quay_"):]: [clean(v) for v in ts[c]] for c in ts.columns if c.startswith("free_quay_")}
+    # fuel and emissions of every step, kg (the viewer adds them up to the playhead)
+    if "fuel_kg" in ts:
+        out["em"] = {k: ts[f"{k}_kg"].fillna(0).round(2).tolist() for k in EM_KEYS if f"{k}_kg" in ts}
+        out["em_fuel_by"] = {a: ts[f"fuel_kg_{a}"].fillna(0).round(2).tolist() for a in EM_ACTIVITIES if f"fuel_kg_{a}" in ts}
     return out
 
 

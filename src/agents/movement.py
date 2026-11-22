@@ -730,6 +730,7 @@ class Mover:
                     0 if in_fairway else 1, ship.clear_order, rng.random())
 
         order = sorted(sailing, key=rank)
+        head0 = {ship.id: ship.head for ship in sailing}       # for the distance made good (emissions.py)
         self._deadlocks(sailing)
         moved, done = {}, set()
         todo = order
@@ -771,6 +772,8 @@ class Mover:
             if not retry:
                 break
             todo = retry
+        for ship in sailing:                                   # the distance each ship made good this step
+            ship.moved_m, ship.moved_k = max(ship.head - head0[ship.id], 0.0), t_index
         arrived = []
         reroutes = 0
         for ship in sailing:

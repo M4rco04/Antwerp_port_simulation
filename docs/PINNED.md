@@ -76,6 +76,24 @@ the canal scaling per canal and Rijkswaterstaat's lock counts. Re-fit and re-val
 - **Two inland craft abreast** at a berth (`ALONGSIDE_PER_BERTH`) is assumed. Not reached at today's traffic;
   find a source before runs with more traffic.
 
+## Fuel and emissions
+
+- **Validation (21 November 2026).** MODEL.md §17.1: main engine factor 1.19 set on MRV 2024, holds on MRV 2025
+  (1.03); the area's fuel 0.98 of the same method on the AIS tracks (runs `0042`-`0044`). Open: container ships
+  sail faster than the AIS's while they move (river 14.6 against 12.3 kn), +37 % fuel; fewer tankers and bulk
+  carriers in the area, berth fuel -23 %; LNG ships and CH4 not modelled. The AIS-track comparison is a scratch
+  script: build it into validate.py. Decided (21 November 2026): the fuel method is accepted as validated; the
+  movement model is not to be changed for the container ships' speed, and the emission module must not make up
+  for it (a factor there would hide a movement error behind a fuel one).
+- **Validation, next.** The yearly totals of the Flemish (VMM, EMMOSS: on request) and Dutch (Emissieregistratie)
+  inventories for the Scheldt and the ports; berth fuel from a source with hours at berth.
+- **Not counted.** Tugs (EMEP Table 3-17 gives their power from GT; the tug list has no GT), pilot boats, and the
+  container ships' time slowed at sea before the area (the fuel the virtual arrival saves).
+- **Shallow water for sea-going ships.** Bolt's term is for inland hulls; the river leg of deep ships is likely low.
+- **Assumed values to check or vary.** Tier II NOₓ for the whole fleet, MDO for all (scrubbers, LNG, shore power),
+  the type splits of bulk/general cargo and tankers, the hotel load of river cruise ships, inland craft burning
+  nothing while lying still.
+
 ## Scenarios
 
 - **Scenario switches** (traffic factors and the like) are left for later; the fitted container mode can scale
