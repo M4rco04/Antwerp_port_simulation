@@ -170,6 +170,35 @@ class ShipView:
         """Metres left of the route part it sails now (to the next lock or the end)."""
         return self._s.remaining_m
 
+    @property
+    def next_lock(self):
+        """The lock it is queued at or in, else the lock its route part ends at (its voyage plan), else None."""
+        s = self._s
+        if s.lock:
+            return s.lock
+        lock = self._next_lock_obj()
+        return lock.name if lock is not None else None
+
+    @property
+    def next_lock_side(self):
+        """The side ("a" or "b") of next_lock it comes from, or None."""
+        s = self._s
+        req = getattr(s, "lock_request", None)
+        if s.lock and req is not None:
+            return req.from_side
+        lock = self._next_lock_obj()
+        if lock is None or not s.route:
+            return None
+        return lock.side_of(s.route[-1])
+
+    def _next_lock_obj(self):
+        s = self._s
+        if s.lock_index is None or s.lock_index < 0 or not s.full_route or s.lock_index >= len(s.full_route):
+            return None
+        return self._sim.lock_of_node.get(s.full_route[s.lock_index])
+
+    avoid_locks = property(lambda self: getattr(self._s, "avoid_locks", None))   # locks its routes keep off (None: not drawn yet)
+
     # its request to the VTS
     waiting = property(lambda self: bool(getattr(self._s, "vts_req", False)))     # in the VTS queue now
     request_t = property(lambda self: self._s.request_t)                           # when it asked (this voyage)
@@ -318,6 +347,15 @@ class View:
         lock passages included): the clock the tide check uses."""
         import numpy as np
         return [float(x) for x in self._vts._times(self._vts._ship(ship), np.asarray(route, dtype=np.int64))]
+
+    def route_locks(self, route):
+        """The locks on a route: [(lock name, index in the route)], in order."""
+        lock_of = self._sim.lock_of_node
+        return [(lock_of[n].name, i) for i, n in enumerate(route) if n in lock_of]
+
+    def pilot_zones(self, route):
+        """The pilot stretches of a route: [(zone, index in the route where it starts)], the first at 0 (MODEL.md §13.1)."""
+        return list(self._sim.pilot_stretches(route))
 
     def tide_ok(self, ship, route, start=None):
         """Would the route stay deep enough for the ship leaving at `start` (default now) and 60 min later?"""

@@ -1,24 +1,30 @@
-"""The simulation pipeline: configuration -> numbered run folder -> simulation -> viewer.
+"""The simulation pipeline: configuration -> run folder -> simulation -> (viewer, when asked for).
 
-Every run gets the next free id and its own folder, results/runs/<id>/ (0001, 0002, ...):
+A run's id is its label: its folder is results/runs/<label>/ (the label cleaned to letters, digits, ".", "_" and "-").
+A run without a label is named <strategy>-<date>-<time>. A label already used is refused, never numbered: run ids are
+not a sequence, so runs made on different branches with different labels merge without conflicts. (Runs from before
+this, 0001 to 0051, keep their numbers.)
 
     config.json      the settings it was run with
     status.json      queued / running / building viewer / done / stopped / failed, with progress and timings
                      (stopped: stopped from the setup page; saved and given a viewer like a finished run)
     run.log          the simulation's log (status lines, warnings)
     ...              the simulation output (ships.csv, events.csv, positions.csv.gz, routes.json, ...)
-    viewer.html      the interactive viewer (src/viz/build_viewer.py), built at the end of every run
+    viewer.html      the interactive viewer (src/viz/build_viewer.py), only when the run asks for one (--viewer, or
+                     the box on the setup page); a finished run's viewer can be built later:
+                     py src/viz/build_viewer.py results/runs/<id>
 
-results/runs/index.html lists all runs with links to their viewers. Runs are started from the setup
+results/runs/index.html lists all runs (generated, not kept in git). Runs are started from the setup
 page (py src/ui/app.py) or from the command line:
 
-    py src/sim/pipeline.py --days 7 --label "baseline"
+    py src/sim/pipeline.py --days 7 --label baseline-7d --viewer
     py src/sim/engine.py --days 7                       # the same: the engine runs through the pipeline
 """
 
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import html
 import json
 import logging
@@ -54,8 +60,10 @@ DEFAULTS = {
     "vts_options": {},                 # options passed to the strategy (its constructor)
     "max_minutes": 60.0,               # stop (and save) after this much wall-clock time
     "progress_hours": 2.0,             # simulated hours between status lines
+    "viewer": False,                   # build the interactive viewer at the end (large: 6 to 115 MB)
 }
-STOP_FILE = "stop.request"           # written by the setup page: finish the step, save, build the viewer
+STOP_FILE = "stop.request"           # written by the setup page: finish the step and save (and build the viewer if asked)
+NAME_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
 DAY_LINE = re.compile(r"day\s+([\d.]+)\s*\|")
 
 
@@ -66,7 +74,7 @@ def clean_config(cfg: dict) -> dict:
     for k in ("days", "warmup", "container_rate", "background_rate", "max_minutes", "progress_hours"):
         out[k] = float(out[k])
     out["seed"] = int(out["seed"])
-    for k in ("bunching", "delays", "background"):
+    for k in ("bunching", "delays", "background", "viewer"):
         out[k] = out[k] if isinstance(out[k], bool) else str(out[k]).lower() in ("1", "true", "yes", "on")
     out["label"] = str(out["label"])[:80]
     out["vts"] = str(out["vts"]).strip() or "baseline"
@@ -98,21 +106,40 @@ def clean_config(cfg: dict) -> dict:
 # ---------------------------------------------------------------------------------------------
 # run folders
 
+def run_name(label, fallback="run"):
+    """A folder name from a label: letters, digits, ".", "_" and "-" kept, anything else one "-"; at most 80
+    characters. An empty label gives <fallback>-<date>-<time>."""
+    name = NAME_CHARS.sub("-", str(label or "").strip()).strip("-.")[:80]
+    return name or f"{NAME_CHARS.sub('-', fallback).strip('-.') or 'run'}-{datetime.now():%Y%m%d-%H%M%S}"
+
+
+def new_folder(parent: Path, label, fallback="run") -> Path:
+    """Create parent/<run_name(label)>. A label already used is refused (ValueError); an automatic name that is taken
+    (two runs in the same second) gets -2, -3, ..."""
+    parent.mkdir(parents=True, exist_ok=True)
+    name = run_name(label, fallback)
+    path, k = parent / name, 2
+    while True:
+        try:
+            path.mkdir()
+            return path
+        except FileExistsError:
+            if str(label or "").strip():
+                raise ValueError(f"the label {name!r} is already used in {parent.name}: choose another one")
+            path, k = parent / f"{name}-{k}", k + 1
+
+
 def run_ids():
-    return sorted(int(p.name) for p in RUNS.glob("[0-9][0-9][0-9][0-9]") if p.is_dir())
+    """The ids of every run folder (a folder with a config.json), oldest first by creation."""
+    if not RUNS.is_dir():
+        return []
+    found = [p for p in RUNS.iterdir() if p.is_dir() and (p / "config.json").is_file()]
+    return [p.name for p in sorted(found, key=lambda p: (read_status(p).get("created") or "", p.name))]
 
 
 def new_run(cfg: dict) -> Path:
-    """Create the next run folder with its config and a queued status; returns its path."""
-    RUNS.mkdir(parents=True, exist_ok=True)
-    n = (run_ids() or [0])[-1] + 1
-    while True:
-        path = RUNS / f"{n:04d}"
-        try:
-            path.mkdir()
-            break
-        except FileExistsError:
-            n += 1
+    """Create the run's folder (named by its label) with its config and a queued status; returns its path."""
+    path = new_folder(RUNS, cfg.get("label"), cfg.get("vts") or "run")
     (path / "config.json").write_text(json.dumps(cfg, indent=2))
     write_status(path, state="queued", created=now_iso(), progress=0.0)
     write_index()
@@ -191,16 +218,20 @@ def execute(path: Path) -> dict:
         manual = sim.stop_reason == "stopped manually"
         write_status(path, state="saving", progress=round(min(sim.t / 1440 / cfg["days"], 1.0), 4) if manual else 1.0)
         summary = sim.save(path)
-        write_status(path, state="building viewer")
-        import build_viewer
-        viewer, size = build_viewer.build(path)
+        viewer = size = None
+        if cfg.get("viewer"):
+            write_status(path, state="building viewer")
+            import build_viewer
+            viewer, size = build_viewer.build(path)
         keep = ("days", "stopped_early", "stop_reason", "ships_generated", "ships_finished_after_warmup", "still_in_area",
                 "removed_infeasible", "anchored_mean")
         stop.unlink(missing_ok=True)
         write_status(path, state="stopped" if manual else "done", finished=now_iso(), wall_s=round(time.time() - t0),
                      note=f"stopped manually at day {sim.t / 1440:.2f} of {cfg['days']:g}; everything up to then is saved" if manual else None,
-                     viewer=viewer.name, viewer_mb=round(size / 1e6, 1), summary={k: summary.get(k) for k in keep})
-        logging.getLogger("pipeline").info("run %s done in %.0f s: %s", path.name, time.time() - t0, path / viewer.name)
+                     viewer=viewer.name if viewer else None, viewer_mb=round(size / 1e6, 1) if size else None,
+                     summary={k: summary.get(k) for k in keep})
+        logging.getLogger("pipeline").info("run %s done in %.0f s: %s", path.name, time.time() - t0,
+                                           path / viewer.name if viewer else path)
         return summary
     except Exception as e:                                   # the run fails, the folder says why
         logging.getLogger("pipeline").error("run %s failed: %s", path.name, e)
@@ -226,8 +257,8 @@ def run(cfg: dict) -> Path:
 
 def list_runs():
     out = []
-    for n in reversed(run_ids()):
-        p = RUNS / f"{n:04d}"
+    for name in reversed(run_ids()):
+        p = RUNS / name
         try:
             cfg = json.loads((p / "config.json").read_text())
         except (FileNotFoundError, json.JSONDecodeError):
@@ -244,8 +275,8 @@ def write_index():
     for r in list_runs():
         c, s = r["config"], r["status"]
         sm = s.get("summary") or {}
-        link = f'<a href="{r["id"]}/viewer.html">open viewer</a>' if r["viewer"] else ""
-        rows.append(f"<tr><td>{r['id']}</td><td>{html.escape(c.get('label', ''))}</td><td>{html.escape(s.get('state', ''))}</td>"
+        link = f'<a href="{html.escape(r["id"])}/viewer.html">open viewer</a>' if r["viewer"] else ""
+        rows.append(f"<tr><td>{html.escape(r['id'])}</td><td>{html.escape(s.get('state', ''))}</td>"
                     f"<td>{html.escape(str(c.get('start', '')))}</td><td>{c.get('days', '')}</td><td>{c.get('seed', '')}</td>"
                     f"<td>{html.escape(str(c.get('containers', '')))}</td><td>{html.escape(str(c.get('vts', 'baseline')))}</td>"
                     f"<td>{sm.get('ships_generated', '')}</td>"
@@ -254,7 +285,7 @@ def write_index():
             "<style>body{font:14px system-ui,sans-serif;margin:24px}table{border-collapse:collapse}"
             "td,th{padding:4px 10px;border-bottom:1px solid #ddd;text-align:left}</style>"
             "<h1>Simulation runs</h1><p>Start new runs from the setup page: <code>py src/ui/app.py</code></p>"
-            "<table><tr><th>Id</th><th>Label</th><th>State</th><th>Start</th><th>Days</th><th>Seed</th>"
+            "<table><tr><th>Run</th><th>State</th><th>Start</th><th>Days</th><th>Seed</th>"
             "<th>Containers</th><th>VTS</th><th>Ships</th><th>Created</th><th></th></tr>" + "".join(rows) + "</table>")
     (RUNS / "index.html").write_text(page, encoding="utf-8")
 
@@ -277,7 +308,8 @@ def parse_options(items):
 
 def parser():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--label", default=DEFAULTS["label"], help="a name for the run")
+    p.add_argument("--label", default=DEFAULTS["label"],
+                   help="the run's id and folder name (results/runs/<label>); must be new. Default: <strategy>-<date>-<time>")
     p.add_argument("--start", default=DEFAULTS["start"])
     p.add_argument("--days", type=float, default=DEFAULTS["days"])
     p.add_argument("--warmup", type=float, default=DEFAULTS["warmup"])
@@ -303,7 +335,8 @@ def parser():
     p.add_argument("--progress-hours", type=float, default=DEFAULTS["progress_hours"], help="simulated hours between status lines")
     p.add_argument("--max-minutes", type=float, default=DEFAULTS["max_minutes"], help="stop (and save) after this much wall-clock time")
     p.add_argument("--run-dir", type=Path, help="run an existing, queued run folder (used by the setup page)")
-    p.add_argument("--open", action="store_true", help="open the viewer when the run is done")
+    p.add_argument("--viewer", action="store_true", help="build the interactive viewer at the end (large files)")
+    p.add_argument("--open", action="store_true", help="build the viewer and open it when the run is done")
     return p
 
 
@@ -319,12 +352,16 @@ def main():
                "bunching": not a.no_bunching, "delays": not a.no_delays, "background": not a.no_background,
                "background_rate": a.background_rate,
                "routing": a.routing, "vts": a.vts, "vts_options": parse_options(a.vts_option),
-               "max_minutes": a.max_minutes, "progress_hours": a.progress_hours}
-        path = new_run(clean_config(cfg))
+               "max_minutes": a.max_minutes, "progress_hours": a.progress_hours, "viewer": a.viewer or a.open}
+        try:
+            path = new_run(clean_config(cfg))
+        except ValueError as e:
+            raise SystemExit(str(e))
         logging.getLogger("pipeline").info("run %s: %s", path.name, path)
         execute(path)
-    print(f"run {path.name}: {path / 'viewer.html'}")
-    if a.open:
+    viewer = path / "viewer.html"
+    print(f"run {path.name}: {viewer if viewer.is_file() else path}")
+    if a.open and viewer.is_file():
         import webbrowser
         webbrowser.open((path / "viewer.html").resolve().as_uri())
 

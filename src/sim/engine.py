@@ -19,7 +19,7 @@ exit. Pilots change zone at Vlissingen and at the locks.
 
 Usage:
     py src/sim/engine.py --days 7 --seed 1 [--progress-hours 2] [--max-minutes 60]
-Run through src/sim/pipeline.py (results/runs/<id>/, with a viewer). Writes: events.csv, ships.csv, timeseries.csv, summary.json, positions.csv.gz (+ routes.json),
+Run through src/sim/pipeline.py (results/runs/<label>/, with a viewer when asked for: --viewer). Writes: events.csv, ships.csv, timeseries.csv, summary.json, positions.csv.gz (+ routes.json),
 levels.csv.gz, port_state.json.gz (locks, VTS queue and berths over time, src/sim/port_state.py)
 """
 
@@ -2645,7 +2645,7 @@ class Simulation:
 
 
 def main():
-    """Every run goes through the pipeline: a numbered folder in results/runs/ with its viewer."""
+    """Every run goes through the pipeline: a folder results/runs/<label>/ (and a viewer with --viewer)."""
     import pipeline
     pipeline.main()
 

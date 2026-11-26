@@ -61,13 +61,17 @@ td.n { text-align: right; font-variant-numeric: tabular-nums; }
 a { color: var(--accent); }
 .small { font-size: 12px; color: var(--ink2); }
 .empty { color: var(--ink2); }
+.strats label { display: flex; align-items: center; gap: 6px; margin: 2px 0; color: var(--ink); }
+td.good { color: var(--good); } td.bad { color: var(--critical); }
+.items { margin: 4px 0 0; padding-left: 18px; } .items li { margin: 2px 0; }
+.cmp td, .cmp th { white-space: nowrap; } .cmp-wrap { overflow-x: auto; }
 @media (max-width: 900px) { main { grid-template-columns: 1fr; padding: 16px; } .field { grid-template-columns: 1fr; } .hint { grid-column: 1; } }
 </style>
 </head>
 <body>
 <header>
   <h1>Antwerp port simulation</h1>
-  <p>Set up a run, start it, and open its viewer when it is done. Every run gets an id and its own folder in <code>results/runs/</code>.</p>
+  <p>Set up a run and start it. A run's label is its id and its folder in <code>results/runs/</code>; tick <i>Viewer</i> to get the interactive viewer.</p>
 </header>
 <main>
 <section>
@@ -75,7 +79,8 @@ a { color: var(--accent); }
     <h2>New run</h2>
     <fieldset>
       <legend>Run</legend>
-      <div class="field"><label for="label">Label</label><input type="text" id="label" maxlength="80" placeholder="e.g. baseline, +20 % containers"></div>
+      <div class="field"><label for="label">Label</label><input type="text" id="label" maxlength="80" placeholder="e.g. loaded-S1-seed1001">
+        <div class="hint">The run's id and folder name (results/runs/&lt;label&gt;): must be new. Letters, digits, . _ - (other characters become -). Empty: &lt;strategy&gt;-&lt;date&gt;-&lt;time&gt;</div></div>
       <div class="field"><label for="start">Start (UTC)</label><input type="datetime-local" id="start">
         <div class="hint" id="starthint">The container schedule covers 20 Oct to 22 Nov 2026</div></div>
       <div class="field"><label for="days">Days simulated</label><input type="number" id="days" min="0.05" step="any"></div>
@@ -99,7 +104,9 @@ a { color: var(--accent); }
       <legend>Navigation</legend>
       <div class="field"><label for="routing">Routes</label>
         <select id="routing"><option value="lanes">Hold the starboard side of the buoyed fairway</option><option value="shortest">Shortest path (keep right only as a preference)</option></select></div>
-      <div class="field"><label for="vts">VTS strategy</label><input type="text" id="vts" placeholder="baseline" title="a strategy from src/strategies (baseline, container_first, ...) or module:Class: docs/VTS_API.md"></div>
+      <div class="field"><label for="vts">VTS strategy</label>
+        <select id="vts" title="the traffic-management strategy of the run (src/strategies, docs/VTS_API.md)"><option value="baseline">baseline</option></select>
+        <div class="hint" id="vtshint">First come first served: the strategy the model is calibrated with</div></div>
     </fieldset>
     <fieldset>
       <legend>Weather</legend>
@@ -110,14 +117,38 @@ a { color: var(--accent); }
       <legend>Limits</legend>
       <div class="field"><label for="max_minutes">Stop after (min)</label><input type="number" id="max_minutes" min="1" step="1">
         <div class="hint">Wall-clock limit; the run is saved where it got to. About 1–2 min per simulated day</div></div>
+      <div class="field"><label for="viewer">Viewer</label><span class="check"><input type="checkbox" id="viewer"> Build the interactive viewer at the end</span>
+        <div class="hint">Off: no viewer.html (6 to 115 MB). It can be built later: py src/viz/build_viewer.py results/runs/&lt;id&gt;</div></div>
     </fieldset>
     <button class="primary" type="submit" id="go">Start run</button>
     <button type="button" id="reset">Defaults</button>
     <div class="msg" id="msg" role="status"></div>
   </form>
+  <form class="card" id="evalform">
+    <h2>Evaluation</h2>
+    <p class="small">Several strategies on the same seeds, one after the other (<code>replicate.py</code>), each compared with the baseline seed by seed. Results in <code>results/replications/</code>; the plan in <code>results/evaluations/</code>. Not while a single run is going.</p>
+    <div class="field"><label for="ev_scenario">Scenario</label>
+      <select id="ev_scenario"><option value="loaded">Loaded: containers ×1.25, other traffic ×1.25</option><option value="base">Base: present traffic (×1.0)</option><option value="stress">Stress: containers ×1.25, other traffic ×1.75</option><option value="custom">Custom: the traffic set in the run form above</option></select>
+      <div class="hint">All three use the Poisson container process, so they differ only in load (docs/strategies/run_plan.md)</div></div>
+    <div class="field"><label>Strategies</label><div id="ev_strats" class="small">…</div>
+      <div class="hint">The baseline is always run too: it is what the others are compared with</div></div>
+    <div class="field"><label for="ev_reps">Replications</label><input type="number" id="ev_reps" min="1" max="20" value="3"></div>
+    <div class="field"><label for="ev_seed">First seed</label><input type="number" id="ev_seed" value="2001">
+      <div class="hint">Seeds follow it (2001, 2002, …); every strategy gets the same ones</div></div>
+    <div class="field"><label for="ev_workers">At once</label><input type="number" id="ev_workers" min="1" max="3" value="3">
+      <div class="hint">Replications run side by side (at most 3: memory)</div></div>
+    <div class="field"><label for="ev_days">Days</label><input type="number" id="ev_days" min="1" step="any" value="18"></div>
+    <div class="field"><label for="ev_warmup">Warm-up days</label><input type="number" id="ev_warmup" min="0" step="any" value="11"></div>
+    <div class="field"><label for="ev_label">Label</label><input type="text" id="ev_label" placeholder="e.g. loaded-all"></div>
+    <div class="small" id="ev_estimate"></div>
+    <button class="primary" id="ev_go" type="submit">Start evaluation</button>
+    <div class="msg" id="ev_msg"></div>
+  </form>
 </section>
 <section>
   <div class="card" id="current"><h2>Current run</h2><p class="empty">No run is going.</p></div>
+  <div class="card"><h2>Evaluations</h2><div id="evals"><p class="empty">No evaluations yet.</p></div></div>
+  <div class="card" id="cmpcard" style="display:none"></div>
   <div class="card"><h2>Runs</h2><div id="runs"><p class="empty">No runs yet.</p></div>
     <p class="small">Also listed in <code>results/runs/index.html</code>.</p></div>
 </section>
@@ -126,14 +157,14 @@ a { color: var(--accent); }
 "use strict";
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const FIELDS = ["label", "start", "days", "warmup", "seed", "containers", "container_rate", "bunching", "delays", "background", "background_rate", "routing", "vts", "weather", "max_minutes"];
+const FIELDS = ["label", "start", "days", "warmup", "seed", "containers", "container_rate", "bunching", "delays", "background", "background_rate", "routing", "vts", "weather", "max_minutes", "viewer"];
 let DEF = {};
 function fill(cfg) {
   for (const k of FIELDS) { const el = $(k); if (!el || cfg[k] === undefined) continue;
     if (el.type === "checkbox") el.checked = !!cfg[k];
     else if (k === "start") el.value = String(cfg[k]).replace(" ", "T").slice(0, 16);
     else el.value = cfg[k]; }
-  toggle();
+  toggle(); if (typeof strategyHint === "function" && STRATS.length) strategyHint();
 }
 function read() { const c = {}; for (const k of FIELDS) { const el = $(k); c[k] = el.type === "checkbox" ? el.checked : (el.type === "number" ? +el.value : el.value); }
   c.start = c.start.replace("T", " "); return c; }
@@ -176,9 +207,9 @@ async function poll() {
   let data;
   try { data = await (await fetch("/api/runs")).json(); } catch { return; }
   const runs = data.runs;
-  $("runs").innerHTML = runs.length ? `<table><thead><tr><th>Id</th><th>Label</th><th>State</th><th>Settings</th><th class="n">Ships</th><th>Created</th><th></th></tr></thead><tbody>${
+  $("runs").innerHTML = runs.length ? `<table><thead><tr><th>Run</th><th>State</th><th>Settings</th><th class="n">Ships</th><th>Created</th><th></th></tr></thead><tbody>${
     runs.map(r => { const s = r.status, sm = s.summary || {};
-      return `<tr><td>${r.id}</td><td>${esc(r.config.label)}</td><td>${stateCell(s.state)}${s.error ? `<div class="small">${esc(s.error)}</div>` : ""}</td>
+      return `<tr><td>${esc(r.id)}</td><td>${stateCell(s.state)}${s.error ? `<div class="small">${esc(s.error)}</div>` : ""}</td>
         <td class="small">${settings(r.config)}${s.note ? `<div>${esc(s.note)}</div>` : ""}</td><td class="n">${sm.ships_generated ?? ""}</td><td class="small">${esc(s.created || "")}</td>
         <td>${r.viewer ? `<a href="/runs/${r.id}/viewer.html" target="_blank" rel="noopener">Open viewer</a>` : ""}</td></tr>`; }).join("")}</tbody></table>` : `<p class="empty">No runs yet.</p>`;
   const cur = runs.find(r => data.running.includes(r.id));
@@ -188,7 +219,7 @@ async function poll() {
     if (logFor !== cur.id) logFor = cur.id;
     let lines = [];
     try { lines = (await (await fetch(`/api/runs/${cur.id}/log`)).json()).lines; } catch {}
-    $("current").innerHTML = `<h2>Current run: ${cur.id}${cur.config.label ? ` · ${esc(cur.config.label)}` : ""}</h2>
+    $("current").innerHTML = `<h2>Current run: ${esc(cur.id)}</h2>
       <div>${stateCell(s.state)} <span class="small">${pct} % of ${cur.config.days} simulated days</span></div>
       <div class="bar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><div style="width:${pct}%"></div></div>
       <div class="small">${esc(s.last_line || "")}</div>
@@ -207,7 +238,117 @@ async function poll() {
       : `<p class="empty">No run is going.</p>`);
   }
 }
-(async () => { DEF = await (await fetch("/api/defaults")).json(); fill(DEF); poll(); setInterval(poll, 2000); })();
+let STRATS = [];
+function strategyHint() {
+  const s = STRATS.find(x => x.name === $("vts").value);
+  $("vtshint").textContent = s ? s.description + (s.levers && s.levers.length ? ` (levers: ${s.levers.join(", ")})` : "") : "";
+}
+async function loadStrategies() {
+  try { STRATS = (await (await fetch("/api/strategies")).json()).strategies || []; } catch (e) { STRATS = []; }
+  if (!STRATS.length) return;
+  $("vts").innerHTML = STRATS.map(s => `<option value="${esc(s.name)}">${esc(s.label)}</option>`).join("");
+}
+$("vts").addEventListener("change", strategyHint);
+
+// ------------------------------------------------------------------ evaluations
+const PORT4 = ["local_lookahead", "chain_planning", "equilibrium_guidance", "evolutionary_guidance"];
+let EVRUN = null, EVLOG = null;
+function evalStrategies() {
+  const box = $("ev_strats");
+  const list = STRATS.length ? STRATS : [{name: "baseline", label: "baseline"}];
+  box.className = "strats small";
+  box.innerHTML = list.map(s => `<label><input type="checkbox" value="${esc(s.name)}" ${s.name === "baseline" ? "checked disabled" : (PORT4.includes(s.name) ? "checked" : "")}> ${esc(s.label || s.name)}</label>`).join("");
+  box.querySelectorAll("input").forEach(i => i.addEventListener("change", evalEstimate));
+  evalEstimate();
+}
+function evalChosen() { return [...$("ev_strats").querySelectorAll("input:checked")].map(i => i.value); }
+function evalEstimate() {
+  const n = evalChosen().length, reps = +$("ev_reps").value || 1, w = Math.min(+$("ev_workers").value || 1, 3), days = +$("ev_days").value || 0;
+  const hours = n * Math.ceil(reps / w) * days * 3.75 / 60 * (w > 1 ? 1.15 : 1);   // ~3.5-4 min per simulated day (baseline)
+  $("ev_estimate").textContent = n ? `${n} strategies × ${reps} replications: about ${hours.toFixed(1)} h at the baseline's speed (S3/S4 may be slower)` : "";
+}
+["ev_reps", "ev_workers", "ev_days"].forEach(k => $(k).addEventListener("input", evalEstimate));
+$("evalform").onsubmit = async e => {
+  e.preventDefault();
+  const c = read();
+  const body = { scenario: $("ev_scenario").value, strategies: evalChosen(), reps: +$("ev_reps").value, seed: +$("ev_seed").value,
+    workers: +$("ev_workers").value, days: +$("ev_days").value, warmup: +$("ev_warmup").value, label: $("ev_label").value,
+    start: c.start, weather: c.weather, containers: c.containers, container_rate: c.container_rate, background_rate: c.background_rate || 1 };
+  if (body.warmup >= body.days) { $("ev_msg").className = "msg err"; $("ev_msg").textContent = "The warm-up must be shorter than the run."; return; }
+  $("ev_go").disabled = true; $("ev_msg").className = "msg"; $("ev_msg").textContent = "Starting…";
+  const r = await fetch("/api/evaluations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const j = await r.json();
+  $("ev_go").disabled = false;
+  if (!r.ok) { $("ev_msg").className = "msg err"; $("ev_msg").textContent = j.error || "Could not start the evaluation."; return; }
+  $("ev_msg").textContent = `Evaluation ${j.id} started.`;
+  pollEvals();
+};
+function evState(s) { return stateCell(s === "cancelled" ? "stopped" : s); }
+async function pollEvals() {
+  let j;
+  try { j = await (await fetch("/api/evaluations")).json(); } catch (e) { return; }
+  EVRUN = j.running;
+  $("ev_go").disabled = !!EVRUN;
+  const list = j.evaluations || [];
+  if (!list.length) { $("evals").innerHTML = `<p class="empty">No evaluations yet.</p>`; return; }
+  $("evals").innerHTML = list.map(ev => {
+    const st = ev.settings, sc = st.scenario === "custom" ? `custom (containers ×${st.container_rate}, other ×${st.background_rate})` : st.scenario;
+    const items = ev.items.map(it => `<li>${evState(it.state)} ${esc(it.strategy)}${it.replication ? ` <span class="small">→ results/replications/${esc(it.replication)}</span>` : ""}${it.state === "running" || it.state === "failed" ? ` <a href="#" data-log="${ev.id}/${it.n}">log</a>` : ""}</li>`).join("");
+    const done = ev.items.filter(it => it.state === "done").length;
+    return `<div style="margin-bottom:12px"><b>${esc(ev.id)}</b> ${esc(ev.label)} ${evState(ev.state)}
+      <div class="small">${esc(sc)} · ${st.reps} × ${st.days} d (warm-up ${st.warmup}) · seeds from ${st.seed} · created ${esc(ev.created)}</div>
+      <ul class="items">${items}</ul>
+      ${ev.id === EVRUN ? `<button data-stop="${ev.id}">Stop</button> ` : ""}${done >= 2 ? `<button data-cmp="${ev.id}">Compare with the baseline</button>` : ""}
+      ${EVLOG && EVLOG.startsWith(ev.id + "/") ? `<pre id="evlog">…</pre>` : ""}</div>`;
+  }).join("");
+  $("evals").querySelectorAll("[data-stop]").forEach(b => b.onclick = async () => {
+    if (!confirm("Stop this evaluation? The strategy running now is lost; finished ones keep their results.")) return;
+    await fetch(`/api/evaluations/${b.dataset.stop}/stop`, { method: "POST" }); pollEvals(); });
+  $("evals").querySelectorAll("[data-cmp]").forEach(b => b.onclick = () => showCompare(b.dataset.cmp));
+  $("evals").querySelectorAll("[data-log]").forEach(a => a.onclick = e => { e.preventDefault(); EVLOG = EVLOG === a.dataset.log ? null : a.dataset.log; pollEvals(); });
+  if (EVLOG && $("evlog")) {
+    const [id, n] = EVLOG.split("/");
+    const l = await (await fetch(`/api/evaluations/${id}/log/${n}`)).json();
+    $("evlog").textContent = (l.lines || []).join("\n") || "(nothing yet)";
+  }
+}
+function fmt(v, unit) {
+  if (v === null || v === undefined) return "–";
+  if (unit === "share") return (100 * v).toFixed(1) + " %";
+  return Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2);
+}
+async function showCompare(id) {
+  const c = await (await fetch(`/api/evaluations/${id}/compare`)).json();
+  const card = $("cmpcard");
+  card.style.display = "";
+  if (!c.has_baseline) { card.innerHTML = `<h2>Comparison ${esc(id)}</h2><p class="empty">The baseline has not finished: nothing to compare with yet.</p>`; return; }
+  const head = `<tr><th>Result</th><th class="n">Baseline</th>${c.strategies.map(s => `<th class="n">${esc(s)}</th>`).join("")}</tr>`;
+  const rows = c.rows.map(r => {
+    const neutral = r.metric.startsWith("utilisation");
+    const cells = c.strategies.map(s => {
+      const x = r.strategies[s];
+      if (!x || x.mean === null) return `<td class="n">–</td>`;
+      let cls = "", tip = "";
+      if (x.diff !== undefined) {
+        tip = `difference ${fmt(x.diff, r.unit)}${x.half_width != null ? " ± " + fmt(x.half_width, r.unit) : ""} (95 %, ${x.seeds} seeds)`;
+        if (x.significant && !neutral) cls = x.diff < 0 ? "good" : "bad";
+      }
+      const pct = x.pct != null ? ` <span class="small">(${x.pct > 0 ? "+" : ""}${x.pct.toFixed(1)} %${x.significant ? "*" : ""})</span>` : "";
+      return `<td class="n ${cls}" title="${esc(tip)}">${fmt(x.mean, r.unit)}${pct}</td>`;
+    }).join("");
+    return `<tr><td>${esc(r.label)} <span class="small">${esc(r.unit)}</span></td><td class="n">${fmt(r.baseline, r.unit)}</td>${cells}</tr>`;
+  }).join("");
+  card.innerHTML = `<h2>Comparison ${esc(id)} · ${esc(c.label)}</h2>
+    <p class="small">Means over the seeds; in brackets the change against the baseline on the same seeds. * the 95 % interval of the paired difference excludes 0 (green: lower, red: higher; pilot and boat use not coloured). Hover a cell for the interval.</p>
+    <div class="cmp-wrap"><table class="cmp">${head}${rows}</table></div>`;
+  card.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+(async () => {
+  await loadStrategies();
+  DEF = await (await fetch("/api/defaults")).json();
+  if (DEF.vts && !STRATS.some(s => s.name === DEF.vts)) $("vts").insertAdjacentHTML("beforeend", `<option value="${esc(DEF.vts)}">${esc(DEF.vts)}</option>`);
+  fill(DEF); strategyHint(); evalStrategies(); poll(); setInterval(poll, 2000); pollEvals(); setInterval(pollEvals, 5000);
+})();
 </script>
 </body>
 </html>

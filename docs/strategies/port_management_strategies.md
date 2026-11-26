@@ -1,6 +1,13 @@
-# Three strategies for running the whole port: local look-ahead, chain planning, equilibrium guidance
+# Strategies for running the whole port: local look-ahead, chain planning, equilibrium guidance, evolutionary planning
 
-Status: **proposal, nothing implemented.** Built on the five papers in `docs/strategies/` (§1), on what the runs
+Status: **S1–S4 implemented (2026-11-26), not yet run.** Code: `src/strategies/local_lookahead.py`, `chain_planning.py`,
+`equilibrium_guidance.py`, `evolutionary_guidance.py`, helpers `_common.py` (B1, B2, B4) and `_games.py`; unit tests
+`tests/test_port_strategies.py`; selectable on the setup page. Not built yet: B3 as a separate forecast (S2 folds it into
+its pilot tables), B5 (disruption wrapper), B6 (metrics script), S2's announcement variant and one-way restrictions.
+S4 was built on S3's game (the user's "equilibrium guidance with an evolutionary algorithm inside") rather than on S2's
+slot builder as §6b first proposed; its chromosome, robust fitness, seeds and operators are as §6b describes.
+
+The proposal below was built on the five papers in `docs/strategies/` (§1), on what the runs
 show about where the time goes (§2: run `0046` and replication `0042`), and on the levers of the strategy API
 (`docs/VTS_API.md`). It extends `vts_strategies_feasible.md`: the lock look-ahead (L), plan-keyed clearance (A1)
 and the evolved priority rule become parts of the strategies below (§8).
@@ -27,6 +34,11 @@ and **lock operation** (when a chamber closes, which chamber a ship takes, who g
 S1 and S3 use the same levers, so comparing them isolates *rules against equilibrium*. S2 at tier 3 against its
 tier-2 variant separates *more power* from *a better algorithm*. S2 with and without announcements separates
 *more information* from both.
+
+A fourth strategy, **S4 Evolutionary rolling-horizon planner** (§6b), runs a genetic algorithm inside the VTS
+every hour. It searches the orders, start times, speeds and lock choices that S2 would otherwise fix greedily,
+and scores them on a fast, noise-perturbed forward model. It uses S2's levers and slot builder, so S4 against S2
+measures the value of search.
 
 ---
 
@@ -85,7 +97,7 @@ plan can therefore only cover ships already in the area, unless the API is exten
 
 ---
 
-## 3. Shared building blocks (build once, use in all three)
+## 3. Shared building blocks (build once, use in all strategies)
 
 | Block | What it does | How it is checked |
 |---|---|---|
@@ -312,7 +324,91 @@ Vickrey bottleneck toll of the earlier arrival-time proposal (A).
 
 ---
 
-## 7. Evaluation, shared by all three
+## 6b. Strategy 4: evolutionary rolling-horizon planner ("a genetic algorithm inside the VTS")
+
+**Why the genetic algorithm runs *inside* the strategy.** The obvious use of a GA, evolving a policy by running
+the simulator for every candidate, is the evolved priority rule. It costs about 670 h serial for stage 1
+(`vts_strategies_feasible.md` §1), because one evaluation is a ~50-min run. Here the GA instead searches, **every
+planning cycle and within a few seconds**, over the joint decisions for the next H hours. It scores candidates on
+a fast forward model built from the shared blocks (B1–B4), not on the simulator. No extra simulator runs are
+needed beyond the usual evaluation. `class EvolutionaryPlanner(Baseline)`, tier 2 (a tier-3 variant adds quay
+positions).
+
+**How it differs from the others.** S2 builds one plan by greedy insertion: the first feasible slot for each ship,
+in a fixed priority order. S4 reuses S2's slot builder as the *decoder*, but searches over the order and the
+choices, so it can find plans greedy insertion cannot (letting a ship go second to fill a lockage, holding a
+departure so that two arrivals share pilots and a boat). S4 against S2 measures **the value of search**. S1 and S3
+decide ship by ship and round by round; S4 optimises the whole horizon jointly.
+
+### 6b.1 Chromosome
+
+One individual is a complete set of decisions for the ships in the horizon (the same players as S2: pilot ships in
+the area or at the edge, and craft within reach of a lock):
+
+| Gene block | Values | Lever |
+|---|---|---|
+| Priority permutation | the order in which the decoder serves ships at every shared resource | clearance order, `lock_priority`, `choose_chamber` |
+| Start offset per ship | {0, 15, 30, 60, 120} min | clearance time (`recheck`), `arrival_delay` at the edge |
+| Speed factor per ship | {1.0, 0.85, 0.7} × planning speed (floor 4 kn) | `set_speed` |
+| Route per ship (where offered) | twin lock / complex A or B | `set_avoid_locks` |
+
+**Decoder**: S2's reservation tables (pilots per zone, pilot boats, chamber lockages with packing, quay). Ships are
+taken in the permutation's order; each gets its start offset and speed, then the earliest feasible slots at or
+after that time. Every decoded plan is feasible by construction, so the GA never has to repair or penalise
+infeasible individuals.
+
+### 6b.2 Fitness: robust, not nominal
+
+`J = Σ_ships [ VOT_class · (waiting + lateness against windows) + fuel (B4) ]` over the horizon, plus a penalty for
+missing a tidal window. It is the same cost as S3's, so S3 and S4 compare like for like.
+
+The reading's warning about stiff plans (§1) is built into the fitness: each individual is decoded on **K = 3
+perturbed futures** (travel times ×N(1, 0.1), a random lock hold drawn at the engine's rates, lock cycles ±20 %),
+and J is their mean. Plans that only work when everything goes right lose to plans with slack. This is
+sample-average robust optimisation, cheap because the decoder is cheap.
+
+### 6b.3 The algorithm
+
+- **Rolling horizon**: H = 4 h, re-optimised every hour and after a disruption (missed slots > 30 %, as in S2's
+  trigger). Between optimisations, orders are executed as in S2 (§5.3).
+- **Warm start**: the new population is the best individuals of the last cycle, shifted by one hour (ships gone
+  removed, new ships inserted at their greedy position), plus S2's greedy plan and S1's decisions as seeds. The GA
+  therefore never does worse than S2 on the forward model; the question is only whether it does better in the
+  simulator.
+- **Operators**: order crossover (OX) on the permutation, uniform crossover on the per-ship genes; swap and
+  insertion mutation on the permutation, a step of ±1 level on the offset and speed genes; tournament selection
+  (k = 3); elitism (best 2 kept).
+- **Size**: population 40, 30 generations, about 1 200 decodes × K = 3 per cycle. The decoder must run in about
+  1 ms (numpy arrays for the tables, packing cached per lockage), giving about 4 s per hourly cycle: about 2 % on
+  top of a run.
+- **Multi-objective variant (optional)**: NSGA-II on (waiting, fuel) in place of the weighted sum. The VTS picks
+  the knee of each cycle's front, and the front shows the waiting–fuel trade-off the port faces *in that hour*.
+
+### 6b.4 What it should change, and what could go wrong
+
+- *Hypotheses*: (H12) S4 beats S2 on the same decoder and levers, measured by waiting and fuel, under load, where
+  interactions between ships are strongest; (H13) robust fitness keeps slot adherence and recovery after
+  disruptions at least as good as S2's buffers, with less waste; (H14) a GA–S2 gap that shrinks at ×1.0 shows when
+  search is worth it.
+- *Risks*: the GA optimises the forward model, not the simulator. If B1–B3 are biased it will exploit the bias, and
+  the more aggressively the more it searches. Mitigations: the estimator checks of §3; comparing *predicted* with
+  *realised* cost per cycle (a large, growing gap is the warning sign); robust fitness. Also: plan churn between
+  cycles (penalise changes to the frozen first 30 min); compute, if the decoder cannot be made fast (fall back to
+  the lock and pilot subproblem only); GA settings (fixed before evaluation, tuned on development seeds only).
+- *Acceptance*: with 0 generations, the S2 greedy plan exactly; the GA's best never worse than its seeds on the
+  forward model; a unit test on a small instance (≤ 8 ships, one lock, one pilot zone) where brute force finds the
+  optimum and the GA reaches it in ≥ 90 % of trials; predicted against realised cost logged every cycle.
+
+### 6b.5 An offline GA layer, if budget allows
+
+The GA's few settings, and S1's index weights (a, b, c, h, the hysteresis), can also be tuned *offline* by a small
+GA over the simulator: about 10 individuals × 5 generations × 2 seeds × short runs with the warm-up snapshot
+(P8), roughly 30–40 h. This is the reduced evolved priority rule of `vts_strategies_feasible.md` §5, and keeps its
+go/no-go gate. It tunes a strategy; it is not a strategy of its own.
+
+---
+
+## 7. Evaluation, shared by all strategies
 
 - **Scenarios**: base (×1.0), **loaded (×1.25, the main case)**, stress (×1.75).
 - **Disruptions**, through B5 and on the loaded scenario: D1 Berendrecht's approach closed for 6 h on day 13;
@@ -325,9 +421,10 @@ Vickrey bottleneck toll of the earlier arrival-time proposal (A).
   baseline; refused orders.
 - **Resilience** (from the reading's lens): during and after a disruption, the peak excess queue, the excess
   ship-hours, and the **recovery time** until the queue is within 10 % of the undisturbed run.
-- **Per strategy**: S2's slot adherence and time in degraded mode; S3's regret and price of anarchy.
+- **Per strategy**: S2's slot adherence and time in degraded mode; S3's regret and price of anarchy; S4's predicted
+  against realised cost per cycle, and its gain over its S2 seed.
 - **Budget**: about 70–75 min per scenario for 3 seeds. Three scenarios plus two disruptions is about 6 h per
-  strategy, so about 25 h for the baseline plus three strategies, before parameter sweeps.
+  strategy, so about 30 h for the baseline plus four strategies, before parameter sweeps.
 
 ---
 
@@ -339,6 +436,8 @@ Vickrey bottleneck toll of the earlier arrival-time proposal (A).
    clearest research result (rules against equilibrium, and the price of anarchy).
 4. **S2** last, reduced first: locks, pilots and boats at tier 2, then quay at tier 3, then announcements. It is
    only worth the build if S1 and S3 leave clear headroom, most likely in the container lateness tail.
+5. **S4** right after S2 (~1 extra week): S2's decoder is most of the work, and the GA is a thin search layer on
+   top of it. If S2 is not built, S4 is not either.
 
 How the earlier proposals fit:
 

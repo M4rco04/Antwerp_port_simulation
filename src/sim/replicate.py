@@ -4,7 +4,7 @@
     py src/sim/replicate.py --days 14 --reps 5 --seed 100 --workers 3 --containers nhpp
 
 One run is one draw: a result is the mean over independent replications with its confidence interval. Each
-replication i runs with seed + i and is saved in results/replications/<id>_<label>/rep_<seed>/ (ships.csv,
+replication i runs with seed + i and is saved in results/replications/<label>/rep_<seed>/ (ships.csv,
 timeseries.csv, summary.json; no positions or viewer). The folder also gets:
 
     replications.csv   one row per replication, one column per result (v.*: the numbers validate.py sets
@@ -60,6 +60,11 @@ def flatten(summary):
         for k, v in (summary.get(group) or {}).items():
             if isinstance(v, (int, float)) and not isinstance(v, bool):
                 row[f"{group}.{k}"] = v
+    em = summary.get("emissions") or {}                # fuel and exhaust after the warm-up (MODEL.md §17.1), tonnes
+    for group in ("after_warmup_per_day", "after_warmup_fuel_by_activity_t"):
+        for k, v in (em.get(group) or {}).items():
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                row[f"emissions.{group}.{k}"] = v
     v = summary.get("vts") or {}                       # the VTS strategy: what it did, changed and had refused
     for k in ("cleared", "cleared_without_pilot", "restrictions_made"):
         if k in v:
@@ -176,11 +181,15 @@ def welch(series, window_steps):
     return mean, smooth, (first if first is not None and first < n // 2 else None)
 
 
-def next_folder(label):
-    OUT.mkdir(parents=True, exist_ok=True)
-    ids = [int(p.name[:4]) for p in OUT.iterdir() if p.is_dir() and p.name[:4].isdigit()]
-    name = f"{max(ids, default=0) + 1:04d}" + ("_" + "".join(ch if ch.isalnum() else "-" for ch in label) if label else "")
-    return OUT / name
+def new_folder(label, vts="baseline"):
+    """results/replications/<label>/, as pipeline.new_folder names runs: the label is the id (refused when it is
+    already used), or rep-<strategy>-<date>-<time> without one. Not a numbered sequence, so replications made on
+    different branches merge without conflicts (those from before this keep their 0001_... names)."""
+    from pipeline import new_folder as make
+    try:
+        return make(OUT, label, f"rep-{vts}")
+    except ValueError as e:
+        raise SystemExit(str(e))
 
 
 def main():
@@ -219,8 +228,7 @@ def main():
            "containers": a.containers, "container_rate": a.container_rate, "bunching": not a.no_bunching,
            "routing": a.routing, "checks": a.checks, "measure_until": a.measure_until, "holdout": a.holdout, "set": a.set,
            "vts": a.vts, "vts_options": parse_options(a.vts_option), "background_rate": a.background_rate}
-    out = next_folder(a.label)
-    out.mkdir(parents=True)
+    out = new_folder(a.label, a.vts)
     (out / "config.json").write_text(json.dumps(cfg, indent=2))
     seeds = [a.seed + i for i in range(a.reps)]
     log.info("%d replications of %.1f days (seeds %d-%d), %d at once -> %s", a.reps, a.days, seeds[0], seeds[-1], a.workers, out)

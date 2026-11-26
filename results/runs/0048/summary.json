@@ -1,0 +1,339 @@
+{
+  "steps": 288,
+  "days": 1.0,
+  "stopped_early": false,
+  "stop_reason": null,
+  "start": "2026-10-21 00:00:00+00:00",
+  "warmup_min": 0.0,
+  "step_min": 5.0,
+  "ships_generated": 362,
+  "removed_infeasible": 0,
+  "ships_finished_after_warmup": 137,
+  "still_in_area": 225,
+  "per_class": {
+    "bulk_general": {
+      "n": 7,
+      "hours_in_area_mean": 6.27,
+      "spawned_h_mean": 0.0,
+      "sailing_h_mean": 4.83,
+      "lock_queue_h_mean": 0.31,
+      "in_lock_h_mean": 0.48,
+      "to_station_h_mean": 0.14,
+      "wait_clearance_h_mean": 0.11,
+      "boarding_h_mean": 0.25,
+      "pilot_change_h_mean": 0.21,
+      "mooring_h_mean": 0.0,
+      "at_berth_h_mean": 0.0,
+      "unmooring_h_mean": 0.0,
+      "dwell_port_h_mean": 0.0,
+      "to_anchorage_h_mean": 0.0,
+      "anchored_h_mean": 0.0
+    },
+    "inland_cargo": {
+      "n": 89,
+      "hours_in_area_mean": 6.29,
+      "spawned_h_mean": 0.0,
+      "sailing_h_mean": 2.91,
+      "lock_queue_h_mean": 0.72,
+      "in_lock_h_mean": 0.94,
+      "to_station_h_mean": 0.0,
+      "wait_clearance_h_mean": 0.0,
+      "boarding_h_mean": 0.0,
+      "pilot_change_h_mean": 0.0,
+      "mooring_h_mean": 0.06,
+      "at_berth_h_mean": 0.69,
+      "unmooring_h_mean": 0.07,
+      "dwell_port_h_mean": 0.52,
+      "to_anchorage_h_mean": 0.18,
+      "anchored_h_mean": 0.24
+    },
+    "inland_tanker": {
+      "n": 38,
+      "hours_in_area_mean": 5.99,
+      "spawned_h_mean": 0.0,
+      "sailing_h_mean": 2.92,
+      "lock_queue_h_mean": 0.72,
+      "in_lock_h_mean": 0.93,
+      "to_station_h_mean": 0.0,
+      "wait_clearance_h_mean": 0.0,
+      "boarding_h_mean": 0.0,
+      "pilot_change_h_mean": 0.0,
+      "mooring_h_mean": 0.04,
+      "at_berth_h_mean": 0.53,
+      "unmooring_h_mean": 0.02,
+      "dwell_port_h_mean": 0.71,
+      "to_anchorage_h_mean": 0.06,
+      "anchored_h_mean": 0.1
+    },
+    "passenger": {
+      "n": 1,
+      "hours_in_area_mean": 7.25,
+      "spawned_h_mean": 0.0,
+      "sailing_h_mean": 4.67,
+      "lock_queue_h_mean": 0.47,
+      "in_lock_h_mean": 2.19,
+      "to_station_h_mean": 0.0,
+      "wait_clearance_h_mean": 0.0,
+      "boarding_h_mean": 0.0,
+      "pilot_change_h_mean": 0.0,
+      "mooring_h_mean": 0.0,
+      "at_berth_h_mean": 0.0,
+      "unmooring_h_mean": 0.0,
+      "dwell_port_h_mean": 0.0,
+      "to_anchorage_h_mean": 0.0,
+      "anchored_h_mean": 0.0
+    },
+    "tanker": {
+      "n": 2,
+      "hours_in_area_mean": 4.99,
+      "spawned_h_mean": 0.0,
+      "sailing_h_mean": 3.2,
+      "lock_queue_h_mean": 0.61,
+      "in_lock_h_mean": 0.49,
+      "to_station_h_mean": 0.25,
+      "wait_clearance_h_mean": 0.08,
+      "boarding_h_mean": 0.25,
+      "pilot_change_h_mean": 0.17,
+      "mooring_h_mean": 0.0,
+      "at_berth_h_mean": 0.0,
+      "unmooring_h_mean": 0.0,
+      "dwell_port_h_mean": 0.0,
+      "to_anchorage_h_mean": 0.0,
+      "anchored_h_mean": 0.0
+    }
+  },
+  "utilisation_mean": {
+    "tugs_busy": 1.22,
+    "pilot_boats_busy": 2.59,
+    "boatmen_busy": 0.35,
+    "pilots_busy_dock": 2.49,
+    "pilots_busy_river": 11.19,
+    "pilots_busy_sea": 10.85
+  },
+  "anchored_mean": 4.3,
+  "release_valves": {
+    "encounter_rule_overridden": 0,
+    "depth_hold_overridden": 0,
+    "squeeze_past": 0,
+    "total": 0,
+    "per_1000_ships": 0.0
+  },
+  "silent": {
+    "next_call_dropped": 0,
+    "next_call_unfit": 0,
+    "destination_redrawn": 0,
+    "berth_wait": 0,
+    "anchorage_full": 0,
+    "no_anchorage": 0
+  },
+  "removed_why": {},
+  "squeeze_where": {},
+  "locks": {
+    "Berendrecht.inland": 19.0,
+    "Berendrecht.sea_going": 10.0,
+    "Boudewijn.inland": 15.0,
+    "Boudewijn.sea_going": 5.0,
+    "Hansweert.inland": 89.0,
+    "Kallo.inland": 12.0,
+    "Kallo.sea_going": 3.0,
+    "Kieldrecht.inland": 9.0,
+    "Kieldrecht.sea_going": 3.0,
+    "Kreekrak.inland": 120.0,
+    "Kreekrak.sea_going": 1.0,
+    "Terneuzen.inland": 103.0,
+    "Terneuzen.sea_going": 16.0,
+    "Van Cauwelaert.inland": 49.0,
+    "Van Cauwelaert.sea_going": 5.0,
+    "Zandvliet.inland": 20.0,
+    "Zandvliet.sea_going": 5.0
+  },
+  "vts": {
+    "strategy": "local_lookahead",
+    "description": "S1: each resource on its own with a short look-ahead (lock balancing, look-ahead lockages, JIT speeds)",
+    "levers": [
+      "clearance",
+      "anchorage",
+      "speed",
+      "lock_route",
+      "lock_chamber",
+      "lockage"
+    ],
+    "options": {},
+    "hooks": [
+      "avoid_locks",
+      "choose_chamber",
+      "keep_lock_open",
+      "on_request",
+      "on_tick"
+    ],
+    "cleared": 66,
+    "cleared_without_pilot": 413,
+    "rejected": {},
+    "overrides": {
+      "lock_chamber": 60,
+      "lockage": 98
+    },
+    "restrictions_made": 0
+  },
+  "emissions": {
+    "units": "tonnes; per day: tonnes a day; per call: tonnes a ship",
+    "after_warmup": {
+      "fuel_t": 440.53,
+      "co2_t": 1409.402,
+      "nox_t": 22.545,
+      "sox_t": 0.689,
+      "pm_t": 0.469
+    },
+    "after_warmup_per_day": {
+      "fuel_t": 440.53,
+      "co2_t": 1409.402,
+      "nox_t": 22.545,
+      "sox_t": 0.689,
+      "pm_t": 0.469
+    },
+    "after_warmup_fuel_by_activity_t": {
+      "sailing": 339.498,
+      "manoeuvring": 40.576,
+      "waiting": 17.25,
+      "berth": 43.206
+    },
+    "whole_run": {
+      "fuel_t": 440.53,
+      "co2_t": 1409.402,
+      "nox_t": 22.545,
+      "sox_t": 0.689,
+      "pm_t": 0.469
+    },
+    "days_after_warmup": 1.0,
+    "after_warmup_by_class": {
+      "bulk_general": {
+        "fuel_t": 99.164,
+        "co2_t": 317.919,
+        "nox_t": 5.678,
+        "sox_t": 0.194,
+        "pm_t": 0.106,
+        "fuel_t_sailing": 84.289,
+        "fuel_t_manoeuvring": 6.072,
+        "fuel_t_waiting": 2.576,
+        "fuel_t_berth": 6.227
+      },
+      "container": {
+        "fuel_t": 142.247,
+        "co2_t": 456.045,
+        "nox_t": 8.289,
+        "sox_t": 0.278,
+        "pm_t": 0.151,
+        "fuel_t_sailing": 113.181,
+        "fuel_t_manoeuvring": 12.652,
+        "fuel_t_waiting": 3.647,
+        "fuel_t_berth": 12.766
+      },
+      "inland_cargo": {
+        "fuel_t": 53.247,
+        "co2_t": 168.954,
+        "nox_t": 2.177,
+        "sox_t": 0.001,
+        "pm_t": 0.068,
+        "fuel_t_sailing": 43.186,
+        "fuel_t_manoeuvring": 9.548,
+        "fuel_t_waiting": 0.513,
+        "fuel_t_berth": 0.0
+      },
+      "inland_tanker": {
+        "fuel_t": 34.832,
+        "co2_t": 110.521,
+        "nox_t": 1.424,
+        "sox_t": 0.001,
+        "pm_t": 0.044,
+        "fuel_t_sailing": 29.579,
+        "fuel_t_manoeuvring": 4.874,
+        "fuel_t_waiting": 0.378,
+        "fuel_t_berth": 0.0
+      },
+      "passenger": {
+        "fuel_t": 3.659,
+        "co2_t": 11.7,
+        "nox_t": 0.16,
+        "sox_t": 0.005,
+        "pm_t": 0.004,
+        "fuel_t_sailing": 1.496,
+        "fuel_t_manoeuvring": 0.248,
+        "fuel_t_waiting": 0.535,
+        "fuel_t_berth": 1.381
+      },
+      "tanker": {
+        "fuel_t": 107.381,
+        "co2_t": 344.263,
+        "nox_t": 4.817,
+        "sox_t": 0.21,
+        "pm_t": 0.097,
+        "fuel_t_sailing": 67.766,
+        "fuel_t_manoeuvring": 7.181,
+        "fuel_t_waiting": 9.601,
+        "fuel_t_berth": 22.833
+      }
+    },
+    "per_call": {
+      "bulk_general": {
+        "n": 7,
+        "fuel_t_per_call": 2.034,
+        "co2_t_per_call": 6.521,
+        "nox_t_per_call": 0.106,
+        "sox_t_per_call": 0.004,
+        "pm_t_per_call": 0.002,
+        "fuel_t_per_call_sailing": 1.845,
+        "fuel_t_per_call_manoeuvring": 0.135,
+        "fuel_t_per_call_waiting": 0.054,
+        "fuel_t_per_call_berth": 0.0
+      },
+      "inland_cargo": {
+        "n": 89,
+        "fuel_t_per_call": 0.3,
+        "co2_t_per_call": 0.952,
+        "nox_t_per_call": 0.012,
+        "sox_t_per_call": 0.0,
+        "pm_t_per_call": 0.0,
+        "fuel_t_per_call_sailing": 0.238,
+        "fuel_t_per_call_manoeuvring": 0.059,
+        "fuel_t_per_call_waiting": 0.003,
+        "fuel_t_per_call_berth": 0.0
+      },
+      "inland_tanker": {
+        "n": 38,
+        "fuel_t_per_call": 0.429,
+        "co2_t_per_call": 1.361,
+        "nox_t_per_call": 0.018,
+        "sox_t_per_call": 0.0,
+        "pm_t_per_call": 0.001,
+        "fuel_t_per_call_sailing": 0.387,
+        "fuel_t_per_call_manoeuvring": 0.037,
+        "fuel_t_per_call_waiting": 0.005,
+        "fuel_t_per_call_berth": 0.0
+      },
+      "passenger": {
+        "n": 1,
+        "fuel_t_per_call": 1.267,
+        "co2_t_per_call": 4.042,
+        "nox_t_per_call": 0.055,
+        "sox_t_per_call": 0.001,
+        "pm_t_per_call": 0.002,
+        "fuel_t_per_call_sailing": 0.885,
+        "fuel_t_per_call_manoeuvring": 0.109,
+        "fuel_t_per_call_waiting": 0.273,
+        "fuel_t_per_call_berth": 0.0
+      },
+      "tanker": {
+        "n": 2,
+        "fuel_t_per_call": 1.657,
+        "co2_t_per_call": 5.314,
+        "nox_t_per_call": 0.095,
+        "sox_t_per_call": 0.003,
+        "pm_t_per_call": 0.002,
+        "fuel_t_per_call_sailing": 1.395,
+        "fuel_t_per_call_manoeuvring": 0.133,
+        "fuel_t_per_call_waiting": 0.13,
+        "fuel_t_per_call_berth": 0.0
+      }
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "label": "smoke-S3",
+  "start": "2026-10-21 00:00",
+  "days": 1.0,
+  "warmup": 0.0,
+  "seed": 1,
+  "weather": "bootstrap",
+  "containers": "nhpp",
+  "container_rate": 1.25,
+  "background_rate": 1.25,
+  "bunching": true,
+  "delays": true,
+  "background": true,
+  "routing": "lanes",
+  "vts": "equilibrium_guidance",
+  "vts_options": {},
+  "max_minutes": 60.0,
+  "progress_hours": 2.0
+}

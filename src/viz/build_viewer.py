@@ -424,8 +424,11 @@ def pack_port(run, idx):
 
 
 def analysis(events, ships_cols):
-    hold = events.loc[events.event == "vts_hold", "reason"].value_counts().to_dict()
-    lock_entries = events.loc[(events.event == "enter") & events.ship.notna(), "lock"].value_counts().to_dict()
+    # a column is missing when no event carried it (a short run with no ship held for clearance has no "reason")
+    hold = (events.loc[events.event == "vts_hold", "reason"].value_counts().to_dict()
+            if "reason" in events.columns else {})
+    lock_entries = (events.loc[(events.event == "enter") & events.ship.notna(), "lock"].value_counts().to_dict()
+                    if "lock" in events.columns else {})
     rule_names = ["overtake_denied", "reroute", "squeeze_past", "hold_encounter_rule", "held_for_ulcv",
                   "weather_hold", "fallback_berth", "draught_capped", "no_anchorage", "anchorage_full", "infeasible"]
     rules = {n: int((events.event == n).sum()) for n in rule_names}

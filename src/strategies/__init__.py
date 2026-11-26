@@ -3,6 +3,12 @@
     baseline          the first-come-first-served VTS the model is calibrated with (the reference)
     container_first   an example: the baseline with container ships first in the clearance and lock queues
     template          every hook, documented, doing what the baseline does: copy it to start a new strategy
+    local_lookahead   S1: each resource on its own with a short look-ahead (docs/strategies/port_management_strategies.md)
+    chain_planning    S2: a rolling plan of time slots with buffers and a degraded mode
+    equilibrium_guidance   S3: an approximate Nash equilibrium of the ships' guidance game each round (PULSE)
+    evolutionary_guidance  S4: the same game searched by a genetic algorithm on perturbed futures
+
+Modules whose name starts with "_" are helpers, not strategies (_common: shared estimators, _games: game solvers).
 
 A run names its strategy: Simulation(vts="baseline"), pipeline.py --vts baseline. Besides the names of the modules
 here, a strategy can be given as "package.module:Class" or "path/to/file.py:Class" (a strategy kept elsewhere), and
