@@ -10,7 +10,7 @@ engine's own. The components, each with an option to switch it off (all off: the
     index       resources: within the baseline's classes, container ships late for their berth window go first
     reserve     resources: a few river pilots and pilot boats are kept for tide-dependent ships whose high water is near
     lookahead   locks: an idle chamber waits for a ship really coming when that is cheaper than making it wait a cycle
-    chamber     locks: a ship queues at the chamber it can enter earliest
+    chamber     locks: an inland craft queues at the chamber it can enter earliest (sea-going ships: the engine)
     jit         speed: a ship heading for a long lock queue slows down to arrive when it can go in
 
 Options (with their defaults): the switches above (True), horizon_min 30, hysteresis_min 15, complex_hysteresis_min 45,
@@ -180,7 +180,11 @@ class LocalLookahead(Baseline):
 
     # ------------------------------------------------------------------ locks
     def choose_chamber(self, ship, lock, options, default):
-        if not self.on["chamber"] or len(options) < 2:
+        # inland craft only: a sea-going ship goes before the craft queued at its side (lock priority 3 against 4),
+        # which the estimate does not see, so it would think the ship's wait longer than it is; the engine's lock
+        # planner also moves a sea-going ship to a chamber open at its side (MODEL.md §14). Phase 0 (run 0048): a
+        # tanker moved this way at Terneuzen waited 0.88 h against 0.23 h
+        if not self.on["chamber"] or len(options) < 2 or ship.sea_going:
             return None
         model, _ = self.snapshot()
         side = ship.next_lock_side

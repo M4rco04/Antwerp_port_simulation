@@ -170,3 +170,33 @@ def test_lock_wait_grows_with_the_queue_and_the_chamber_being_away():
     busy = C.LockModel(FakeView({"Kreekrak": {"east": chamber(waiting_a=[f"s{i}" for i in range(2 * cap)])}}))
     assert busy.entry_min("Kreekrak", "a", 110, 11.4) == pytest.approx(2 * 2 * tc)
     assert m.entry_min("Kreekrak", "a", 400, 11.4) is None      # too long for the chamber
+
+
+class SpeedShip(FakeShip):
+    def __init__(self, sea=9.5, river=8.6, plan=9.0, **kw):
+        super().__init__(**kw)
+        self._top = {"sea": sea, "river": river}
+        self._plan = plan
+        self.next_lock_side = "a"
+
+    def max_speed_kn(self, leg="river"):
+        return self._top[leg]
+
+    def planning_speed_kn(self, leg="river"):
+        return self._plan
+
+
+def test_speed_orders_stay_within_what_the_engine_accepts():
+    from strategies.equilibrium_guidance import EquilibriumGuidance
+    # its own top speed is below its class's planning speed (its spread): an order at the planning speed is clamped
+    slow = SpeedShip(sea=8.2, river=8.0, plan=9.0)
+    assert EquilibriumGuidance.speed_order(slow, 9.0) == pytest.approx(8.2)
+    assert EquilibriumGuidance.speed_order(slow, 1.0) == pytest.approx(3.0)     # vts_api.MIN_SPEED_KN
+    assert EquilibriumGuidance.speed_order(slow, 6.5) == pytest.approx(6.5)
+
+
+def test_local_lookahead_leaves_sea_going_ships_chambers_to_the_engine():
+    s = strategies.load("local_lookahead")
+    s.start()
+    tanker = SpeedShip(cls="tanker", loa=180.0, beam=28.0, draught=10.0, sea_going=True)
+    assert s.choose_chamber(tanker, "Terneuzen", ["Terneuzen west lock", "Terneuzen east lock"], "Terneuzen west lock") is None
