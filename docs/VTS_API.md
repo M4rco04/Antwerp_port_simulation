@@ -141,7 +141,7 @@ A ship already inside carries on. `who` filters the ships: `min_loa`, `min_beam`
 
 - **Ships:** `requests()` (waiting ships, in the order they asked), `ships()` (all in the area), `ship(id)`, `at_sea()` (ships held at sea and the minute they will enter), `default_priority(ship)` (the baseline's order).
 - **A ship** (`ShipView`): what it is (`cls`, `loa`, `beam`, `draught`, `teu`, `dg`, `needs_pilot`, `tide_dependent`, `ulcv`, `distress`), where it is and goes (`state`, `departing`, `terminal`, `destination`, `exit`, `berth`, `anchorage`, `lock`, `node`, `position`, `target`, `remaining_m`), its request (`waiting`, `request_t`, `request_kind`, `wait_reason`, `at_station`, `ready`, `waited_min`), a container ship's `scheduled_berth_min`, its speeds (`max_speed_kn(leg)`, `planning_speed_kn(leg)`, `ordered_speed_kn`), `rank`, `tugs_needed()`, `pilots_needed(zone)`.
-- **Resources:** `pilots_free(zone)`, `pilots_total(zone)`, `pilot_boats_free()`, `tugs()`, `locks()`, `anchorages()`, `terminals()`, `terminal_free(name, at)`, `berth_holder(id)`, `zone_berths(zone)`.
+- **Resources:** `pilots_free(zone)`, `pilots_total(zone)`, `pilot_boats_free()`, `tugs()`, `locks()` (each chamber: state, side, size, the ships inside and queued at each side), `anchorages()`, `terminals()`, `terminal_free(name, at)`, `berth_holder(id)`, `zone_berths(zone)`.
 - **Water and time:** `now`, `step_min` (5), `round_min` (15), `travel_minutes(ship, route)` (planning speed, speed limits and locks, the clock of the tide check), `tide_ok(ship, route, start)`, `high_waters()`, `water_level(node, minute)`, `weather(minute)`, `stretches()`, `restrictions()`.
 - **Randomness:** `rng`, the strategy's own random stream from the seed. Draws from it move nothing else in the model.
 

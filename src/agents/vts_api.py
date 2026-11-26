@@ -285,7 +285,8 @@ class View:
                 for t in self._sim.tugs.tugs]
 
     def locks(self):
-        """Every lock: {name: {chamber: {"state", "side", "inside", "waiting_a", "waiting_b", "timer_min"}}}."""
+        """Every lock: {name: {chamber: {"state", "side", "length_m", "width_m", "inside", "waiting_a", "waiting_b",
+        "timer_min"}}}: the ship ids inside and queued at each side (queued: asked, including ships still on their way)."""
         return {name: lock.summary() for name, (_, lock) in self._sim.locks.items()}
 
     def anchorages(self):

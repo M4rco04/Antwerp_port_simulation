@@ -1,0 +1,11 @@
+{
+  "state": "failed",
+  "created": "2026-11-21 01:20:28",
+  "progress": 0.277,
+  "id": "0042",
+  "started": "2026-11-21 01:20:29",
+  "error": "'NoneType' object is not iterable",
+  "last_line": "day 11.08 | area 1072 done  4758 removed   0 | sailing 107 blocked   0 berth 557 anchored  31 vts  41 lockq 32 | pilots s/r/d 38/47/11 tugs 15 | 2392 s wall, 216 s per day",
+  "finished": "2026-11-21 02:01:05",
+  "wall_s": 2436
+}

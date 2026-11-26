@@ -448,8 +448,14 @@ class Lock:
             # then missed the lockage it was called to and waited a whole cycle at the gate: Terneuzen's
             # sea-going passages 1.68 h at the 90th percentile against 1.33 h, MODEL.md §19)
             coming = [s for s in c.queue[c.side] if s is not ship and s.priority < ship.priority and t < s.ready_at < math.inf]
-            if pack(c.length_m, c.width_m, [p.ship for p in c.ships] + coming + [ship],
-                    self.times.gap_long_m, self.times.gap_side_m) is not None:
+            inside = [p.ship for p in c.ships]
+            # it must also pack with those inside alone: that is what _finish packs once it is in, and the greedy
+            # packing is not monotone (a set can fit where the same set less one ship does not: one case in a
+            # hundred of random fills). Checked with the ships coming only, a run at 1.75 times the traffic packed a
+            # chamber into None and stopped (run 0042)
+            if (pack(c.length_m, c.width_m, inside + coming + [ship], self.times.gap_long_m, self.times.gap_side_m) is not None
+                    and (not coming or pack(c.length_m, c.width_m, inside + [ship], self.times.gap_long_m,
+                                            self.times.gap_side_m) is not None)):
                 return ship
         return None
 
@@ -464,8 +470,12 @@ class Lock:
                 return [self._event("exit", t, c, item.ship, side=c.side)]
             if kind == "enter":
                 item.entered_at = t
-                c.ships = pack(c.length_m, c.width_m, [p.ship for p in c.ships] + [item],
-                               self.times.gap_long_m, self.times.gap_side_m)
+                packed = pack(c.length_m, c.width_m, [p.ship for p in c.ships] + [item],
+                              self.times.gap_long_m, self.times.gap_side_m)
+                if packed is None:                 # cannot happen after _next_to_enter's check; say where if it does
+                    raise RuntimeError(f"{self.name} {c.name}: {item.ship_id} went in but does not pack with "
+                                       f"{[p.ship.ship_id for p in c.ships]}")
+                c.ships = packed
                 return [self._event("enter", t, c, item, side=c.side)]
             if kind == "pass":
                 return [self._event("passed", t, c, item, side=other_side(item.from_side))]
@@ -485,7 +495,8 @@ class Lock:
         return []
 
     def summary(self):
-        return {c.name: {"state": c.state, "side": c.side, "inside": [p.ship.ship_id for p in c.ships],
+        return {c.name: {"state": c.state, "side": c.side, "length_m": c.length_m, "width_m": c.width_m,
+                         "inside": [p.ship.ship_id for p in c.ships],
                          "waiting_a": [s.ship_id for s in c.queue["a"]],
                          "waiting_b": [s.ship_id for s in c.queue["b"]], "timer_min": round(c.timer_min, 1)}
                 for c in self.chambers}

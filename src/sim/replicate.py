@@ -115,7 +115,8 @@ def one(job):
                             warmup_days=cfg["warmup"], background=cfg["background"], weather_mode=cfg["weather"],
                             container_mode=cfg["containers"], container_rate=cfg["container_rate"],
                             bunching=cfg["bunching"], routing=cfg["routing"], checks=cfg["checks"],
-                            vts=cfg.get("vts", "baseline"), vts_options=cfg.get("vts_options"))
+                            vts=cfg.get("vts", "baseline"), vts_options=cfg.get("vts_options"),
+                            background_rate=cfg.get("background_rate"))
     sim.run(progress_hours=1e9)
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
@@ -197,6 +198,8 @@ def main():
     p.add_argument("--containers", choices=("replay", "weeks", "nhpp"), default="weeks")
     p.add_argument("--container-rate", type=float, default=1.0)
     p.add_argument("--no-bunching", action="store_true")
+    p.add_argument("--background-rate", type=float, default=None,
+                   help="multiply the arrival rate of the other traffic (default: generator.BACKGROUND_RATE_FACTOR, 1)")
     p.add_argument("--routing", choices=("lanes", "shortest"), default="lanes")
     p.add_argument("--checks", action="store_true", help="check the model's invariants every step (slower)")
     p.add_argument("--measure-until", type=float, help="day of the run at which the validation numbers (v.*) end; default: its end")
@@ -215,7 +218,7 @@ def main():
            "delays": not a.no_delays, "background": not a.no_background, "weather": a.weather,
            "containers": a.containers, "container_rate": a.container_rate, "bunching": not a.no_bunching,
            "routing": a.routing, "checks": a.checks, "measure_until": a.measure_until, "holdout": a.holdout, "set": a.set,
-           "vts": a.vts, "vts_options": parse_options(a.vts_option)}
+           "vts": a.vts, "vts_options": parse_options(a.vts_option), "background_rate": a.background_rate}
     out = next_folder(a.label)
     out.mkdir(parents=True)
     (out / "config.json").write_text(json.dumps(cfg, indent=2))

@@ -350,7 +350,7 @@ class PositionLog:
 class Simulation:
     def __init__(self, start="2026-10-21 00:00", days=7.0, seed=1, delays=True, warmup_days=2.0, background=True,
                  weather_mode="bootstrap", container_mode="replay", container_rate=1.0, bunching=True,
-                 routing="lanes", checks=False, vts="baseline", vts_options=None):
+                 routing="lanes", checks=False, vts="baseline", vts_options=None, background_rate=None):
         t0 = time.time()
         self.checks = checks                           # check the invariants every step (check_invariants)
         self.dt_min = DT_MIN
@@ -438,6 +438,7 @@ class Simulation:
             lock.planner = self.vts
         self.generator = Generator(self.start, self.streams["arrivals"], delays=delays, background=background,
                                    container_mode=container_mode, rate_factor=container_rate, bunching=bunching,
+                                   background_rate=background_rate,
                                    rng_attributes=self.streams["attributes"], rng_stays=self.streams["stays"],
                                    quay_m={name: sum(b - a for a, b in T.suitable_intervals(None, True))
                                            for name, T in self.terminals.items()})

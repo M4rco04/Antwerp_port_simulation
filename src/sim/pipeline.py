@@ -43,6 +43,8 @@ DEFAULTS = {
     "containers": "replay",            # replay the schedule; weeks: a schedule of whole real weeks drawn at
                                        # random; nhpp: a Poisson process fitted to it
     "container_rate": 1.0,             # nhpp: multiplies the container arrival rate
+    "background_rate": 1.0,            # multiplies the arrival rate of the other traffic (bulk, tankers, inland craft,
+                                       # passenger ships), in every container mode
     "bunching": True,                  # nhpp: daily gamma factor (liner calls bunch)
     "delays": True,                    # replay: draw the AIS delay against the schedule
     "background": True,                # non-container traffic
@@ -61,7 +63,7 @@ def clean_config(cfg: dict) -> dict:
     """Defaults filled in, values of the right type, nonsense refused (ValueError)."""
     out = dict(DEFAULTS)
     out.update({k: v for k, v in (cfg or {}).items() if k in DEFAULTS and v is not None and v != ""})
-    for k in ("days", "warmup", "container_rate", "max_minutes", "progress_hours"):
+    for k in ("days", "warmup", "container_rate", "background_rate", "max_minutes", "progress_hours"):
         out[k] = float(out[k])
     out["seed"] = int(out["seed"])
     for k in ("bunching", "delays", "background"):
@@ -86,6 +88,8 @@ def clean_config(cfg: dict) -> dict:
         raise ValueError("the warm-up must be shorter than the run")
     if not 0 < out["container_rate"] <= 5:
         raise ValueError("container rate must be between 0 and 5")
+    if not 0 < out["background_rate"] <= 5:
+        raise ValueError("other traffic rate must be between 0 and 5")
     if out["max_minutes"] <= 0:
         raise ValueError("max minutes must be positive")
     return out
@@ -180,7 +184,7 @@ def execute(path: Path) -> dict:
         sim = engine.Simulation(cfg["start"], cfg["days"], cfg["seed"], cfg["delays"], cfg["warmup"], cfg["background"],
                                 weather_mode=cfg["weather"], container_mode=cfg["containers"],
                                 container_rate=cfg["container_rate"], bunching=cfg["bunching"], routing=cfg["routing"],
-                                vts=cfg["vts"], vts_options=cfg["vts_options"])
+                                vts=cfg["vts"], vts_options=cfg["vts_options"], background_rate=cfg["background_rate"])
         write_status(path, state="running")
         stop = path / STOP_FILE
         sim.run(cfg["progress_hours"], cfg["max_minutes"], should_stop=stop.exists)
@@ -288,6 +292,8 @@ def parser():
     p.add_argument("--container-rate", type=float, default=DEFAULTS["container_rate"],
                    help="nhpp: multiply the fitted container arrival rate (scenarios)")
     p.add_argument("--no-bunching", action="store_true", help="nhpp: plain Poisson, without the daily gamma factor")
+    p.add_argument("--background-rate", type=float, default=DEFAULTS["background_rate"],
+                   help="multiply the arrival rate of the other traffic (bulk, tankers, inland craft, passenger ships)")
     p.add_argument("--routing", choices=("lanes", "shortest"), default=DEFAULTS["routing"],
                    help="lanes: ships hold the starboard side of the buoyed fairway; shortest: the shortest allowed path")
     p.add_argument("--vts", default=DEFAULTS["vts"],
@@ -311,6 +317,7 @@ def main():
         cfg = {"label": a.label, "start": a.start, "days": a.days, "warmup": a.warmup, "seed": a.seed,
                "weather": a.weather, "containers": a.containers, "container_rate": a.container_rate,
                "bunching": not a.no_bunching, "delays": not a.no_delays, "background": not a.no_background,
+               "background_rate": a.background_rate,
                "routing": a.routing, "vts": a.vts, "vts_options": parse_options(a.vts_option),
                "max_minutes": a.max_minutes, "progress_hours": a.progress_hours}
         path = new_run(clean_config(cfg))

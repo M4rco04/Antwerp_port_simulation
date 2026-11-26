@@ -1,0 +1,23 @@
+Traceback (most recent call last):
+  File "C:\St00dia\Antwerp_port_simulation\src\sim\pipeline.py", line 190, in execute
+    sim.run(cfg["progress_hours"], cfg["max_minutes"], should_stop=stop.exists)
+    ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\St00dia\Antwerp_port_simulation\src\sim\engine.py", line 2483, in run
+    self.step()
+    ~~~~~~~~~^^
+  File "C:\St00dia\Antwerp_port_simulation\src\sim\engine.py", line 2300, in step
+    self._locks(now)                                                          # 4 resources
+    ~~~~~~~~~~~^^^^^
+  File "C:\St00dia\Antwerp_port_simulation\src\sim\engine.py", line 2233, in _locks
+    for e in lock.step(now, DT_MIN, levels):
+             ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "C:\St00dia\Antwerp_port_simulation\src\environment\locks.py", line 311, in step
+    events += self._advance(chamber, now, dt, levels)
+              ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\St00dia\Antwerp_port_simulation\src\environment\locks.py", line 325, in _advance
+    if not self._start_next(c, t, levels, events):
+           ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\St00dia\Antwerp_port_simulation\src\environment\locks.py", line 354, in _start_next
+    leaving = [p for p in c.ships if p.ship.from_side != here]
+                          ^^^^^^^
+TypeError: 'NoneType' object is not iterable

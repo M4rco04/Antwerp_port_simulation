@@ -92,6 +92,8 @@ a { color: var(--accent); }
         <div class="hint">1.2 = 20 % more container calls</div></div>
       <div class="field nhpp"><label for="bunching">Bunching</label><span class="check"><input type="checkbox" id="bunching"> liner calls bunch by day</span></div>
       <div class="field"><label for="background">Other traffic</label><span class="check"><input type="checkbox" id="background"> bulk, tankers, inland craft, passenger ships</span></div>
+      <div class="field"><label for="background_rate">Other traffic ×</label><input type="number" id="background_rate" min="0.1" max="5" step="any">
+        <div class="hint">1.25 = 25 % more bulk carriers, tankers, inland craft and passenger ships (any container mode)</div></div>
     </fieldset>
     <fieldset>
       <legend>Navigation</legend>
@@ -124,7 +126,7 @@ a { color: var(--accent); }
 "use strict";
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const FIELDS = ["label", "start", "days", "warmup", "seed", "containers", "container_rate", "bunching", "delays", "background", "routing", "vts", "weather", "max_minutes"];
+const FIELDS = ["label", "start", "days", "warmup", "seed", "containers", "container_rate", "bunching", "delays", "background", "background_rate", "routing", "vts", "weather", "max_minutes"];
 let DEF = {};
 function fill(cfg) {
   for (const k of FIELDS) { const el = $(k); if (!el || cfg[k] === undefined) continue;
@@ -165,7 +167,7 @@ function stateCell(s) { const st = s || "unknown"; const cls = st === "done" ? "
 function settings(c) {
   const parts = [`${c.days} d from ${esc(c.start)}`, `seed ${c.seed}`,
     c.containers === "nhpp" ? `containers: Poisson ×${c.container_rate}${c.bunching ? "" : ", no bunching"}` : `containers: schedule${c.delays ? " + delays" : ""}`,
-    c.background ? "" : "no other traffic", c.routing === "shortest" ? "shortest routes" : "fairway lanes",
+    c.background ? (c.background_rate && c.background_rate != 1 ? `other traffic ×${c.background_rate}` : "") : "no other traffic", c.routing === "shortest" ? "shortest routes" : "fairway lanes",
     c.vts && c.vts !== "baseline" ? `VTS: ${esc(c.vts)}` : "", `weather: ${c.weather}`];
   return parts.filter(Boolean).join(" · ");
 }

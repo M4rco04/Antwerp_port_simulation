@@ -59,7 +59,8 @@ QUAY_GAP_M = 22.5                          # between two ships at a quay (termin
 SCHEDULE_TZ = "Europe/Brussels"
 WEEK_TZ = SCHEDULE_TZ                    # the day of the week of the background arrivals (EP.WEEKDAY_FACTOR)
 # Scenarios: a factor on the arrival rate of every background class (inland craft, bulk carriers, tankers,
-# passenger ships). 1 is today's traffic. Set per run: replicate.py --set generator.BACKGROUND_RATE_FACTOR=1.5;
+# passenger ships). 1 is today's traffic. Set per run: pipeline.py / replicate.py --background-rate 1.5 (the setup page:
+# "Other traffic ×"), or replicate.py --set generator.BACKGROUND_RATE_FACTOR=1.5;
 # containers are scaled with --containers nhpp --container-rate (the replay and weeks modes cannot be scaled).
 BACKGROUND_RATE_FACTOR = 1.0
 SCHEDULE_YEAR = 2026
@@ -175,6 +176,7 @@ def read_schedule(path=SCHEDULE):
 class Generator:
     def __init__(self, start, rng, delays=True, schedule=SCHEDULE, background=True, containers=True,
                  container_mode="replay", rate_factor=1.0, bunching=True, rng_attributes=None, quay_m=None,
+                 background_rate=None,
                  unscheduled=True, rng_stays=None):
         self.start = pd.Timestamp(start)
         self.rng = rng
@@ -182,6 +184,8 @@ class Generator:
         self.rng_stay = self.rng_att if rng_stays is None else rng_stays     # the stay ratios (a stream of their own)
         self.delays = delays
         self.background = background
+        # the factor on the background rates: the run's (Simulation(background_rate=...)), else BACKGROUND_RATE_FACTOR
+        self.background_rate = BACKGROUND_RATE_FACTOR if background_rate is None else float(background_rate)
         self.counter = itertools.count(1)
         self.pending = []
         self.nhpp = None
@@ -460,7 +464,7 @@ class Generator:
         for cls in BACKGROUND_CLASSES:
             day_factor = getattr(EP, "WEEKDAY_FACTOR", {}).get(cls, [1.0] * 7)[weekday]
             for source, rate in EP.RATE_PER_HOUR[cls].items():
-                lam = rate * EP.HOURLY_FACTOR[cls][hour] * day_factor * BACKGROUND_RATE_FACTOR * dt / 60.0
+                lam = rate * EP.HOURLY_FACTOR[cls][hour] * day_factor * self.background_rate * dt / 60.0
                 scale = INLAND_TRIP_SCALE if cls in INLAND_CLASSES and source in INLAND_SCALED_SOURCES else 1.0
                 top = max(scale, INLAND_TRIP_SCALE_ANTWERP or 0.0) if scale != 1.0 else 1.0
                 lam *= top
