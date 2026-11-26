@@ -1,24 +1,24 @@
 {
   "state": "done",
-  "created": "2026-11-21 02:07:05",
+  "created": "2026-11-21 13:07:27",
   "progress": 1.0,
   "id": "0043",
-  "started": "2026-11-21 02:07:05",
+  "started": "2026-11-21 13:07:27",
   "error": null,
-  "last_line": "day 29.86 | area 1075 done 14227 removed   0 | sailing 122 blocked   0 berth 521 anchored  23 vts  37 lockq 105 | pilots s/r/d 34/43/18 tugs 2 | 7200 s wall, 241 s per day",
-  "finished": "2026-11-21 04:09:18",
-  "wall_s": 7333,
+  "last_line": "day 14.00 | area  562 done  3607 removed   0 | sailing  44 blocked   0 berth 285 anchored  14 vts  14 lockq 12 | pilots s/r/d 17/23/9 tugs 4 |  734 s wall,  52 s per day",
+  "finished": "2026-11-21 14:00:29",
+  "wall_s": 3182,
   "note": null,
   "viewer": "viewer.html",
-  "viewer_mb": 115.0,
+  "viewer_mb": 32.2,
   "summary": {
-    "days": 29.86,
-    "stopped_early": true,
-    "stop_reason": "wall-clock limit",
-    "ships_generated": 15302,
-    "ships_finished_after_warmup": 6422,
-    "still_in_area": 1075,
+    "days": 14.0,
+    "stopped_early": false,
+    "stop_reason": null,
+    "ships_generated": 4169,
+    "ships_finished_after_warmup": 3022,
+    "still_in_area": 562,
     "removed_infeasible": 0,
-    "anchored_mean": 28.15
+    "anchored_mean": 12.89
   }
 }

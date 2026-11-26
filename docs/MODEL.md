@@ -864,6 +864,108 @@ A run records every ship's timeline, every event, and the state of the port each
 
 **Warm-up.** The run starts empty; ships entering in the first 2 days (by default) are excluded from the statistics, so they cover a port that has filled up.
 
+### 17.1 Fuel and exhaust emissions
+
+Every step, every ship in the area burns fuel for what it is doing, and its exhaust follows from the fuel and the energy (`src/sim/emissions.py`). It is bookkeeping only: it reads the ships' states, the distance each made good in the step, its draught and the water and current where it is, and draws no random numbers, so a run is the same run with it or without it (§1), and two strategies run on the same seeds are compared ship by ship. The sources are in `ecology/`: the Fourth IMO GHG Study 2020 (IMO), the EMEP/EEA guidebook 2023, chapter 1.A.3.d (EMEP), MAN's Basic principles of ship propulsion (MAN), the Dutch EMS protocol for inland shipping (EMS, 2018) and Bolt's estimate of the energy use of inland ships (Bolt, 2003).
+
+**Engines of a sea-going ship.** The model knows no ship's engines. A ship gets the mean main engine power (MCR) and design speed v\_ref of its type and size in the 2018 fleet (IMO Table 35): container ships by TEU; bulk carriers, general cargo ships and tankers by deadweight, which is estimated from the hull (MAN Table 1.01: block coefficient C\_B and lightweight over deadweight; L\_pp = 0.97 LOA, assumed):
+
+```math
+\mathrm{DWT} = \frac{1.025\, C_B\, L_{pp}\, B\, T}{1 + \mathrm{lwt}/\mathrm{dwt}}, \qquad (C_B,\ \mathrm{lwt/dwt}) = (0.80, 0.20)\ \text{bulk and general cargo},\ (0.76, 0.30)\ \text{tankers},\ (0.70, 0.40)\ \text{gas carriers}
+```
+
+Below 10,000 t a ship of the class bulk/general cargo takes the general-cargo bins, above it the bulk carriers'; tankers below 60,000 t the chemical tankers', above it the oil tankers'; a tanker carrying gas (hazard category A) the gas carriers' by a cargo volume of 1.5 m³ a tonne (all three assumed). Main engines of 5,000 kW and more are two-stroke (slow-speed, SSD), smaller ones four-stroke (MSD), after MAN Table 1.01.
+
+**Main engine under way.** The power follows the Admiralty formula of IMO (eq. 8), with the speed through the water v\_STW, at most the MCR:
+
+```math
+P_{ME} = \min\Big(k\,\frac{P_{ref}\,(v_{STW}/v_{ref})^3\,(T/T_{ref})^{0.66}}{\eta_w\,\eta_f},\ \mathrm{MCR}\Big), \qquad \eta_w = 0.909,\ \eta_f = 0.917,\ k = 1.19
+```
+
+- v\_STW is the distance the ship made good in the step over the step, less the physical current along its heading (§4.4: the current itself, not the part of it that ships' speed over ground shows; a ship held still against a current needs power too).
+- P\_ref is the MCR, 0.75 MCR for container ships of 14,500 TEU or more (IMO p. 65: their listed speed is a service speed). T\_ref is the draught of a container ship's TEU (§2.1) and the deepest draught of the visit for the other ships.
+- η\_w is the weather modifier of coastal waters (within 5 nm of the shore, as all of the area is) and η\_f the hull-fouling one (IMO p. 64).
+- k is calibrated on the EU MRV reports of 2024 (below, Validation): with the fleet means alone the ships burnt 12 % less at sea than they reported.
+
+**Main engine lying still.** Off at a berth and at anchor (IMO Table 16). While a timer runs under way (boarding, pilot change, mooring and unmooring) 20 % MCR; at a lock or waiting for a pilot 1 % MCR (EMEP Table 3-20: manoeuvring at 20 %; hotelling at 20 % for 5 % of the time).
+
+**Auxiliary engines and boilers.** By type, size and IMO phase (IMO Table 17): at berth, anchored, manoeuvring or at sea. Under way a ship is manoeuvring below 5 kn or in the docks, else at sea (IMO Table 16). Ships of less than 150 kW have none, of 150 to 500 kW an auxiliary of 5 % of the main engine (IMO p. 68).
+
+**Fuel.** The North Sea is an emission control area at 0.10 % sulphur, so every sea-going ship burns MDO/MGO (IMO Table 18). The specific fuel consumption (IMO Table 19, engines built from 2001) is 165 g/kWh for a slow-speed main engine, 175 for a medium-speed one, 185 for auxiliaries and 320 for boilers, the main engine's raised at low load (IMO eq. 10):
+
+```math
+\mathrm{SFC}_{ME}(\ell) = \mathrm{SFC}_{base}\,(0.455\,\ell^2 - 0.710\,\ell + 1.280), \qquad \ell = P_{ME}/\mathrm{MCR}
+```
+
+```math
+m_{fuel} = \big(P_{ME}\,\mathrm{SFC}_{ME} + P_{AE}\,\mathrm{SFC}_{AE} + P_{B}\,\mathrm{SFC}_{B}\big)\,\Delta t
+```
+
+**Exhaust of a sea-going ship.** CO₂ = 3.206 × fuel (IMO Table 21), SOₓ = 2 × 0.97753 × 0.001 × fuel (IMO eq. 15). NOₓ and PM₁₀ are the energy of each engine times the EMEP Tier 3 factors for MDO (Table 3-15), "cruise" for a ship at sea and "manoeuvring/hotelling" otherwise; the NOₓ factors are for Tier 0 engines and are lowered by the Tier II reduction for the whole fleet (Table 3-6: 36 % for slow-speed, 23 % for medium-speed engines; an assumed fleet average). Boilers count for fuel, CO₂ and SOₓ only.
+
+**Inland craft.** Their power comes from the resistance of Bolt (2003), which is made for inland hulls in shallow and narrow water:
+
+```math
+R = 53\,\big(\log_{10}(u_{rel} L) + 4\big)^{-2} (LB + 2LT)\,u_{rel}^2 + C_p\,\tfrac12 \rho V^2 BT + C_z\,\rho g z BT, \qquad P_b = 2\,u_{rel}\,R
+```
+
+with C\_p = 0.15, C\_z = 0.2, and P\_b in kW for R in kN. On wide water the flow along the hull is faster in shallow water, V\_eff = V / (1 − e^{4(1 − h/T)}), with h the depth under the craft now (depth below LAT plus the tide or the basin level; h/T at least 1.15); in a canal the return flow u and the drop of the water z of Schijf are added, with the canal's section taken as twice the cell's clearance (§3.4) times its depth; u\_rel = max(V + u, V\_eff). The power is at most the craft's installed power, fitted to the mean craft of classes M1–M8 in Bolt's survey (Table 1): P\_inst = 0.43 (LBT)^0.96 kW. The method reproduces Bolt's own powers for M1–M6 within 1 % (tests/test_emissions.py). Auxiliaries add 13 % to the main engine's fuel (EMS annex A) and are not counted apart, so a craft lying still burns nothing. The emissions are the EMS fleet factors of 2017 in g/kWh (Tables 17 and 18) by tonnage category (L1 below 75 m, L2 to 100 m, L3 above), interpolated in the engine load between those at 25 % and at 100 %; the fuel is the CO₂ over 3.173 (EMS Table 15). River cruise and day-trip ships (passenger ships of inland draught) sail the same way and run a hotel load at all times, taken from IMO Table 17 for the nearest sea-going kind (assumed): 450 kW (580 kW manoeuvring) for those of 80 m and more, as small cruise ships, and 190 kW for the rest, as passenger ferries.
+
+**Books.** Each step's fuel is put down to one of four activities, the ones the management of the port changes:
+
+| Activity | States |
+| --- | --- |
+| Sailing | Under way above 5 kn through the water, outside the docks |
+| Manoeuvring | Under way at 5 kn or less or in the docks; boarding, pilot change, mooring, unmooring |
+| Waiting | At anchor, waiting for clearance away from a berth, at or in a lock, waiting for a pilot |
+| Berth | At the berth, in a port, waiting for clearance at the berth |
+
+**Outputs.** The ship table gives every ship's fuel, CO₂, NOₓ, SOₓ and PM₁₀ (kg) and its fuel by activity; the time series the area's totals of every step; the summary (block `emissions`) the tonnes emitted in the area after the warm-up, in all, a day, by activity and by class, as an inventory counts them (by when they were emitted, whichever ship), the tonnes per call of the ships that came and left after the warm-up, and those of the whole run. The viewer shows the totals up to the playhead on the map and each ship's in its card; in the statistics, the fuel by activity over time, the emissions added up, and the table by class. A strategy is compared on the tonnes after the warm-up of runs on the same seeds (§17, replications).
+
+**Orders of magnitude.** A 14,000 TEU container ship at 12 kn through the water needs 11.8 MW (19 % MCR) at 192 g/kWh, about 2.6 t of fuel an hour with its auxiliaries; at berth 1.3 MW of auxiliaries and 0.6 MW of boiler, 0.44 t an hour. A 110 m inland craft at 9 kn needs 0.85 MW in deep water and 1.0 MW (its installed power) in water 4 m deep. In the runs `0042`–`0044` (21 October, 14 days, seeds 1–3) the area burns 1,480 t of fuel and emits 4,750 t of CO₂ and 60 t of NOₓ a day after the warm-up.
+
+**Validation.** Two sources, each checking a different part (`src/data/fit_mrv_calibration.py`; the comparison with the AIS tracks was run as a script, docs/PINNED.md):
+
+1. *The engines at sea: EU MRV.* The sea-going ships of the AIS record are matched by IMO number to their MRV reports (ecology/: 2024 and 2025; full reports, at least 500 h at sea): 574 ships in 2024 and 851 in 2025, three quarters of the container ships and bulk carriers seen and half of the tankers. For each, the method's fuel an hour at the ship's mean speed at sea (distance over hours at sea) is set against the fuel an hour at sea it reported (its fuel less what it burnt in EU ports, over its hours at sea). With IMO's fleet means alone the median was 0.88 in 2024 and 0.91 in 2025. k is set on 2024 alone (median 1.00) and checked on 2025, held out:
+
+| MRV 2025, held out | Ships | Model / MRV, median | Middle half |
+| --- | --- | --- | --- |
+| Container ships | 160 | 1.01 | |
+| Bulk carriers and general cargo ships | 466 | 1.03 | |
+| Tankers | 225 | 1.04 | |
+| All | 851 | 1.03 (fuel-weighted 1.00) | ±0.29 in logs, ship by ship |
+
+A ship's own error repeats from one year to the next (correlation 0.75): it is its engine against the fleet mean, while a ship's reported fuel an hour at sea changes by ±16 % from year to year. One k for all types, because the types' own values of 2024 (0.95, 0.86, 0.87) did not hold on 2025. MRV also shows what the model leaves out: 5 % of these ships run (partly) on LNG, 6–9 % of their fuel, for which the model's CO₂ is 14 % too high; and their CH₄ and N₂O add 2 % to the CO₂ as CO₂-equivalent (9 % on the LNG ships). It cannot check the berth (no hours at berth), the inland craft (not reported), NOₓ, SOₓ or PM.
+
+2. *The simulation's activity: the same method on the AIS tracks.* The fuel is computed the same way from the AIS fixes of the days the runs share with the record (26 October to 4 November, 7.85 observed days): each fix with its speed through the water (speed over ground less the model's current there), its depth and tide, its draught; a moving fix stands for the time to the next one when that is within 15 minutes, else for one snapshot (as validate.py counts ships under way), a fix lying still for the time to the next (at most 6 h), and what lies between a moving fix and a still one is lying still. Against the mean of three runs (`0042`–`0044`, seeds 1–3, the same days):
+
+| | AIS, t a day | Model, t a day (± sd of the seeds) | Model / AIS |
+| --- | --- | --- | --- |
+| Fuel | 1,623 | 1,588 ± 77 | 0.98 |
+| CO₂ | 5,199 | 5,086 ± 247 | 0.98 |
+| NOₓ | 57.5 | 65.7 ± 2.7 | 1.14 |
+| SOₓ | 2.86 | 2.82 ± 0.15 | 0.99 |
+| PM₁₀ | 1.23 | 1.35 ± 0.05 | 1.10 |
+| Sailing | 708 | 817 ± 27 | 1.15 |
+| Manoeuvring | 75 | 112 ± 6 | 1.49 |
+| Waiting | 107 | 93 ± 18 | 0.87 |
+| At berth | 733 | 567 ± 37 | 0.77 |
+| Container ships | 488 | 671 ± 29 | 1.37 |
+| Bulk / general cargo | 246 | 222 ± 10 | 0.90 |
+| Tankers | 679 | 536 ± 69 | 0.79 |
+| Inland cargo | 86 | 81 ± 2 | 0.94 |
+| Inland tankers | 72 | 62 ± 1 | 0.86 |
+| Passenger ships | 52 | 16 ± 3 | 0.30 |
+
+The area's fuel and CO₂ agree; the split does not, and the totals agree partly because the parts err both ways:
+
+- *Container ships* +37 % with as many in the area (0.99): they sail faster than real ones while they move, on the river a median of 14.6 kn over the ground against 12.3 kn, at sea 14.1 against 12.6 kn, which the cube of the speed makes some 65 % more power on the river. Their sailing times agree (§19) because the sailing factors (§7) were set on them, and the model's ships lose time standing behind others and on a longer path, which the faster sailing makes up. The fix belongs in the movement (a speed nearer the AIS's, with less time lost), not here.
+- *At berth* −23 %, *tankers* −21 % and *bulk carriers* −10 %: there are fewer of them in the area than the AIS shows (0.86 of the AIS's tankers and bulk carriers in this measure), and the tankers' boilers at berth make the difference large.
+- *Inland craft* within 6–14 %, as many fewer as there are fewer craft (fuel per craft within 5 %). *Passenger ships*: the AIS has 27 in the area and the model 7: ferries and harbour boats the model leaves out (§2.1), not their fuel.
+- *NOₓ* +14 %: sailing and manoeuvring, where the factors are highest, are high.
+
+For comparing strategies the totals and their differences on the same seeds are sound; a strategy that changes how container ships sail, or moves time between berth and sailing, carries the errors of that part.
+
 ## 18. Assumptions, approximations and limitations
 
 The largest gaps are the simple VTS, the short AIS record, and a set of durations and thresholds the sources do not give.
@@ -897,6 +999,15 @@ The largest gaps are the simple VTS, the short AIS record, and a set of duration
 - Assumed thresholds without a published value: the extreme-weather ban at 9 Bft, no sea boarding at 8 Bft, crane stop at 20 m/s gusts, the extra tug at 6 Bft, and the speed caps in restricted visibility.
 - Release valves (an encounter rule overridden after 1 h, a hold for depth overridden, a deadlock passed after 1 h) keep the model moving; how often each fires is a result of every run (§17).
 - Service craft (dredgers, tugs on other work) and Zeebrugge traffic are not simulated.
+
+**Fuel and emissions (§17.1)**
+
+- No ship's own engine is known: each has the mean main engine and design speed of its type and size in the 2018 world fleet (IMO), and the deadweight that sets the size of a bulk carrier or a tanker is estimated from its dimensions. Fuel per ship is uncertain by tens of per cent; totals are firmer, and the differences between strategies on the same seeds firmer still.
+- Assumed: Tier II NOₓ for the whole sea-going fleet; MDO for every sea-going ship (no scrubbers, no LNG, no shore power); the engine type from the power; the split of the classes bulk/general cargo and tanker into IMO's types; the gas carriers' cargo volume; the GT of a sea-going passenger ship; the hotel load of river cruise ships.
+- Shallow water raises the power of inland craft only (Bolt); the Admiralty formula of the sea-going ships has no shallow-water term, so on the river their power is likely on the low side. No wind or waves beyond IMO's average weather modifier.
+- Inland craft lying still burn nothing beyond the 13 % added to their sailing (EMS): in the model their waiting costs no fuel.
+- Tugs, pilot boats and the time container ships are slowed at sea before they enter the area (§6.1) are not counted. LNG-fuelled ships (6–9 % of the sea-going fuel in MRV) are taken for MDO, and CH₄ and N₂O are not counted (2 % CO₂-equivalent). Validated at sea against EU MRV and in the area against the same method on the AIS tracks (§17.1); not against the Flemish and Dutch inventories (EMMOSS, Emissieregistratie), nor at berth or for inland craft against anything measured.
+- Container ships sailing in the model burn 37 % more than on the AIS tracks: they sail faster while they move (§17.1). Berth fuel is 23 % low (fewer tankers and bulk carriers in the area).
 
 ## 19. Validation and calibration
 

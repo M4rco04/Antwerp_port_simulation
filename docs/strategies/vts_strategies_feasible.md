@@ -4,7 +4,7 @@ Status: **review + plan, nothing implemented.** Reviews the two proposals on `or
 `docs/strategies/strategie_vts_A_i_L.md` (A: arrival-time game, L: dynamic lock policy) and
 `docs/strategies/evolved_priority_rule.md` (learned clearance priority). Each one is checked against the code
 (`src/agents/vts_api.py`, `vts.py`, `src/environment/locks.py`, `src/sim/engine.py`) and against real runs
-(`results/runs/0042`, `0043`, `results/replications/0042_*`). Each is then cut down to something that can be built
+(`results/runs/0045`, `0046`, `results/replications/0042_*`). Each is then cut down to something that can be built
 with the current API and run on this machine in a reasonable time.
 
 ---
@@ -13,12 +13,12 @@ with the current API and run on this machine in a reasonable time.
 
 | Fact | Where from | Consequence |
 |---|---|---|
-| **~3.6–4 min of wall time per simulated day** (216–241 s/day, `background_rate` 1.75) | `run.log` of runs 0042, 0043 | A 7-day run takes ~28 min, not the ~7 min per 5 days the evolved-priority budget assumes (about 3× off) |
-| **Warm-up used in practice: 11–15 days** (default `--warmup` is 2) | `config.json` of replications 0001–0042, run 0043 | One evaluation run is ≥ 14 simulated days, **~50–55 min** |
+| **~3.6–4 min of wall time per simulated day** (216–241 s/day, `background_rate` 1.75) | `run.log` of runs 0045, 0046 | A 7-day run takes ~28 min, not the ~7 min per 5 days the evolved-priority budget assumes (about 3× off) |
+| **Warm-up used in practice: 11–15 days** (default `--warmup` is 2) | `config.json` of replications 0001–0042, run 0046 | One evaluation run is ≥ 14 simulated days, **~50–55 min** |
 | **Runs one at a time; `replicate.py --workers 3` is the most that has run without a memory kill** (15.6 GB RAM) | project memory, 16 Nov | No "5 parallel processes". At most 3 seeds in parallel inside one `replicate.py` |
 | ~~There is no fuel or emissions model~~ **Correction (2026-11-26):** `origin/main` has one (`src/sim/emissions.py`, MODEL.md §17.1, validated against EU MRV), not yet merged into this working copy. It does not count the fuel of ships held at sea before the area | `git diff HEAD origin/main --stat` | Merge `origin/main` before experiments; use its fuel books, plus an approach-leg term for ships held at sea (§4) |
-| **Where waiting actually is** (run 0043, ships after warm-up, sum of `min_wait_clearance + min_anchored + min_lock_queue + min_wait_pilot`, 15 measured days; corrected 2026-11-26, the first figures also counted time inside the lock): inland ≈ 29 000 ship-h (mostly **lock queue**, mean 4–6.5 h), tanker 6 600, bulk 3 300, **container 1 150** | `ships.csv` of run 0043 | The lock policy (L) has by far the most room to help. Clearance ordering and the arrival game touch a small share |
-| **Why clearance is refused** (run 0043): `pilot` 930 ships, `destination` 502, `tide` 102, `weather` 28 | `vts_hold` events | Ordering matters only when pilots are short. A container ship's quay (`destination`) gates it whatever its place in the queue |
+| **Where waiting actually is** (run 0046, ships after warm-up, sum of `min_wait_clearance + min_anchored + min_lock_queue + min_wait_pilot`, 15 measured days; corrected 2026-11-26, the first figures also counted time inside the lock): inland ≈ 29 000 ship-h (mostly **lock queue**, mean 4–6.5 h), tanker 6 600, bulk 3 300, **container 1 150** | `ships.csv` of run 0046 | The lock policy (L) has by far the most room to help. Clearance ordering and the arrival game touch a small share |
+| **Why clearance is refused** (run 0046): `pilot` 930 ships, `destination` 502, `tide` 102, `weather` 28 | `vts_hold` events | Ordering matters only when pilots are short. A container ship's quay (`destination`) gates it whatever its place in the queue |
 | Ships ask the lock **when their route is planned** (`lock.request(..., ready_at=inf)`, engine.py:1794), so the lock queue already lists ships still sailing towards it | engine.py, locks.py `summary()` | "Wait only for a ship that is really coming" (L1) can be built from `view.locks()` + `ShipView.remaining_m`, with no new information |
 | The default arrival is **already JIT**: `slow_down_min` holds a container ship at sea until it berths on time | engine.py:1391 | The status quo is not FCFS racing. Strategy A's baseline has to be built on purpose (§2) |
 | ~~`replicate.py` does not start: `--background-rate` declared twice~~ fixed 2026-11-26 | `py src/sim/replicate.py --help` | |
@@ -57,7 +57,7 @@ the headroom gate passes.**
    the plan. L needs it to know whether a coming ship would fit.
 4. **Experiment config, fixed for the whole study** (record it in each result's `config.json`):
    - two scenarios: **base** (`--background-rate 1.0`, `--containers weeks`) and **loaded** (`--background-rate 1.75`
-     as in run 0043, or `--containers nhpp --container-rate 1.2`). Results are expected only under load (both
+     as in run 0046, or `--containers nhpp --container-rate 1.2`). Results are expected only under load (both
      proposals say so too),
    - `--days 18 --warmup 11` (11 days is what the Welch check gave in replications 0001–0042; re-check with
      `warmup.png` on the loaded scenario),

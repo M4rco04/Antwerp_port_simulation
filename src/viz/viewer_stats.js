@@ -261,6 +261,23 @@ function buildCharts() {
   charts.push(timeChart("c_services", [lineSet("Tugs", TS.tugs_busy, 0), lineSet("Pilot boats", TS.pilot_boats_busy, 1), lineSet("Boatmen crews", TS.boatmen_busy, 2)]));
   charts.push(timeChart("c_wind", [lineSet("Wind force", TS.wind_bft, 0, { stepped: true })], { yExtra: { suggestedMax: 8 } }));
   charts.push(timeChart("c_vis", [lineSet("Visibility", TS.visibility_m && Array.from(TS.visibility_m, v => v == null ? null : v / 1000), 0, { stepped: true })]));
+  if (TS.em) {
+    // hourly means of the steps' fuel (kg a step -> t an hour), by activity, stacked
+    const per = Math.max(1, Math.round(60 / M.step_min));
+    const hourly = a => { const out = new Array(a.length); for (let k = 0; k < a.length; k++) { const b = k - k % per, e = Math.min(b + per, a.length);
+      let s = 0; for (let j = b; j < e; j++) s += a[j]; out[k] = s / (e - b) * per / 1000; } return out; };
+    const ACT = [["sailing", "Sailing"], ["manoeuvring", "Manoeuvring"], ["waiting", "Waiting (anchor, locks, clearance)"], ["berth", "At berth"]];
+    const by = TS.em_fuel_by || { sailing: TS.em.fuel };
+    charts.push(timeChart("c_fuel", ACT.filter(([a]) => by[a]).map(([a, n], k) =>
+      lineSet(n, hourly(by[a]), k, { fill: k ? "-1" : "origin", borderColor: C.surface, borderWidth: 1, backgroundColor: C.s[k], stack: "f" })),
+      { yExtra: { stacked: true, ticks: { color: C.muted, maxTicksLimit: 5 } } }));
+    const cum = a => { let c = 0; return Array.from(a, v => (c += v) / 1000); };
+    const ch = timeChart("c_emis", [lineSet("CO₂", cum(TS.em.co2), 0), lineSet("NOₓ", cum(TS.em.nox), 1, { yAxisID: "y2" }),
+      lineSet("SOₓ", cum(TS.em.sox), 2, { yAxisID: "y2" }), lineSet("PM₁₀", cum(TS.em.pm), 3, { yAxisID: "y2" })]);
+    ch.options.scales.y2 = { ...valueAxis(""), position: "right", grid: { display: false }, ticks: { color: C.muted, maxTicksLimit: 5 } };
+    ch.update("none");
+    charts.push(ch);
+  } else { $("c_fuel").closest(".card").querySelector(".sub").textContent = "This run was saved before fuel and emissions were computed"; $("c_emis").closest(".card").hidden = true; }
 }
 
 // ------------------------------------------------------------------ analysis (the whole run)
@@ -276,7 +293,11 @@ function buildAnalysis() {
   const sm = M.summary;
   const ak = [["Days simulated", fmt(sm.days, 1)], ["Ships generated", sm.ships_generated], ["Finished after warm-up", sm.ships_finished_after_warmup],
               ["Still in the area", sm.still_in_area], ["Removed (voyage impossible)", sm.removed_infeasible], ["Mean ships at anchor", fmt(sm.anchored_mean, 1)]];
+  const em = sm.emissions;
+  if (em && em.after_warmup_per_day) ak.push(["Fuel a day after warm-up", `${fmt(em.after_warmup_per_day.fuel_t, 1)} t`],
+    ["CO₂ a day after warm-up", `${fmt(em.after_warmup_per_day.co2_t, 0)} t`], ["NOₓ a day after warm-up", `${fmt(em.after_warmup_per_day.nox_t, 2)} t`]);
   $("akpis").innerHTML = ak.map(([l, v]) => `<div class="kpi"><div class="v">${v}</div><div class="l">${l}</div></div>`).join("");
+  emissionTable(em);
 
   // time in the area by phase, per class: ships that entered after the warm-up and finished
   const phases = Array.from(M.phases);
@@ -356,6 +377,25 @@ function buildAnalysis() {
   }
   ["q", "fclass", "fstatus", "fwarm"].forEach(id => $(id).addEventListener("input", drawTable));
   drawTable();
+}
+
+// fuel and emissions by class: in the area after the warm-up (an inventory's count), and per call of the ships
+// that came and left after it
+function emissionTable(em) {
+  if (!em || !em.after_warmup_by_class) { $("emis_sub").textContent = "This run was saved before fuel and emissions were computed"; return; }
+  const A = [["sailing", "sailing"], ["manoeuvring", "manoeuvring"], ["waiting", "waiting"], ["berth", "at berth"]];
+  $("emis_sub").textContent = `Tonnes emitted in the area during the ${fmt(em.days_after_warmup, 1)} days after the warm-up, by the time they were emitted; per call: ships that entered after the warm-up and left within the run`;
+  const rows = Object.entries(em.after_warmup_by_class);
+  const tot = k => rows.reduce((s, [, d]) => s + (d[k] || 0), 0);
+  const pc = em.per_call || {};
+  const row = (name, d, call) => `<tr><td>${name}</td><td class="n">${fmt(d.fuel_t, 1)}</td>${A.map(([a]) => `<td class="n">${fmt(d[`fuel_t_${a}`], 1)}</td>`).join("")}
+    <td class="n">${fmt(d.co2_t, 0)}</td><td class="n">${fmt(d.nox_t, 2)}</td><td class="n">${fmt(d.sox_t, 3)}</td><td class="n">${fmt(d.pm_t, 3)}</td>
+    <td class="n">${call ? call.n : "–"}</td><td class="n">${call ? fmt(call.fuel_t_per_call, 2) : "–"}</td><td class="n">${call ? fmt(call.fuel_t_per_call_waiting, 2) : "–"}</td></tr>`;
+  const all = { fuel_t: tot("fuel_t"), co2_t: tot("co2_t"), nox_t: tot("nox_t"), sox_t: tot("sox_t"), pm_t: tot("pm_t") };
+  A.forEach(([a]) => all[`fuel_t_${a}`] = tot(`fuel_t_${a}`));
+  $("emis_table").innerHTML = `<thead><tr><th>Class</th><th class="n">Fuel (t)</th>${A.map(([, n]) => `<th class="n">… ${n}</th>`).join("")}<th class="n">CO₂ (t)</th><th class="n">NOₓ (t)</th><th class="n">SOₓ (t)</th><th class="n">PM₁₀ (t)</th><th class="n">Calls</th><th class="n">Fuel a call (t)</th><th class="n">… of it waiting</th></tr></thead><tbody>`
+    + rows.map(([c, d]) => row(esc(M.class_label[c] || c), d, pc[c])).join("") + `</tbody><tfoot>${row("<b>All</b>", all, null)}</tfoot>`;
+  $("emis_table").querySelectorAll("tbody tr").forEach(tr => tr.style.cursor = "default");
 }
 
 statsTick(tNow(), true);

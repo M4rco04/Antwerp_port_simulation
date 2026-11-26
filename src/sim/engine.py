@@ -53,6 +53,7 @@ import navigation_rules as NR                             # noqa: E402
 import port_infrastructure as PI                          # noqa: E402
 from anchorages import FCFS, TIDE_DEPENDENT, choose_anchorage   # noqa: E402
 from currents import CurrentModel                         # noqa: E402
+from emissions import ACTIVITIES as EM_ACTIVITIES, POLLUTANTS as EM_POLLUTANTS, Accounting as EmissionAccounting   # noqa: E402
 from clearance import node_clearance                      # noqa: E402
 from fast_graph import FastGraph, PassabilityCache        # noqa: E402
 from lanes import Lanes                                   # noqa: E402
@@ -69,6 +70,7 @@ from weather import Weather                               # noqa: E402
 import weather_gates as WG                                # noqa: E402
 
 log = logging.getLogger("sim")
+EM_ZERO = {"fuel_kg": 0.0, **{f"{p}_kg": 0.0 for p in EM_POLLUTANTS}, **{f"fuel_kg_{a}": 0.0 for a in EM_ACTIVITIES}}
 
 GRAPH = ROOT / "cache" / "antwerp_scheldt_graph.pkl"
 DT_MIN = 5.0
@@ -433,6 +435,7 @@ class Simulation:
         self.tugs.bind(lambda n: (float(fg.x[n]), float(fg.y[n])))
         # agents
         self.mover = Mover(self)
+        self.emissions = EmissionAccounting(self)      # fuel and exhaust emissions, bookkeeping only (emissions.py)
         self.vts = VTS(self, strategy)
         for _, lock in self.locks.values():            # the lock planners' choices go through the VTS strategy
             lock.planner = self.vts
@@ -2308,6 +2311,7 @@ class Simulation:
         for ship in sailing:
             if ship.state in MOVING and ship not in arrived:
                 self._after_move(ship, now)
+        self.emissions.account(self.ships, self.k, DT_MIN, State)  # fuel and emissions of the step (before exits)
         for ship in arrived:                                                      # 6 ends of routes
             self._arrive_end(ship, now + DT_MIN)
         self._record(now)                                                         # 7 logging
@@ -2387,6 +2391,15 @@ class Simulation:
         for x in self.ships:
             if any(v < -1e-6 for v in x.durations.values()):
                 fail(f"{x.id} has a negative time in a state")
+        # fuel: never negative, and the activities add up to the whole
+        for x in self.ships:
+            e = getattr(x, "em", None)
+            if e is None:
+                continue
+            if any(v < -1e-9 for v in e.values()):
+                fail(f"{x.id} has a negative fuel or emission")
+            if abs(sum(e[f"fuel_kg_{a}"] for a in EM_ACTIVITIES) - e["fuel_kg"]) > 1e-6 * max(1.0, e["fuel_kg"]):
+                fail(f"{x.id}: its fuel by activity does not add up to its fuel")
 
     def _record(self, now):
         states = pd.Series([s.state.value for s in self.ships]).value_counts().to_dict() if self.ships else {}
@@ -2398,7 +2411,8 @@ class Simulation:
                "tugs_busy": self.tugs.busy(now), "pilot_boats_busy": self.pilot_boats.n - self.pilot_boats.available(now),
                "boatmen_busy": self.boatmen.n - self.boatmen.available(now),
                **{f"pilots_busy_{z}": self.pilots.busy(z, now) for z in self.pilots.sizes},
-               **{f"free_quay_{k}": round(T.free_quay_m()) for k, T in self.terminals.items()}}
+               **{f"free_quay_{k}": round(T.free_quay_m()) for k, T in self.terminals.items()},
+               **{k: round(v, 3) for k, v in self.emissions.step.items()}}   # fuel and emissions this step (kg)
         self.series.append(row)
         self.port_log.record(now)
         # positions for the viewer, every step: a ship under way as (route, distance of its bow along it,
@@ -2506,6 +2520,7 @@ class Simulation:
                          "scheduled_berth_min": s.schedule.get("arrival_min"), "planned_berth_min": s.schedule.get("berth_min"),
                          "slowed_at_sea_min": getattr(s, "slowed_min", 0.0), "moored_min": s.times.get("at_berth"),
                          "scheduled_departure_min": s.schedule.get("departure_min"), "ready_min": s.times.get("ready"),
+                         **{k: round(v, 3) for k, v in getattr(s, "em", EM_ZERO).items()},
                          **{f"min_{k}": round(v, 1) for k, v in d.items()}})
         return pd.DataFrame(rows)
 
@@ -2570,6 +2585,37 @@ class Simulation:
                                  "late_over_2h_share": round(float((late > 2).mean()), 3),
                                  "late_over_12h_share": round(float((late > 12).mean()), 3),
                                  "slowed_at_sea_h_mean": round(float(c.slowed_at_sea_min.fillna(0).mean() / 60), 2)}
+        out["emissions"] = self.emission_summary(ships)
+        return out
+
+    def emission_summary(self, ships):
+        """Fuel and exhaust emissions (emissions.py): in the area after the warm-up (by the time they were emitted,
+        as an inventory counts them: the port's footprint for the comparison of strategies), per day, by class and
+        activity; per call of the ships that came and left after the warm-up; and the whole run."""
+        ts = pd.DataFrame(self.series)
+        keys = ["fuel_kg"] + [f"{p}_kg" for p in EM_POLLUTANTS]
+        if ts.empty or "fuel_kg" not in ts:
+            return {}
+        after = ts[ts.t >= self.warmup_min]
+        days = max(len(after) * DT_MIN / 1440.0, 1e-9)
+        t = lambda frame, k: round(float(frame[k].sum()) / 1000.0, 3)          # tonnes
+        out = {"units": "tonnes; per day: tonnes a day; per call: tonnes a ship",
+               "after_warmup": {k[:-3] + "_t": t(after, k) for k in keys},
+               "after_warmup_per_day": {k[:-3] + "_t": round(t(after, k) / days, 3) for k in keys},
+               "after_warmup_fuel_by_activity_t": {a: t(after, f"fuel_kg_{a}") for a in EM_ACTIVITIES},
+               "whole_run": {k[:-3] + "_t": t(ts, k) for k in keys},
+               "days_after_warmup": round(days, 3),
+               "after_warmup_by_class": {c: {k.replace("_kg", "_t"): round(v / 1000.0, 3) for k, v in d.items()}
+                                         for c, d in sorted(self.emissions.by_class.items())}}
+        done = ships[ships.finished & (ships.spawn_min >= self.warmup_min)]
+        per = {}
+        for cls, g in done.groupby("class"):
+            if "fuel_kg" not in g:
+                continue
+            per[cls] = {"n": len(g), **{k[:-3] + "_t_per_call": round(float(g[k].fillna(0).mean()) / 1000.0, 3) for k in keys},
+                        **{f"fuel_t_per_call_{a}": round(float(g[f"fuel_kg_{a}"].fillna(0).mean()) / 1000.0, 3)
+                           for a in EM_ACTIVITIES}}
+        out["per_call"] = per
         return out
 
     def save(self, out):

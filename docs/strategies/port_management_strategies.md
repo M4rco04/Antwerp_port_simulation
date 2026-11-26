@@ -1,7 +1,7 @@
 # Three strategies for running the whole port: local look-ahead, chain planning, equilibrium guidance
 
 Status: **proposal, nothing implemented.** Built on the five papers in `docs/strategies/` (§1), on what the runs
-show about where the time goes (§2: runs `0043` and replication `0042`), and on the levers of the strategy API
+show about where the time goes (§2: run `0046` and replication `0042`), and on the levers of the strategy API
 (`docs/VTS_API.md`). It extends `vts_strategies_feasible.md`: the lock look-ahead (L), plan-keyed clearance (A1)
 and the evolved priority rule become parts of the strategies below (§8).
 
@@ -53,7 +53,7 @@ The review is corrected. All three strategies use that module for fuel, both in 
 
 ### 2.1 Where the time and the contention are
 
-| Resource | Loaded, ×1.25 (replication `0042`, seed 401) | Stress, ×1.75 background (run `0043`) |
+| Resource | Loaded, ×1.25 (replication `0042`, seed 401) | Stress, ×1.75 background (run `0046`) |
 |---|---|---|
 | Waiting ship-hours after warm-up, by class (clearance, anchor, lock queue, pilot) | inland 4 400, tankers 2 100, bulk 930, containers 770 (9 measured days) | inland 29 000, tankers 6 600, bulk 3 300, containers 1 150 (15 measured days: the run stopped at day 29.9) |
 | Lock queues (inland craft) | 1.4–1.5 h mean per craft | **Kreekrak** 5.2 h mean (p90 12.2 h): 22 500 of ~35 000 lock-queue ship-hours. **Van Cauwelaert** 2.0 h next to **Boudewijn** 0.64 h (its twin; it takes 4 in 5 of the complex's inland craft) |
