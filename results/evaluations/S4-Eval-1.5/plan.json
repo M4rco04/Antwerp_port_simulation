@@ -1,0 +1,52 @@
+{
+  "id": "S4-Eval-1.5",
+  "folder": "S4-Eval-1.5",
+  "label": "S4-Eval-1.5",
+  "created": "2026-11-27 00:48:28",
+  "state": "done",
+  "settings": {
+    "label": "S4-Eval-1.5",
+    "scenario": "custom",
+    "containers": "nhpp",
+    "container_rate": 1.5,
+    "background_rate": 1.5,
+    "days": 60.0,
+    "warmup": 15.0,
+    "reps": 3,
+    "seed": 2,
+    "workers": 3,
+    "start": "2026-10-21 00:00",
+    "weather": "bootstrap",
+    "strategies": [
+      "baseline",
+      "evolutionary_guidance"
+    ],
+    "options": {}
+  },
+  "items": [
+    {
+      "n": 1,
+      "strategy": "baseline",
+      "options": {},
+      "state": "done",
+      "replication": "S4-Eval-1.5-baseline",
+      "started": "2026-11-27 00:48:28",
+      "finished": "2026-11-27 02:38:03",
+      "returncode": 0,
+      "log": "01_baseline.log"
+    },
+    {
+      "n": 2,
+      "strategy": "evolutionary_guidance",
+      "options": {},
+      "state": "done",
+      "replication": "S4-Eval-1.5-evolutionary_guidance",
+      "started": "2026-11-27 02:38:03",
+      "finished": "2026-11-27 04:42:03",
+      "returncode": 0,
+      "log": "02_evolutionary-guidance.log"
+    }
+  ],
+  "started": "2026-11-27 00:48:28",
+  "finished": "2026-11-27 04:42:03"
+}

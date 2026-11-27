@@ -1,0 +1,20 @@
+{
+  "label": "S4-seed1",
+  "start": "2026-10-21 00:00",
+  "days": 60.0,
+  "warmup": 2.0,
+  "seed": 1,
+  "weather": "bootstrap",
+  "containers": "nhpp",
+  "container_rate": 1.5,
+  "background_rate": 1.5,
+  "bunching": true,
+  "delays": true,
+  "background": true,
+  "routing": "lanes",
+  "vts": "evolutionary_guidance",
+  "vts_options": {},
+  "max_minutes": 120.0,
+  "progress_hours": 2.0,
+  "viewer": false
+}

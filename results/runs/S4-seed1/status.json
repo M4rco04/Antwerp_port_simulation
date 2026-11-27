@@ -1,0 +1,24 @@
+{
+  "state": "done",
+  "created": "2026-11-26 22:35:54",
+  "progress": 1.0,
+  "id": "S4-seed1",
+  "started": "2026-11-26 22:35:55",
+  "error": null,
+  "last_line": "day 51.92 | area 1077 done 21591 removed   2 | sailing 111 blocked   1 berth 461 anchored  44 vts  93 lockq 61 | pilots s/r/d 23/51/11 tugs 6 | 7200 s wall, 139 s per day",
+  "finished": "2026-11-27 00:37:10",
+  "wall_s": 7275,
+  "note": null,
+  "viewer": null,
+  "viewer_mb": null,
+  "summary": {
+    "days": 51.92,
+    "stopped_early": true,
+    "stop_reason": "wall-clock limit",
+    "ships_generated": 22668,
+    "ships_finished_after_warmup": 20656,
+    "still_in_area": 1077,
+    "removed_infeasible": 2,
+    "anchored_mean": 27.64
+  }
+}
