@@ -43,6 +43,11 @@ CRANE_SPACING_M = 45.0                   # one STS per 45 m of ship (crane densi
 QUAY_JOIN_M = 60.0
 MIN_CRANE_GAP_M = 15.0                   # two cranes on one ship keep one bay free between them
 MOORING_GAP_M = (20.0, 25.0)             # between moored ships, Antwerp
+# a position at the end of a free stretch, s0 = b - loa, gives s0 + loa a rounding error past b (1348.2 - 261.4 +
+# 261.4 = 1348.2000000000003): booking such a position takes this tolerance, the one the VTS checks a strategy's
+# choice of quay position with (vts.choose_quay_position). Without it the booking failed and the ship was cleared
+# with no quay booked (run 200, strategy chain_planning)
+POSITION_TOL_M = 1e-6
 
 # documented data per terminal (alokacja_przestrzenna_w_terminalach.md, sprzet_ladunkowy.md, regs §8.10/§10.6)
 TERMINAL_SPECS = {
@@ -146,7 +151,7 @@ class Terminal:
         its Moored, or None if it does not fit."""
         if s0 is None:
             s0 = self.find_position(loa, at=at)
-        elif not any(a <= s0 and s0 + loa <= b for a, b in self.free_intervals(at)):
+        elif not any(a - POSITION_TOL_M <= s0 and s0 + loa <= b + POSITION_TOL_M for a, b in self.free_intervals(at)):
             s0 = None
         if s0 is None:
             return None

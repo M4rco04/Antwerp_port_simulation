@@ -1,0 +1,632 @@
+[
+ {
+  "metric": "anchored_mean",
+  "label": "Ships at anchor (mean)",
+  "unit": "ships",
+  "baseline": 17.2525,
+  "strategy": 17.3275,
+  "seeds": 4,
+  "diff": 0.07500000000000018,
+  "half_width": 0.13841507439356776,
+  "pct": 0.43471960585422503,
+  "significant": false,
+  "per_seed": {
+   "2": 0.120000000000001,
+   "3": 0.060000000000002274,
+   "4": 0.16000000000000014,
+   "5": -0.0400000000000027
+  }
+ },
+ {
+  "metric": "containers.berth_delay_h_mean",
+  "label": "Container berth delay, mean",
+  "unit": "h",
+  "baseline": 6.8549999999999995,
+  "strategy": 7.3950000000000005,
+  "seeds": 4,
+  "diff": 0.5400000000000003,
+  "half_width": 0.3827765486951909,
+  "pct": 7.877461706783374,
+  "significant": true,
+  "per_seed": {
+   "2": 0.6400000000000006,
+   "3": 0.6800000000000006,
+   "4": 0.6600000000000001,
+   "5": 0.17999999999999972
+  }
+ },
+ {
+  "metric": "containers.late_over_2h_share",
+  "label": "Containers more than 2 h late",
+  "unit": "share",
+  "baseline": 0.34125,
+  "strategy": 0.34325,
+  "seeds": 4,
+  "diff": 0.0020000000000000157,
+  "half_width": 0.01526247631212968,
+  "pct": 0.5860805860805907,
+  "significant": false,
+  "per_seed": {
+   "2": -0.0030000000000000027,
+   "3": 0.01100000000000001,
+   "4": -0.008999999999999952,
+   "5": 0.009000000000000008
+  }
+ },
+ {
+  "metric": "containers.late_over_12h_share",
+  "label": "Containers more than 12 h late",
+  "unit": "share",
+  "baseline": 0.1545,
+  "strategy": 0.17300000000000001,
+  "seeds": 4,
+  "diff": 0.018499999999999996,
+  "half_width": 0.010753027227188574,
+  "pct": 11.974110032362457,
+  "significant": true,
+  "per_seed": {
+   "2": 0.025999999999999995,
+   "3": 0.02099999999999999,
+   "4": 0.016999999999999987,
+   "5": 0.010000000000000009
+  }
+ },
+ {
+  "metric": "emissions.after_warmup_per_day.fuel_t",
+  "label": "Fuel in the area",
+  "unit": "t/day",
+  "baseline": 1473.04275,
+  "strategy": 1471.9745000000003,
+  "seeds": 4,
+  "diff": -1.0682499999999777,
+  "half_width": 17.14520868454371,
+  "pct": -0.07251995911184368,
+  "significant": false,
+  "per_seed": {
+   "2": 0.6340000000000146,
+   "3": -16.72199999999998,
+   "4": 4.675999999999931,
+   "5": 7.139000000000124
+  }
+ },
+ {
+  "metric": "emissions.after_warmup_per_day.co2_t",
+  "label": "CO\u2082 in the area",
+  "unit": "t/day",
+  "baseline": 4717.8625,
+  "strategy": 4714.6115,
+  "seeds": 4,
+  "diff": -3.2509999999999764,
+  "half_width": 54.96659092151152,
+  "pct": -0.06890832447957049,
+  "significant": false,
+  "per_seed": {
+   "2": 2.2049999999999272,
+   "3": -53.43499999999949,
+   "4": 15.158000000000357,
+   "5": 23.0679999999993
+  }
+ },
+ {
+  "metric": "emissions.after_warmup_per_day.nox_t",
+  "label": "NO\u2093 in the area",
+  "unit": "t/day",
+  "baseline": 56.85225,
+  "strategy": 56.682,
+  "seeds": 4,
+  "diff": -0.17024999999999935,
+  "half_width": 0.9698078691241567,
+  "pct": -0.29946044351806544,
+  "significant": false,
+  "per_seed": {
+   "2": -0.08199999999999363,
+   "3": -1.0519999999999996,
+   "4": 0.1419999999999959,
+   "5": 0.31099999999999994
+  }
+ },
+ {
+  "metric": "utilisation_mean.pilot_boats_busy",
+  "label": "Pilot boats busy (mean)",
+  "unit": "boats",
+  "baseline": 3.7424999999999997,
+  "strategy": 3.7325,
+  "seeds": 4,
+  "diff": -0.010000000000000009,
+  "half_width": 4.079816997653204e-16,
+  "pct": -0.26720106880427547,
+  "significant": true,
+  "per_seed": {
+   "2": -0.009999999999999787,
+   "3": -0.010000000000000231,
+   "4": -0.010000000000000231,
+   "5": -0.009999999999999787
+  }
+ },
+ {
+  "metric": "utilisation_mean.pilots_busy_river",
+  "label": "River pilots busy (mean)",
+  "unit": "pilots",
+  "baseline": 21.5975,
+  "strategy": 21.3625,
+  "seeds": 4,
+  "diff": -0.23499999999999943,
+  "half_width": 0.757406620269879,
+  "pct": -1.088088899178143,
+  "significant": false,
+  "per_seed": {
+   "2": -0.41000000000000014,
+   "3": -0.8200000000000003,
+   "4": 0.240000000000002,
+   "5": 0.05000000000000071
+  }
+ },
+ {
+  "metric": "silent.anchorage_full",
+  "label": "Anchorage full (hidden shortage)",
+  "unit": "events",
+  "baseline": 45.25,
+  "strategy": 50.0,
+  "seeds": 4,
+  "diff": 4.75,
+  "half_width": 11.354318470808902,
+  "pct": 10.497237569060774,
+  "significant": false,
+  "per_seed": {
+   "2": 4.0,
+   "3": 11.0,
+   "4": -5.0,
+   "5": 9.0
+  }
+ },
+ {
+  "metric": "removed_infeasible",
+  "label": "Ships removed (infeasible)",
+  "unit": "ships",
+  "baseline": 0.75,
+  "strategy": 0.75,
+  "seeds": 4,
+  "diff": 0.0,
+  "half_width": 0.0,
+  "pct": 0.0,
+  "significant": false,
+  "per_seed": {
+   "2": 0.0,
+   "3": 0.0,
+   "4": 0.0,
+   "5": 0.0
+  }
+ },
+ {
+  "metric": "container.hours_in_area_mean",
+  "label": "container: time in the area",
+  "unit": "h",
+  "baseline": 52.305,
+  "strategy": 53.025,
+  "seeds": 4,
+  "diff": 0.7199999999999989,
+  "half_width": 0.17671414911812752,
+  "pct": 1.37654143963292,
+  "significant": true,
+  "per_seed": {
+   "2": 0.8599999999999994,
+   "3": 0.5899999999999963,
+   "4": 0.730000000000004,
+   "5": 0.6999999999999957
+  }
+ },
+ {
+  "metric": "container.anchored_h_mean",
+  "label": "container: at anchor",
+  "unit": "h",
+  "baseline": 4.8125,
+  "strategy": 5.0725,
+  "seeds": 4,
+  "diff": 0.26,
+  "half_width": 0.41146786791258977,
+  "pct": 5.402597402597403,
+  "significant": false,
+  "per_seed": {
+   "2": 0.34999999999999964,
+   "3": 0.28000000000000025,
+   "4": 0.5099999999999998,
+   "5": -0.09999999999999964
+  }
+ },
+ {
+  "metric": "container.wait_clearance_h_mean",
+  "label": "container: waiting for clearance",
+  "unit": "h",
+  "baseline": 1.6949999999999998,
+  "strategy": 2.035,
+  "seeds": 4,
+  "diff": 0.33999999999999997,
+  "half_width": 0.5358430676779301,
+  "pct": 20.058997050147493,
+  "significant": false,
+  "per_seed": {
+   "2": 0.09999999999999987,
+   "3": 0.2899999999999998,
+   "4": 0.14000000000000012,
+   "5": 0.8300000000000001
+  }
+ },
+ {
+  "metric": "container.lock_queue_h_mean",
+  "label": "container: in lock queues",
+  "unit": "h",
+  "baseline": 0.46,
+  "strategy": 0.45,
+  "seeds": 4,
+  "diff": -0.009999999999999995,
+  "half_width": 0.04684434123032382,
+  "pct": -2.17391304347826,
+  "significant": false,
+  "per_seed": {
+   "2": 0.020000000000000018,
+   "3": -0.04999999999999999,
+   "4": -0.010000000000000009,
+   "5": 0.0
+  }
+ },
+ {
+  "metric": "bulk_general.hours_in_area_mean",
+  "label": "bulk general: time in the area",
+  "unit": "h",
+  "baseline": 60.292500000000004,
+  "strategy": 60.25,
+  "seeds": 4,
+  "diff": -0.042500000000000426,
+  "half_width": 0.2850540564072897,
+  "pct": -0.07048969606501708,
+  "significant": false,
+  "per_seed": {
+   "2": 0.07000000000000028,
+   "3": 0.03999999999999915,
+   "4": -0.3100000000000023,
+   "5": 0.030000000000001137
+  }
+ },
+ {
+  "metric": "bulk_general.anchored_h_mean",
+  "label": "bulk general: at anchor",
+  "unit": "h",
+  "baseline": 3.085,
+  "strategy": 3.0875,
+  "seeds": 4,
+  "diff": 0.0024999999999999467,
+  "half_width": 0.0079561157632091,
+  "pct": 0.08103727714748611,
+  "significant": false,
+  "per_seed": {
+   "2": 0.0,
+   "3": 0.0,
+   "4": 0.0,
+   "5": 0.009999999999999787
+  }
+ },
+ {
+  "metric": "bulk_general.wait_clearance_h_mean",
+  "label": "bulk general: waiting for clearance",
+  "unit": "h",
+  "baseline": 0.265,
+  "strategy": 0.3,
+  "seeds": 4,
+  "diff": 0.034999999999999976,
+  "half_width": 0.020542602567605227,
+  "pct": 13.20754716981131,
+  "significant": true,
+  "per_seed": {
+   "2": 0.02999999999999997,
+   "3": 0.019999999999999962,
+   "4": 0.04999999999999999,
+   "5": 0.03999999999999998
+  }
+ },
+ {
+  "metric": "bulk_general.lock_queue_h_mean",
+  "label": "bulk general: in lock queues",
+  "unit": "h",
+  "baseline": 0.995,
+  "strategy": 0.9075,
+  "seeds": 4,
+  "diff": -0.0875,
+  "half_width": 0.023868347289627802,
+  "pct": -8.793969849246231,
+  "significant": true,
+  "per_seed": {
+   "2": -0.09999999999999998,
+   "3": -0.08000000000000007,
+   "4": -0.06999999999999995,
+   "5": -0.09999999999999998
+  }
+ },
+ {
+  "metric": "tanker.hours_in_area_mean",
+  "label": "tanker: time in the area",
+  "unit": "h",
+  "baseline": 77.58500000000001,
+  "strategy": 77.91999999999999,
+  "seeds": 4,
+  "diff": 0.3349999999999973,
+  "half_width": 0.4627332375949869,
+  "pct": 0.4317844944254653,
+  "significant": false,
+  "per_seed": {
+   "2": -0.030000000000001137,
+   "3": 0.6499999999999915,
+   "4": 0.2600000000000051,
+   "5": 0.45999999999999375
+  }
+ },
+ {
+  "metric": "tanker.anchored_h_mean",
+  "label": "tanker: at anchor",
+  "unit": "h",
+  "baseline": 11.0725,
+  "strategy": 11.07,
+  "seeds": 4,
+  "diff": -0.0024999999999999467,
+  "half_width": 0.0238683472896273,
+  "pct": -0.022578460149017356,
+  "significant": false,
+  "per_seed": {
+   "2": -0.009999999999999787,
+   "3": -0.009999999999999787,
+   "4": 0.019999999999999574,
+   "5": -0.009999999999999787
+  }
+ },
+ {
+  "metric": "tanker.wait_clearance_h_mean",
+  "label": "tanker: waiting for clearance",
+  "unit": "h",
+  "baseline": 0.345,
+  "strategy": 0.45999999999999996,
+  "seeds": 4,
+  "diff": 0.11499999999999999,
+  "half_width": 0.1506768741030992,
+  "pct": 33.333333333333336,
+  "significant": false,
+  "per_seed": {
+   "2": 0.02999999999999997,
+   "3": 0.25,
+   "4": 0.09999999999999998,
+   "5": 0.08000000000000002
+  }
+ },
+ {
+  "metric": "tanker.lock_queue_h_mean",
+  "label": "tanker: in lock queues",
+  "unit": "h",
+  "baseline": 1.5625,
+  "strategy": 1.4625000000000001,
+  "seeds": 4,
+  "diff": -0.09999999999999998,
+  "half_width": 0.03437434881858306,
+  "pct": -6.399999999999999,
+  "significant": true,
+  "per_seed": {
+   "2": -0.1299999999999999,
+   "3": -0.07999999999999985,
+   "4": -0.09000000000000008,
+   "5": -0.10000000000000009
+  }
+ },
+ {
+  "metric": "inland_cargo.hours_in_area_mean",
+  "label": "inland cargo: time in the area",
+  "unit": "h",
+  "baseline": 33.56,
+  "strategy": 33.8475,
+  "seeds": 4,
+  "diff": 0.2875000000000032,
+  "half_width": 0.1074321159097846,
+  "pct": 0.8566746126340977,
+  "significant": true,
+  "per_seed": {
+   "2": 0.3500000000000014,
+   "3": 0.20000000000000284,
+   "4": 0.3300000000000054,
+   "5": 0.2700000000000031
+  }
+ },
+ {
+  "metric": "inland_cargo.anchored_h_mean",
+  "label": "inland cargo: at anchor",
+  "unit": "h",
+  "baseline": 0.20750000000000002,
+  "strategy": 0.20750000000000002,
+  "seeds": 4,
+  "diff": 6.938893903907228e-18,
+  "half_width": 0.012992282636251101,
+  "pct": 3.3440452548950496e-15,
+  "significant": false,
+  "per_seed": {
+   "2": 0.0,
+   "3": 0.010000000000000009,
+   "4": -0.009999999999999981,
+   "5": 0.0
+  }
+ },
+ {
+  "metric": "inland_cargo.wait_clearance_h_mean",
+  "label": "inland cargo: waiting for clearance",
+  "unit": "h",
+  "baseline": 0.0,
+  "strategy": 0.0,
+  "seeds": 4,
+  "diff": 0.0,
+  "half_width": 0.0,
+  "pct": null,
+  "significant": false,
+  "per_seed": {
+   "2": 0.0,
+   "3": 0.0,
+   "4": 0.0,
+   "5": 0.0
+  }
+ },
+ {
+  "metric": "inland_cargo.lock_queue_h_mean",
+  "label": "inland cargo: in lock queues",
+  "unit": "h",
+  "baseline": 1.3075,
+  "strategy": 1.3625,
+  "seeds": 4,
+  "diff": 0.05499999999999999,
+  "half_width": 0.05435061767592019,
+  "pct": 4.206500956022944,
+  "significant": true,
+  "per_seed": {
+   "2": 0.040000000000000036,
+   "3": 0.020000000000000018,
+   "4": 0.06000000000000005,
+   "5": 0.09999999999999987
+  }
+ },
+ {
+  "metric": "inland_tanker.hours_in_area_mean",
+  "label": "inland tanker: time in the area",
+  "unit": "h",
+  "baseline": 45.245000000000005,
+  "strategy": 45.567499999999995,
+  "seeds": 4,
+  "diff": 0.3224999999999998,
+  "half_width": 0.33412528867520724,
+  "pct": 0.7127859431981429,
+  "significant": false,
+  "per_seed": {
+   "2": 0.35999999999999943,
+   "3": 0.030000000000001137,
+   "4": 0.5300000000000011,
+   "5": 0.36999999999999744
+  }
+ },
+ {
+  "metric": "inland_tanker.anchored_h_mean",
+  "label": "inland tanker: at anchor",
+  "unit": "h",
+  "baseline": 0.1925,
+  "strategy": 0.1925,
+  "seeds": 4,
+  "diff": -6.938893903907228e-18,
+  "half_width": 0.02250329363228181,
+  "pct": -3.6046202098219365e-15,
+  "significant": false,
+  "per_seed": {
+   "2": 0.009999999999999981,
+   "3": -0.01999999999999999,
+   "4": 0.009999999999999981,
+   "5": 0.0
+  }
+ },
+ {
+  "metric": "inland_tanker.wait_clearance_h_mean",
+  "label": "inland tanker: waiting for clearance",
+  "unit": "h",
+  "baseline": 0.0,
+  "strategy": 0.0,
+  "seeds": 4,
+  "diff": 0.0,
+  "half_width": 0.0,
+  "pct": null,
+  "significant": false,
+  "per_seed": {
+   "2": 0.0,
+   "3": 0.0,
+   "4": 0.0,
+   "5": 0.0
+  }
+ },
+ {
+  "metric": "inland_tanker.lock_queue_h_mean",
+  "label": "inland tanker: in lock queues",
+  "unit": "h",
+  "baseline": 1.3650000000000002,
+  "strategy": 1.4324999999999999,
+  "seeds": 4,
+  "diff": 0.0674999999999999,
+  "half_width": 0.027175308837960193,
+  "pct": 4.945054945054936,
+  "significant": true,
+  "per_seed": {
+   "2": 0.05999999999999983,
+   "3": 0.04999999999999982,
+   "4": 0.08999999999999986,
+   "5": 0.07000000000000006
+  }
+ },
+ {
+  "metric": "passenger.hours_in_area_mean",
+  "label": "passenger: time in the area",
+  "unit": "h",
+  "baseline": 29.99,
+  "strategy": 30.154999999999998,
+  "seeds": 4,
+  "diff": 0.16500000000000092,
+  "half_width": 0.07849317419788027,
+  "pct": 0.5501833944648247,
+  "significant": true,
+  "per_seed": {
+   "2": 0.22000000000000242,
+   "3": 0.19000000000000128,
+   "4": 0.14000000000000057,
+   "5": 0.10999999999999943
+  }
+ },
+ {
+  "metric": "passenger.anchored_h_mean",
+  "label": "passenger: at anchor",
+  "unit": "h",
+  "baseline": 0.0,
+  "strategy": 0.0,
+  "seeds": 4,
+  "diff": 0.0,
+  "half_width": 0.0,
+  "pct": null,
+  "significant": false,
+  "per_seed": {
+   "2": 0.0,
+   "3": 0.0,
+   "4": 0.0,
+   "5": 0.0
+  }
+ },
+ {
+  "metric": "passenger.wait_clearance_h_mean",
+  "label": "passenger: waiting for clearance",
+  "unit": "h",
+  "baseline": 0.005,
+  "strategy": 0.0075,
+  "seeds": 4,
+  "diff": 0.0025,
+  "half_width": 0.00795611576320927,
+  "pct": 50.0,
+  "significant": false,
+  "per_seed": {
+   "2": 0.0,
+   "3": 0.0,
+   "4": 0.0,
+   "5": 0.01
+  }
+ },
+ {
+  "metric": "passenger.lock_queue_h_mean",
+  "label": "passenger: in lock queues",
+  "unit": "h",
+  "baseline": 1.025,
+  "strategy": 1.08,
+  "seeds": 4,
+  "diff": 0.05500000000000005,
+  "half_width": 0.07056615717861398,
+  "pct": 5.365853658536591,
+  "significant": false,
+  "per_seed": {
+   "2": 0.020000000000000018,
+   "3": 0.1200000000000001,
+   "4": 0.040000000000000036,
+   "5": 0.040000000000000036
+  }
+ }
+]

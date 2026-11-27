@@ -200,3 +200,18 @@ def test_local_lookahead_leaves_sea_going_ships_chambers_to_the_engine():
     s.start()
     tanker = SpeedShip(cls="tanker", loa=180.0, beam=28.0, draught=10.0, sea_going=True)
     assert s.choose_chamber(tanker, "Terneuzen", ["Terneuzen west lock", "Terneuzen east lock"], "Terneuzen west lock") is None
+
+
+def test_a_quay_position_at_the_end_of_a_free_stretch_can_be_booked():
+    # strategy 2 lies a ship at the end of a free stretch, s0 = b - loa; s0 + loa then rounds past b. Run 200: the
+    # booking failed, the ship was cleared with no quay booked and the run stopped when it moored
+    from terminals import Moored, Terminal
+    T = Terminal("T", "T", [(0.0, 0.0), (2000.0, 0.0)], 2000.0, 2000.0, 16.0, 8, 25.0)
+    T.ships.append(Moored("A", 280.0, 1370.7, 1650.7, 0.0))        # free quay before it: 0 .. 1348.2 (gap 22.5 m)
+    a, b = T.free_intervals()[0]
+    assert (a, b) == (0.0, pytest.approx(1348.2))
+    loa = 261.4
+    s0 = b - loa
+    assert s0 + loa > b                                             # the rounding the booking has to allow for
+    assert T.moor("B", loa, 0.0, s0=s0, arrived=False) is not None
+    assert T.moor("C", 10.0, 0.0, s0=b + 1.0, arrived=False) is None   # a position off the free quay is still refused

@@ -403,20 +403,84 @@ function sideways(k, h, m) {                         // [dLat, dLon] for m metre
   if (n < 1e-6) return [0, 0];
   return [-dx / n * m / 111320, dy / n * m / (111320 * cos)];      // starboard of (east dx, north dy) is (dy, -dx)
 }
-function shipAt(i, t) {                              // {lat, lon, st, route, head, dLat, dLon} or null when not in the area
+// Coming to a stop and getting under way. Under way a ship is recorded every step as the distance of its bow
+// along its route; lying still, once, as its node. Its last record under way is taken before it reaches the
+// end of the route (a median 0.5 km, up to 2.5 km before a berth), so it used to stand there for the rest of
+// the step and then jump to the berth, and the reverse when it left. It now sails that last bit within the
+// step at its speed of the step before (after, when leaving): along its route when the node is the route's
+// end (start), else in a straight line (a lock's waiting place, an anchor spot, a pilot change).
+// Per stay at a node (its records in a row there): the route it came by, if the node is that route's end (a
+// moored ship is drawn along it, zoomed in, as it was while sailing in), and its place in the fan of ships
+// lying at the same node, kept for the whole stay (in the order of the ship indices the ships hopped from
+// place to place whenever one of them came or left).
+const arrRoute = new Int32Array(P.t.length).fill(-1), slot = new Int32Array(P.t.length);
+if (!P.legacy) {
+  const stays = new Map();                           // node -> [[from, until, first record, last record]]
+  for (let i = 0; i < NS; i++) {
+    const e = P.off[i + 1];
+    for (let r = P.off[i]; r < e; ) {
+      if (P.route[r] >= 0) { r++; continue; }
+      let s = r; while (s + 1 < e && P.route[s + 1] < 0 && P.v[s + 1] === P.v[r]) s++;
+      const p = r - 1, k = p >= P.off[i] ? P.route[p] : -1;
+      if (k >= 0 && RT.nodes[RT.off[k + 1] - 1] === P.v[r]) arrRoute.fill(k, r, s + 1);
+      let l = stays.get(P.v[r]); if (!l) stays.set(P.v[r], l = []);
+      l.push([P.t[r], s + 1 < e ? P.t[s + 1] : (S.end[i] ?? END), r, s]);
+      r = s + 1;
+    }
+  }
+  for (const l of stays.values()) {
+    if (l.length < 2) continue;
+    l.sort((x, y) => x[0] - y[0]);
+    const until = [];                                // per place in the fan: until when it is taken
+    for (const [t0, t1, a, b] of l) { let k = until.findIndex(u => u <= t0); if (k < 0) k = until.length; until[k] = t1; slot.fill(k, a, b + 1); }
+  }
+}
+function onRoute(k, h, m, st) {                      // a ship h metres along route k, m metres to starboard of it
+  // standing off the centre line while passing in one lane (the engine's ship.lateral_m)
+  const [dLat, dLon] = m ? sideways(k, h, m) : [0, 0];
+  const [la, lo] = along(k, h); return { lat: la + dLat, lon: lo + dLon, st, route: k, head: h, dLat, dLon };
+}
+function speed(r0, r1) {                             // m/min along one route between two records a step apart, else 0
+  if (r0 < 0 || r1 < 0 || P.route[r0] < 0 || P.route[r0] !== P.route[r1]) return 0;
+  const dt = P.t[r1] - P.t[r0]; return dt > 0 && dt <= M.step_min + 0.01 ? Math.max(P.v[r1] - P.v[r0], 0) / dt : 0;
+}
+function glide(dist, v, span) { return Math.max(Math.min(v > 0 ? dist / v : span, span), 1e-6); }   // minutes to sail dist
+function metres(a, b, c, d) { return Math.hypot((c - a) * 111320, (d - b) * 111320 * Math.cos(a * Math.PI / 180)); }
+function between(a, la, lo, f, st) { return { lat: a.lat + (la - a.lat) * f, lon: a.lon + (lo - a.lon) * f, st, route: -1, node: -1 }; }
+function shipAt(i, t) {                              // {lat, lon, st, route, head, dLat, dLon, ...} or null when not in the area
   if (t < S.spawn[i] || (S.end[i] != null && t > S.end[i])) return null;
   const r = lastRec(i, t); if (r < 0) return null;
-  const q = r + 1 < P.off[i + 1] ? r + 1 : -1;
+  const e = P.off[i + 1], q = r + 1 < e ? r + 1 : -1, lat = k => (P.lat ? P.lat[k] : 0);
   if (P.route[r] >= 0) {
-    let h = P.v[r];
-    if (q >= 0 && P.route[q] === P.route[r] && P.t[q] - P.t[r] <= M.step_min + 0.01) h += (P.v[q] - h) * (t - P.t[r]) / (P.t[q] - P.t[r]);
-    // standing off the centre line while passing in one lane (the engine's ship.lateral_m)
-    const [dLat, dLon] = P.lat && P.lat[r] ? sideways(P.route[r], h, P.lat[r]) : [0, 0];
-    const [la, lo] = along(P.route[r], h); return { lat: la + dLat, lon: lo + dLon, st: P.st[r], route: P.route[r], head: h, dLat, dLon };
+    const k = P.route[r], span = q >= 0 ? P.t[q] - P.t[r] : Infinity;
+    if (q >= 0 && P.route[q] === k && span <= M.step_min + 0.01) return onRoute(k, P.v[r] + (P.v[q] - P.v[r]) * (t - P.t[r]) / span, lat(r), P.st[r]);
+    if (q >= 0 && P.route[q] < 0 && !P.legacy && span <= M.step_min + 0.01) {        // comes to a stop within the step
+      const v = speed(r > P.off[i] ? r - 1 : -1, r);
+      if (arrRoute[q] === k) {                       // at the end of its route (a berth, a port)
+        const c = cumOf(k), rest = Math.max(c[c.length - 1] - P.v[r], 0), f = Math.min((t - P.t[r]) / glide(rest, v, span), 1);
+        return onRoute(k, P.v[r] + rest * f, lat(r) * (1 - f), P.st[r]);
+      }
+      const a = onRoute(k, P.v[r], lat(r), P.st[r]), n = P.v[q];
+      return between(a, nLat[n], nLon[n], Math.min((t - P.t[r]) / glide(metres(a.lat, a.lon, nLat[n], nLon[n]), v, span), 1), P.st[r]);
+    }
+    return onRoute(k, P.v[r], lat(r), P.st[r]);
   }
-  let la = nLat[P.v[r]], lo = nLon[P.v[r]];
+  const n = P.v[r];
+  if (!P.legacy && q >= 0 && P.route[q] >= 0) {     // gets under way within the step before its next record
+    const k = P.route[q], v = speed(q, q + 1 < e ? q + 1 : -1), span = Math.min(P.t[q] - P.t[r], M.step_min);
+    if (RT.nodes[RT.off[k]] === n) {                 // from the start of its route
+      const dur = glide(P.v[q], v, span);
+      if (t > P.t[q] - dur) { const f = 1 - (P.t[q] - t) / dur; return onRoute(k, P.v[q] * f, lat(q) * f, P.st[r]); }
+    } else {
+      const b = onRoute(k, P.v[q], lat(q), P.st[r]), dur = glide(metres(nLat[n], nLon[n], b.lat, b.lon), v, span);
+      if (t > P.t[q] - dur) return between({ lat: nLat[n], lon: nLon[n] }, b.lat, b.lon, 1 - (P.t[q] - t) / dur, P.st[r]);
+    }
+  }
+  let la = nLat[n], lo = nLon[n];
   if (P.legacy && q >= 0 && P.t[q] - P.t[r] <= 15.01) { const f = (t - P.t[r]) / (P.t[q] - P.t[r]); la += (nLat[P.v[q]] - la) * f; lo += (nLon[P.v[q]] - lo) * f; }
-  return { lat: la, lon: lo, st: P.st[r], route: -1, node: P.legacy ? -1 : P.v[r] };
+  if (P.legacy) return { lat: la, lon: lo, st: P.st[r], route: -1, node: -1, slot: 0 };
+  const hull = arrRoute[r], c = hull >= 0 ? cumOf(hull) : null;
+  return { lat: la, lon: lo, st: P.st[r], route: -1, node: n, slot: slot[r], hull, head: c ? c[c.length - 1] : 0, dLat: 0, dLon: 0 };
 }
 let drawn = [];           // [shipIndex, x, y, radius, state, node]
 const DWELL_PORT = M.states.indexOf("dwell_port");
@@ -433,30 +497,27 @@ function drawShips() {
   // there by a resource, not placed in the water: fan them out so each one shows. Ships lying in a port with
   // no berth model (Vlissingen, Terneuzen, the canals) stay on its node: the fan has a fixed size on the
   // screen, so at a small scale these groups, the largest of all, covered far more than the port
-  const here = [], atNode = new Map();
+  const here = [];
   inPort = new Map();
   for (let i = 0; i < NS; i++) {
     const a = shipAt(i, T); if (!a) continue;
     here.push([i, a]);
-    if (a.route < 0 && a.node >= 0) {
-      const m = a.st === DWELL_PORT ? inPort : atNode;
-      m.set(a.node, (m.get(a.node) || 0) + 1);
-    }
+    if (a.route < 0 && a.node >= 0 && a.st === DWELL_PORT) inPort.set(a.node, (inPort.get(a.node) || 0) + 1);
   }
-  const fanned = new Map();
   for (const [i, a] of here) {
     if (i === selected) sel = a;
     if (!b.contains([a.lat, a.lon])) continue;
     const p = map.latLngToContainerPoint([a.lat, a.lon]);
     const col = shipColour(i, a.st);
     const rad = Math.min(Math.max(2 + S.loa[i] / 70, 2.5), 8);
-    if (a.route < 0 && a.st !== DWELL_PORT && atNode.get(a.node) > 1) {       // the k-th ship at a shared node: a sunflower spiral
-      const k = fanned.get(a.node) || 0; fanned.set(a.node, k + 1);
-      const rr = 2.2 * rad * Math.sqrt(k), ang = k * 2.39996;
+    const fan = a.route < 0 && a.st !== DWELL_PORT && a.slot > 0;
+    if (fan) {                                        // its place at a shared node, kept while it lies there: a sunflower spiral
+      const rr = 2.2 * rad * Math.sqrt(a.slot), ang = a.slot * 2.39996;
       p.x += rr * Math.cos(ang); p.y += rr * Math.sin(ang);
     }
-    if (a.route >= 0 && S.loa[i] / mpp >= 10) {       // zoomed in: the hull along its route, real length and beam
-      const pts = hullPoints(a.route, a.head - S.loa[i], a.head).map(q => map.latLngToContainerPoint([q[0] + a.dLat, q[1] + a.dLon]));
+    const hk = a.route >= 0 ? a.route : fan ? -1 : (a.hull ?? -1);   // lying at the end of the route it came by: along it
+    if (hk >= 0 && S.loa[i] / mpp >= 10) {            // zoomed in: the hull along its route, real length and beam
+      const pts = hullPoints(hk, a.head - S.loa[i], a.head).map(q => map.latLngToContainerPoint([q[0] + a.dLat, q[1] + a.dLon]));
       g.beginPath(); pts.forEach((q, k) => k ? g.lineTo(q.x, q.y) : g.moveTo(q.x, q.y));
       g.strokeStyle = C.surface; g.lineWidth = Math.max(S.beam[i] / mpp, 3) + 2; g.stroke();
       g.strokeStyle = col; g.lineWidth = Math.max(S.beam[i] / mpp, 3); g.stroke();
