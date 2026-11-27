@@ -291,3 +291,22 @@ def test_a_quay_is_not_planned_on_while_its_ship_waits_to_be_cleared(sim):
         sim.vts.withdraw(c)
         T.unmoor(c.id, 0.0)
         sim.ships.remove(c)
+
+
+# ------------------------------------------------------------------ waits for a pilot off the fairway
+def test_a_ship_waiting_for_a_pilot_lies_only_where_it_can_sail_on_from(sim):
+    """Out of the Terneuzen lock with no river pilot free, ships of 10-12 m were put on Zuid Everingen, too shallow
+    for them: no route led out again and each lay there for weeks with its river pilot (runs 201-204)."""
+    import numpy as np
+
+    everingen = sim.anchorage_node["Zuid Everingen"]
+    deep = ship("bulk_general", 180.0, 30.0, 10.6, source="ghent_terneuzen_canal", destination="exit_sea_north")
+    assert not sim.reachable_between(node(sim, "vlissingen"), everingen, deep)   # the anchorage does not take it
+    reach = sim.reach(deep)
+    d = np.hypot(np.asarray(sim.fg.x) - sim.fg.x[everingen], np.asarray(sim.fg.y) - sim.fg.y[everingen])
+    near = np.flatnonzero(np.asarray(reach, dtype=bool) & (d < 3000.0))
+    assert len(near)
+    head = int(near[np.argmin(d[near])])                       # the fairway next to it, where the ship lay
+    at = sim.off_fairway_node(deep, head, "river")
+    assert at != everingen and sim.reachable_between(head, at, deep)
+    assert sim.off_fairway_node(deep, head, "dock") == head    # in the docks it waits where it is

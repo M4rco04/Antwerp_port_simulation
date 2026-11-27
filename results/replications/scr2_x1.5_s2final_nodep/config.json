@@ -1,0 +1,25 @@
+{
+  "label": "scr2_x1.5_s2final_nodep",
+  "reps": 4,
+  "seed": 2,
+  "start": "2026-10-21 00:00",
+  "days": 22.5,
+  "warmup": 12.5,
+  "delays": true,
+  "background": true,
+  "weather": "bootstrap",
+  "containers": "nhpp",
+  "container_rate": 1.5,
+  "bunching": true,
+  "routing": "lanes",
+  "checks": false,
+  "measure_until": null,
+  "holdout": null,
+  "set": [],
+  "vts": "chain_planning",
+  "vts_options": {
+    "departures_first": false
+  },
+  "background_rate": 1.5,
+  "no_validation": true
+}

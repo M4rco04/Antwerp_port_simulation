@@ -102,16 +102,18 @@ class LockModel:
         rest = c["timer_min"] + tc / 3.0
         return rest if other_side(c["side"]) == side else rest + tc
 
-    def entry_min(self, lock, side, loa, beam, ahead=0, chamber=None):
+    def entry_min(self, lock, side, loa, beam, ahead=0, chamber=None, count=None):
         """Minutes from now until a ship of this size at a side could go into a chamber (the best one, or the one
         named): the time until it opens there plus a return trip per lockage of ships queued before it. `ahead`
-        adds ships known to be coming before it. None if no chamber takes it."""
+        adds ships known to be coming before it; `count(ship id)` says which queued ships go before it (default:
+        all of them). None if no chamber takes it."""
         best = None
         for name, c in self.chambers(lock).items():
             if (chamber is not None and name != chamber) or not fits(c, loa, beam):
                 continue
             cap = max(capacity(c, loa, beam), 1)
-            q = len(c["waiting_" + side]) + ahead
+            queued = c["waiting_" + side]
+            q = (len(queued) if count is None else sum(1 for i in queued if count(i))) + ahead
             t = self.time_to_open(lock, name, side) + (q // cap) * 2.0 * cycle_min(lock)
             best = t if best is None else min(best, t)
         return best

@@ -204,6 +204,10 @@ Every anchorage is a single node (`type == "anchorage"`) whose `anchorage` attri
 - `choose_anchorage(pool, loa, draught, ...)` applies the type rules of regs §11.3 (dangerous goods with
   signals: Wielingen Noord only; tide-dependent T ≥ 14 m: Wielingen Zuid; ...).
 - Routes never pass through an anchorage node, only start or end there.
+- A ship that finds no pilot free at a pilot change waits off the fairway at the nearest anchorage within 5 km that
+  takes it (the rules above) and that it can sail from at high water, else where it is (`engine.off_fairway_node`).
+  Until 27 November 2026 deep ships out of the Terneuzen lock were put on Zuid Everingen, too shallow for them, and
+  stayed there with their pilot until the end of the run.
 - Not yet placed: Liefkenshoek, Meestoof, Oosterweel, Rede van Antwerpen (positions needed from the NtM).
 
 ### Coarse routing graph
@@ -437,6 +441,31 @@ It writes `results/<run>/`:
 
 `--no-delays` berths containers at their scheduled time; `--no-background` runs containers only.
 
+### VTS strategies
+
+What the VTS decides (the order of clearance, where a ship waits, speeds under way, locks, quay positions) is a
+strategy (`src/strategies/`, API in `docs/VTS_API.md`), chosen on the setup page or with `--vts NAME` and
+`--vts-option KEY=VALUE` (`pipeline.py`, `replicate.py`; values read as JSON, so `lookahead=false`):
+
+- `baseline`: first come first served, the VTS the model is calibrated with (the reference);
+- `local_lookahead` (S1): each resource on its own with a short look-ahead: lock balancing, look-ahead lockages,
+  earliest-entry chambers, just-in-time (JIT) speeds to the locks for inland craft;
+- `chain_planning` (S2, version 2 since 27 November 2026): the call chain in step. A ship is cleared whenever its
+  resources are free, container ships late for their berth time first; JIT speeds to the lock entry for sea-going
+  ships too; tier 3 places container ships along the quay. In screening runs it burnt 1.1 % (×1.0) and 2.0 % (×1.5)
+  less fuel than the baseline, with the same time in the area. Version 1, a 6-h slot plan with buffers that every
+  clearance had to fit, held ships whose resources were free (runs 201–204);
+- `equilibrium_guidance` (S3) and `evolutionary_guidance` (S4): the ships' guidance game, solved by replicator
+  dynamics or searched by a genetic algorithm.
+
+Their design, options and results: `docs/strategies/port_management_strategies.md`. Strategies are compared on the
+same seeds, e.g. `py src/sim/replicate.py --label S2 --days 60 --warmup 15 --reps 4 --seed 2 --workers 4
+--containers nhpp --no-validation --vts chain_planning` against the same command with `--vts baseline` (or the
+evaluations on the setup page), by the paired differences of `src/ui/evaluations.py`. `--no-validation` leaves out
+the numbers set against the AIS record (v.*), whose tracks are the largest thing a replication holds: a 60-day
+replication then needs about 2 GB. On Windows the workers ask not to be run as background work (EcoQoS), which on
+a hybrid CPU put them on the efficiency cores at a quarter of the speed.
+
 ### Agents (`src/agents/`)
 
 | Module | What it does |
@@ -444,7 +473,7 @@ It writes `results/<run>/`:
 | `ship.py` | One `Ship` class for both levels. Derived flags from regs §2 (pilot, ULCV, marginal, tide-dependent, oversized by zone, IMO2 gas, boatmen, tugs needed). A state machine (sail → pilot station → VTS → anchorage / boarding → sailing → lock → mooring → berth → departure → exit) with timers. Minutes per state are kept for the KPIs. |
 | `generator.py` | Containers replayed from the schedule (`--containers replay`, default): TEU gives dimensions, call size and cranes; the AIS schedule delay is optional; ships enter 8 h before berthing at a sea source. Or (`--containers nhpp`) a Poisson process fitted to the schedule: 9.8 calls/day × weekday factor × hour-of-day factor (Brussels time) × a daily gamma factor (shape 23.6) for the bunching of liner calls, each arrival one schedule line drawn at random (TEU, terminal, time at berth); `--container-rate` scales it, `--no-bunching` drops the daily factor; runs can lie outside the schedule's dates. A container's TEU-drawn draught is capped at what its terminal's quay allows. Background traffic is a non-homogeneous Poisson process per class and source, from `entry_probabilities`, with bootstrapped AIS ships and destinations.  Ships entering from or leaving to a canal behind a lock (Schelde-Rijn, Zuid-Beveland, Albert) are redrawn until they fit its largest chamber. |
 | `movement.py` | Ships as hulls: a centre line along the route over the ship's length, with its real beam, so ships can be longer and wider than the cells. Two hulls must stay (B1 + B2) / 2 + 20 % of the wider beam apart, less what they can shift sideways inside their lanes ((lane − B) / 2 each): in full when they keep opposite sides of the lane (meeting, or overtaking on the other's port side), only the difference when they keep the same side (one behind the other), so a ship cannot sail into the one ahead and at most two fit abreast. A ship standing off its centre line to pass is drawn there (`lateral_m`). Two-phase moves are resolved by priority, checking the swept hull. Speed is the JA22 planning speed plus current, capped by the cell's limit. The encounter rules of regs §6 and the 3 nm spacing are applied. Blocked ships detour round the other hulls (head-on: the lower-ranked ship gives way); a deadlock with no detour is let through after an hour. |
-| `vts.py` | The simple VTS: first come first served, tide-dependent ships first. A ship is cleared when its route exists (planned for the run's lowest water, else the lowest water of the next 7 h, else the level now; to a sea exit draught-checked only up to the pilot station), the tide holds along it leaving now and 60 min later, a pilot (two for the largest ships) for its first pilot stretch and a pilot boat are free, pilots can be booked for its later stretches (never for a time before now), and its berth or quay has room (the destination is chosen once per round). Otherwise it is sent to an anchorage (regs §11), again at later rounds if none could be reached. No reservations or optimisation yet. See docs/MODEL.md §9 for why the queue used to jam. |
+| `vts.py` | The simple VTS: first come first served, tide-dependent ships first. A ship is cleared when its route exists (planned for the run's lowest water, else the lowest water of the next 7 h, else the level now; to a sea exit draught-checked only up to the pilot station), the tide holds along it leaving now and 60 min later, a pilot (two for the largest ships) for its first pilot stretch and a pilot boat are free, pilots can be booked for its later stretches (never for a time before now), and its berth or quay has room (the destination is chosen once per round). Otherwise it is sent to an anchorage (regs §11), again at later rounds if none could be reached. This is the engine's side; the order of clearance and what a ship not cleared does are the strategy's (VTS strategies above; the baseline reserves nothing and optimises nothing). See docs/MODEL.md §9 for why the queue used to jam. |
 | `services.py` | Pools with fleet sizes from the repo: 42 tugs (`tugs.csv`) at the AIS tug bases, plus the tugs AIS saw at Vlissingen, Terneuzen and Zeebrugge; 8 pilot boats (`pilots_mdk.csv`); 42 boatmen crews (`pilots_brabo.csv`, the Brabo boats). The repo has no pilot count, so pilots per zone = 1.25 × the AIS peak demand (`PILOT_DEMAND`) × (1 + return time / time on board):
 16 sea, 42 river, 21 dock. |
 

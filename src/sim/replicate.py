@@ -8,7 +8,8 @@ replication i runs with seed + i and is saved in results/replications/<label>/re
 timeseries.csv, summary.json; no positions or viewer). The folder also gets:
 
     replications.csv   one row per replication, one column per result (v.*: the numbers validate.py sets
-                       against the AIS record: py src/sim/validate.py compare <this folder>)
+                       against the AIS record: py src/sim/validate.py compare <this folder>; left out with
+                       --no-validation, for comparisons of strategies, which read the summary only)
     results.csv        per result: mean, standard deviation, half-width and bounds of the 95 % confidence
                        interval (Student's t, n - 1 degrees of freedom), n
     warmup.csv         ships in the area per step: every replication, their mean and its moving average
@@ -107,9 +108,32 @@ def apply_overrides(items):
             setattr(m, name, v)
 
 
+def full_speed():
+    """Ask Windows not to run this worker as background work (EcoQoS). With the system's default, on a hybrid CPU,
+    replications started in the background ran on the efficiency cores at about a quarter of the speed (sets 201-204,
+    2026-11-26). Nothing elsewhere."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        import ctypes.wintypes as wt
+
+        class State(ctypes.Structure):
+            _fields_ = [("Version", wt.ULONG), ("ControlMask", wt.ULONG), ("StateMask", wt.ULONG)]
+
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.GetCurrentProcess.restype = wt.HANDLE
+        k32.SetProcessInformation.argtypes = [wt.HANDLE, ctypes.c_int, ctypes.c_void_p, wt.DWORD]
+        s = State(1, 0x1, 0)                   # PROCESS_POWER_THROTTLING_EXECUTION_SPEED: controlled, off
+        k32.SetProcessInformation(k32.GetCurrentProcess(), 4, ctypes.byref(s), ctypes.sizeof(s))
+    except Exception:                          # noqa: BLE001  (an older Windows: run as it is)
+        pass
+
+
 def one(job):
     """One replication (a worker process): run, save the small outputs, return its row and its series."""
     cfg, seed, out = job
+    full_speed()
     sys.path.insert(0, str(ROOT / "src" / "sim"))
     import engine
 
@@ -131,6 +155,9 @@ def one(job):
     series.to_csv(out / "timeseries.csv", index=False)
     summary = sim.summary(ships)
     (out / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
+    if cfg.get("no_validation"):                 # a comparison of strategies reads the summary only
+        sim.positions.close()
+        return {"seed": seed, "wall_s": round(time.time() - t0), **flatten(summary)}, series["ships"].to_numpy()
     # the numbers that are set against the AIS record (validate.py), measured the way the record is
     import validate
     until = cfg.get("measure_until")
@@ -211,6 +238,9 @@ def main():
                    help="multiply the arrival rate of the other traffic (default: generator.BACKGROUND_RATE_FACTOR, 1)")
     p.add_argument("--routing", choices=("lanes", "shortest"), default="lanes")
     p.add_argument("--checks", action="store_true", help="check the model's invariants every step (slower)")
+    p.add_argument("--no-validation", action="store_true",
+                   help="leave out the validation numbers (v.*, validation.json): the tracks they are measured on are "
+                        "the largest thing a replication holds, and a comparison of strategies does not read them")
     p.add_argument("--measure-until", type=float, help="day of the run at which the validation numbers (v.*) end; default: its end")
     p.add_argument("--holdout", type=float, nargs=2, metavar=("FROM", "TO"),
                    help="days of the run measured as a second window (h.*: validate.py compare --prefix h.)")
@@ -227,7 +257,8 @@ def main():
            "delays": not a.no_delays, "background": not a.no_background, "weather": a.weather,
            "containers": a.containers, "container_rate": a.container_rate, "bunching": not a.no_bunching,
            "routing": a.routing, "checks": a.checks, "measure_until": a.measure_until, "holdout": a.holdout, "set": a.set,
-           "vts": a.vts, "vts_options": parse_options(a.vts_option), "background_rate": a.background_rate}
+           "vts": a.vts, "vts_options": parse_options(a.vts_option), "background_rate": a.background_rate,
+           "no_validation": a.no_validation}
     out = new_folder(a.label, a.vts)
     (out / "config.json").write_text(json.dumps(cfg, indent=2))
     seeds = [a.seed + i for i in range(a.reps)]

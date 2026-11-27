@@ -1,222 +1,151 @@
-"""Strategy 2, rolling-horizon chain planning ("VTS 3, with buffers"): docs/strategies/port_management_strategies.md §5.
+"""Strategy 2, chain planning: docs/strategies/port_management_strategies.md §5 (version 2, after runs 201-204).
 
-Every planning round the waiting pilot ships are planned in priority order (distress, tide-dependent, container ships by
-berth time, then first come first served). Each gets the earliest start, in 15-min steps up to the horizon, at which
-its whole voyage fits the reservation tables with buffers:
+A sea-going call is a chain of links: the ship before it leaves the quay, this ship is cleared and sails in, it
+passes the locks with its pilots, it berths. The strategy keeps the links in step with the plan the port already
+has (the quay bookings and planned departures, the lockages coming up) and uses that plan to time ships, never to
+hold back a ship whose resources are free:
 
-    pilots       per zone and 15-min bin, each job holding a pilot for the zone's time on board plus its return;
-                 capacity is the pilots free now plus those on a job coming back as their jobs end
-    pilot boats  one for 30 min for a boarding at sea
-    locks        lockages per lock side, a window of one return trip each, for the ships queued and planned there
-    quay         a container ship's terminal must have room for it when it arrives, after the ships planned before it
+    order      every round, after ships in distress and tide-dependent ships: container ships late for their berth
+               time first, then by request time; on request (departures_first) departures before arrivals
+    clearance  a ship is cleared as soon as the engine's checks pass (route, weather, tide, pilots, destination)
+    locks      strategy 1's lock rules (balancing twins and complexes, earliest-entry chambers; its look-ahead
+               lockages only on request: holding a chamber open for a ship coming cost every ship in it more than
+               the ship coming gained) and its just-in-time speeds to the lock entry, here for sea-going ships too
+               (not for tide-dependent ships or ULCVs), which reach the lock with a larger margin
+    quay       tier 3 chooses where along the quay a container ship lies (the stretch that leaves the longest free
+               quay); on request (quay_jit) a container ship whose booked stretch is still taken at its ETA slows
+               down to arrive as it comes free (in screening runs it cost container ships time and saved little
+               once a ship waiting off a quay is counted at standby, MODEL.md §17.1)
+    waiting    an arrival that is not cleared waits off the station when its wait is short, else at anchor
+               (strategy 1); a departure waits at its berth
 
-A ship whose start is now is cleared (the engine's own checks still decide); one planned later keeps its slot, which the
-ships after it plan around, and waits off the station (or at its berth). Locks, chambers and speeds are run as in
-strategy 1 (look-ahead lockages, earliest-entry chamber, JIT for inland craft), on top of the plan.
+The first version cleared a ship only when its whole voyage fitted a 6-h table of time slots for pilots, pilot
+boats, lockages and quay, with buffers, and fell back to strategy 1 when slots were missed. It held ships whose
+resources were free: in the 60-day runs 201-204 container ships reached their quay 0.5 h later at normal traffic,
+departures left 1.1-1.7 h later at 1.5 times the traffic, and the fuel did not fall. It is in the history (commit
+f2fc5b2c).
 
-Robustness (the reading's warning about tightly coupled plans): buffers on every slot; the plan is rebuilt every round
-from what is real now; and when more than 30 % of the slots due in the last hour were missed, the strategy falls back
-to strategy 1's local rules for two hours (degraded mode). Tier 3: it also chooses where along the quay a container ship
-lies (the stretch that leaves the longest free quay for the ships after it).
-
-Options: those of local_lookahead, plus horizon_h 6, buffer_pilot_min 15, buffer_lock_min 10, buffer_quay_min 30,
-missed_share 0.3, degraded_h 2, quay True (tier 3; False gives the tier-2 variant).
+Options: those of local_lookahead (here lookahead defaults to False and jit_sea_going to True), departures_first
+False, quay_jit False, jit_margin_sea_min 30 and jit_margin_inland_min 10 (minutes before it can go in that a paced
+ship aims to reach the lock), quay True (tier 3; False gives the tier-2 variant). Screening runs of each step:
+docs/strategies/port_management_strategies.md §5.0.
 """
 
 from __future__ import annotations
 
-import math
-
-import numpy as np
-
 from strategies import _common as C
 from strategies.local_lookahead import LocalLookahead
 
-BIN_MIN = 15.0
-JOB_MIN = {"sea": 150.0 + 120.0, "river": 180.0 + 90.0, "dock": 60.0 + 30.0}   # on board + return (MODEL.md §9)
-BOAT_MIN = 30.0
+QUAY_GAP_M = 22.5            # kept between moored ships (terminals.MOORING_GAP_M, the mean)
+CLEARING_MIN = 90.0          # a ship ready at the quay but not yet cleared: assumed gone after this (assumed)
 
 
 class ChainPlanning(LocalLookahead):
     name = "chain_planning"
-    description = "S2: a rolling 6-h plan of time slots (pilots, pilot boats, lockages, quay) with buffers and a degraded mode"
+    description = ("S2: the call chain in step: clearance whenever the resources are free, late container ships "
+                   "first, just-in-time speeds to the lock entry for sea-going ships and inland craft")
     levers = ("clearance", "anchorage", "speed", "lock_route", "lock_chamber", "lockage", "quay_position")
 
     def start(self):
         super().start()
         o = self.options
-        self.horizon_min = float(o.get("horizon_h", 6.0)) * 60.0
-        self.buf_pilot = float(o.get("buffer_pilot_min", 15.0))
-        self.buf_lock = float(o.get("buffer_lock_min", 10.0))
-        self.buf_quay = float(o.get("buffer_quay_min", 30.0))
-        self.missed_share = float(o.get("missed_share", 0.3))
-        self.degraded_min = float(o.get("degraded_h", 2.0)) * 60.0
+        # strategy 1's look-ahead lockages kept chambers open for ships coming: in screening runs at normal traffic
+        # the sea-going ships gained in the queue what every ship lost in the chamber (inland craft 0.1 h a passage)
+        self.on["lookahead"] = bool(o.get("lookahead", False))
+        self.jit_sea_going = bool(o.get("jit_sea_going", True))
+        # departures first: at 1.5 times the traffic it changed neither the time in the area nor the calls and cost
+        # 5 t of fuel a day (screening runs); the departures that version 1 delayed were held by its slot gate
+        self.departures_first = bool(o.get("departures_first", False))
+        self.quay_jit = bool(o.get("quay_jit", False))
+        self.margin_sea = float(o.get("jit_margin_sea_min", 30.0))
+        self.margin_inland = float(o.get("jit_margin_inland_min", 10.0))
         self.use_quay = bool(o.get("quay", True))
         if not self.use_quay:
             self.levers = tuple(l for l in self.levers if l != "quay_position")
-        self.planned = {}                      # ship id -> planned start (minute)
-        self.due_log = []                      # (minute, missed?) for slots that came due
-        self.degraded_until = -math.inf
-
-    # ------------------------------------------------------------------ tables
-    def tables(self):
-        view = self.view
-        n = int(self.horizon_min // BIN_MIN) + int(max(JOB_MIN.values()) // BIN_MIN) + 8
-        t = np.arange(n) * BIN_MIN
-        cap = {}
-        for z, job in JOB_MIN.items():
-            free, total = view.pilots_free(z), view.pilots_total(z)
-            cap[z] = free + (total - free) * np.minimum(1.0, t / job)
-        boats_free = view.pilot_boats_free()
-        boats_total = max(boats_free, 8)
-        cap["boat"] = boats_free + (boats_total - boats_free) * np.minimum(1.0, t / BOAT_MIN)
-        load = {k: np.zeros(n) for k in cap}
-        return {"cap": cap, "load": load, "n": n, "locks": {}, "quay": {}}
-
-    def bin(self, minute):
-        return int(max(minute - self.view.now, 0.0) // BIN_MIN)
-
-    def lock_windows(self, tab, model, lock, side, ship):
-        key = (lock, side)
-        if key not in tab["locks"]:
-            chambers = model.chambers(lock)
-            cap = sum(max(C.capacity(c, ship.loa, ship.beam), 1) for c in chambers.values() if C.fits(c, ship.loa, ship.beam))
-            w = 2.0 * C.cycle_min(lock)
-            load = np.zeros(int(self.horizon_min // w) + 20)
-            q = len(model.queued(lock, side))
-            k = 0
-            while q > 0 and cap > 0 and k < len(load):         # the ships queued now fill the first windows
-                take = min(q, cap)
-                load[k] += take
-                q -= take
-                k += 1
-            tab["locks"][key] = {"cap": max(cap, 1), "w": w, "load": load}
-        return tab["locks"][key]
-
-    # ------------------------------------------------------------------ one ship's chain
-    def chain(self, ship, route):
-        view = self.view
-        tm = view.travel_minutes(ship, route)
-        zones = [(z, tm[i]) for z, i in view.pilot_zones(route)]
-        locks = [(name, tm[i], i) for name, i in view.route_locks(route)]
-        return {"tm": tm, "zones": zones, "locks": locks, "end": tm[-1] if tm else 0.0,
-                "boat": bool(ship.at_station and not ship.departing)}
-
-    def fits_at(self, tab, model, ship, ch, t0, route, reserve=False):
-        view = self.view
-        cap, load = tab["cap"], tab["load"]
-        for k, (z, dt) in enumerate(ch["zones"]):
-            if z not in cap:
-                continue
-            need = ship.pilots_needed(z)
-            a = self.bin(t0 + dt - (self.buf_pilot if k else 0.0))
-            b = min(self.bin(t0 + dt + JOB_MIN[z] + self.buf_pilot), tab["n"] - 1)
-            if a >= tab["n"]:
-                continue                                  # beyond the tables: not planned this far
-            if not reserve and np.any(load[z][a:b + 1] + need > cap[z][a:b + 1] + 1e-9):
-                return False
-            if reserve:
-                load[z][a:b + 1] += need
-        if ch["boat"]:
-            a = self.bin(t0)
-            b = min(self.bin(t0 + BOAT_MIN), tab["n"] - 1)
-            if not reserve and np.any(load["boat"][a:b + 1] + 1 > cap["boat"][a:b + 1] + 1e-9):
-                return False
-            if reserve:
-                load["boat"][a:b + 1] += 1
-        for name, dt, _ in ch["locks"]:
-            side = None
-            node_side = view.ship(ship.id)
-            # the side a ship comes to a lock from is only known for its next lock; the others count on both sides
-            if node_side is not None and node_side.next_lock == name:
-                side = node_side.next_lock_side
-            for s in ((side,) if side else ("a", "b")):
-                lw = self.lock_windows(tab, model, name, s, ship)
-                k = int((t0 + dt - view.now + self.buf_lock) // lw["w"])
-                if k >= len(lw["load"]):
-                    continue
-                if not reserve and lw["load"][k] + 1 > lw["cap"]:
-                    return False
-                if reserve:
-                    lw["load"][k] += 1 / (1 if side else 2)
-        if self.use_quay and ship.terminal and not ship.departing:
-            at = t0 + ch["end"] + self.buf_quay
-            planned = tab["quay"].setdefault(ship.terminal, [])
-            taken = sum(l for t, l in planned if abs(t - at) < 12 * 60)
-            longest = max((b - a for a, b in view.terminal_free(ship.terminal, at)), default=0.0)
-            if not reserve and longest < ship.loa + taken:
-                return False
-            if reserve:
-                planned.append((at, ship.loa))
-        if t0 > view.now and not reserve and not view.tide_ok(ship, route, t0):
-            return False
-        return True
-
-    def plan_start(self, tab, model, ship, route):
-        ch = self.chain(ship, route)
-        now = self.view.now
-        for k in range(int(self.horizon_min // BIN_MIN) + 1):
-            t0 = now + k * BIN_MIN
-            if self.fits_at(tab, model, ship, ch, t0, route):
-                self.fits_at(tab, model, ship, ch, t0, route, reserve=True)
-                return t0
-        return None
+        self.quay_slowed = {}                  # ship id -> terminal whose quay it was slowed for
 
     # ------------------------------------------------------------------ the round
-    def priority(self, ship):
+    def order(self, ship):
+        """(priority class, departures before arrivals, lateness of a container ship, request time)."""
         base = self.view.default_priority(ship)
-        berth = ship.scheduled_berth_min if (ship.cls == "container" and not ship.departing) else None
-        return (base[0], 0 if berth is not None else 1, berth if berth is not None else base[1], base[1])
-
-    def degraded(self):
-        now = self.view.now
-        self.due_log = [(t, m) for t, m in self.due_log if now - t <= 60.0]
-        if len(self.due_log) >= 5 and sum(m for _, m in self.due_log) / len(self.due_log) > self.missed_share:
-            if self.degraded_until < now:
-                self.control.note(None, "chain_planning_degraded", until=now + self.degraded_min,
-                                  missed=sum(m for _, m in self.due_log), due=len(self.due_log))
-            self.degraded_until = now + self.degraded_min
-            self.due_log = []
-        return now < self.degraded_until
+        if self.departures_first and ship.departing:
+            return (base[0], 0, 0.0, base[1])
+        late = 0.0
+        if self.on["index"] and ship.cls == "container" and ship.scheduled_berth_min is not None and not ship.departing:
+            late = max(self.view.now - ship.scheduled_berth_min, 0.0)
+        return (base[0], 1, -late, base[1])
 
     def on_tick(self, now):
-        if self.degraded():
-            return super().on_tick(now)                   # strategy 1's local rules until the plan can be trusted
+        super().on_tick(now)                   # strategy 1's round in this order, and its speeds to the locks
+        if self.quay_jit:
+            self.pace_quay()
+
+    # ------------------------------------------------------------------ speeds
+    def jit_ok(self, ship):
+        if not ship.sea_going:
+            return True
+        return self.jit_sea_going and not ship.tide_dependent and not ship.ulcv
+
+    def jit_margin(self, ship):
+        return self.margin_sea if ship.sea_going else self.margin_inland
+
+    def lock_entry(self, model, lock, side, ship, ahead, ahead_sea):
+        """A sea-going ship goes into the lock before the inland craft queued at its side (lock priority 3 against
+        4): only the sea-going ships before it hold it back. Counting the craft too (strategy 1's estimate) slowed
+        sea-going ships for waits they did not have: container ships sailed 0.26 h longer in screening runs."""
+        if not ship.sea_going:
+            return super().lock_entry(model, lock, side, ship, ahead, ahead_sea)
+        view = self.view
+
+        def sea_going(sid):
+            v = view.ship(sid)
+            return v is not None and v.sea_going
+        return model.entry_min(lock, side, ship.loa, ship.beam, ahead=ahead_sea, count=sea_going)
+
+    def quay_free_at(self, ship, terminal):
+        """Minute the stretch of quay booked for the ship is clear of the ships lying there now (their planned
+        departures), or None when it has no booking."""
+        now = self.view.now
+        mine = next(((a, b) for i, a, b, arrived, _ in terminal["ships"] if i == ship.id and not arrived), None)
+        if mine is None:
+            return None
+        free = now
+        for i, a, b, arrived, leaves in terminal["ships"]:
+            if i != ship.id and arrived and a - QUAY_GAP_M < mine[1] and b + QUAY_GAP_M > mine[0]:
+                free = max(free, leaves if leaves is not None else now + CLEARING_MIN)
+        return free
+
+    def pace_quay(self):
+        """A container ship sailing to a quay that will still be taken when it gets there slows down to arrive
+        as it comes free (no lock left on its way: the lock speeds pace those)."""
         view, control = self.view, self.control
-        model, _ = self.snapshot()
-        tab = self.tables()
-        waiting = [s for s in view.requests() if s.needs_pilot and s.ready]
-        for ship in sorted(waiting, key=self.priority):
-            due = self.planned.pop(ship.id, None)
-            self.rebalance(ship)
-            check = control.check(ship)
-            if check.removed:
+        now = view.now
+        for sid in list(self.quay_slowed):
+            s = view.ship(sid)
+            if s is None or s.state != "sailing":
+                del self.quay_slowed[sid]
+        terminals = None
+        for s in view.ships():
+            if (s.state != "sailing" or s.departing or s.cls != "container" or not s.terminal
+                    or s.tide_dependent or s.ulcv or s.next_lock is not None):
                 continue
-            if not check.ok:
-                if due is not None and due <= now:
-                    self.due_log.append((now, True))
-                if check.reason == "pilot_lost":
-                    continue
-                self.not_cleared(ship, check)
+            b = s.berth
+            if not b or b["kind"] != "terminal":
                 continue
-            t0 = self.plan_start(tab, model, ship, check.route)
-            if t0 is not None and t0 <= now:
-                result = control.clear(ship)
-                if due is not None and due <= now:
-                    self.due_log.append((now, not result.ok))
-                if result.ok or result.removed or result.reason == "pilot_lost":
-                    continue
-                self.not_cleared(ship, result)
-            elif t0 is not None:
-                self.planned[ship.id] = t0               # its slot: the ships after it plan around it
-                if not ship.departing and ship.state == "wait_clearance" and ship.at_station:
-                    if not control.wait_at_sea(ship, self.sea_wait_max + (t0 - now)).ok:
-                        control.send_to_anchorage(ship)
-            else:
-                from vts_api import Result
-                self.not_cleared(ship, Result(False, "pilot"))
-        if self.on["jit"]:
-            self.pace()
+            if terminals is None:
+                terminals = view.terminals()
+            T = terminals.get(s.terminal)
+            free = self.quay_free_at(s, T) if T is not None else None
+            if free is None:
+                continue
+            wait = free - (now + C.eta_min(s))
+            kn = C.jit_speed(s, wait, margin_min=self.margin_sea)
+            if kn is not None:
+                if control.set_speed(s, kn).ok:
+                    self.quay_slowed[s.id] = s.terminal
+            elif s.id in self.quay_slowed and wait <= 0:
+                control.clear_speed(s)                 # its quay comes free sooner than planned
+                del self.quay_slowed[s.id]
 
     # ------------------------------------------------------------------ quay (tier 3)
     def choose_quay_position(self, ship, terminal, options, default):

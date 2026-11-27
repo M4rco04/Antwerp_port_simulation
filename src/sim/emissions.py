@@ -337,6 +337,11 @@ class Accounting:
             return "waiting", "anchored", "off"
         if st in (State.LOCK_QUEUE, State.IN_LOCK, State.WAIT_PILOT):
             return "waiting", "manoeuvring", "standby"
+        if st in (State.MOORING, State.UNMOORING) and getattr(ship, "timer", None) is None:
+            # waiting for its quay to clear, the tide, tugs or boatmen before (un)mooring starts: 20 % MCR is for
+            # while the timer runs; until then it waits at standby, as at a lock (counted as manoeuvring, a ship
+            # waiting off a quay still taken ran at 20 % MCR for hours)
+            return "waiting", "manoeuvring", "standby"
         if st in (State.BOARDING, State.PILOT_CHANGE, State.MOORING, State.UNMOORING):
             return "manoeuvring", "manoeuvring", "manoeuvre"
         if st in (State.SAILING, State.TO_STATION, State.TO_ANCHORAGE):
