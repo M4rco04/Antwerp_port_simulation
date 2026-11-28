@@ -1,0 +1,271 @@
+{
+  "collected_at_utc": "2026-11-28T11:28:49Z",
+  "source": "https://api-bridgesandlocks.nxtport.com/v1/locks/state",
+  "count": 6,
+  "data": [
+    {
+      "description": "Berendrechtsluis",
+      "lock_id": "BES",
+      "longitude_wgs84": 4.2856,
+      "latitude_wgs84": 51.34414,
+      "lock_doors": [
+        {
+          "state": "OPEN",
+          "lock_door_id": "NR1",
+          "operational_state": "WORKING",
+          "state_since_in_utc": "2026-11-28T09:34:13Z",
+          "operational_state_since_in_utc": "2026-11-25T09:27:41Z",
+          "longitude_wgs84": 4.28214,
+          "latitude_wgs84": 51.34426
+        },
+        {
+          "state": "OPEN",
+          "lock_door_id": "NR2",
+          "operational_state": "OUT_OF_ORDER",
+          "state_since_in_utc": "2026-11-25T09:27:41Z",
+          "operational_state_since_in_utc": "2026-11-25T09:27:41Z",
+          "longitude_wgs84": 4.28247,
+          "latitude_wgs84": 51.34424
+        },
+        {
+          "state": "CLOSED",
+          "lock_door_id": "NR3",
+          "operational_state": "WORKING",
+          "state_since_in_utc": "2026-11-28T09:10:54Z",
+          "operational_state_since_in_utc": "2026-11-25T09:27:41Z",
+          "longitude_wgs84": 4.28911,
+          "latitude_wgs84": 51.34383
+        },
+        {
+          "state": "OPEN",
+          "lock_door_id": "NR4",
+          "operational_state": "OUT_OF_ORDER",
+          "state_since_in_utc": "2026-11-25T09:27:41Z",
+          "operational_state_since_in_utc": "2026-11-25T09:27:41Z",
+          "longitude_wgs84": 4.28944,
+          "latitude_wgs84": 51.34381
+        }
+      ]
+    },
+    {
+      "description": "Boudewijnsluis",
+      "lock_id": "BOS",
+      "longitude_wgs84": 4.33312,
+      "latitude_wgs84": 51.27756,
+      "lock_doors": [
+        {
+          "state": "OPEN",
+          "lock_door_id": "NR1",
+          "operational_state": "WORKING",
+          "state_since_in_utc": "2026-11-28T07:55:41Z",
+          "operational_state_since_in_utc": "2026-10-01T10:34:26Z",
+          "longitude_wgs84": 4.33117,
+          "latitude_wgs84": 51.27893
+        },
+        {
+          "state": "CLOSED",
+          "lock_door_id": "NR2",
+          "operational_state": "WORKING",
+          "state_since_in_utc": "2026-11-28T10:51:23Z",
+          "operational_state_since_in_utc": "2026-10-01T10:34:26Z",
+          "longitude_wgs84": 4.33139,
+          "latitude_wgs84": 51.27877
+        },
+        {
+          "state": "OPEN",
+          "lock_door_id": "NR3",
+          "operational_state": "WORKING",
+          "state_since_in_utc": "2026-11-27T15:40:56Z",
+          "operational_state_since_in_utc": "2026-09-30T15:33:58Z",
+          "longitude_wgs84": 4.33452,
+          "latitude_wgs84": 51.27663
+        },
+        {
+          "state": "OPENING",
+          "lock_door_id": "NR4",
+          "operational_state": "WORKING",
+          "state_since_in_utc": "2026-11-28T11:09:41Z",
+          "operational_state_since_in_utc": "2026-09-30T15:33:58Z",
+          "longitude_wgs84": 4.33474,
+          "latitude_wgs84": 51.27648
+        }
+      ]
+    },
+    {
+      "description": "Kallosluis",
+      "lock_id": "KAS",
+      "longitude_wgs84": 4.27778,
+      "latitude_wgs84": 51.26391,
+      "lock_doors": [
+        {
+          "state": "OPEN",
+          "lock_door_id": "NR1",
+          "operational_state": "OUT_OF_ORDER",
+          "state_since_in_utc": "2026-11-19T10:59:15Z",
+          "operational_state_since_in_utc": "2026-11-25T05:44:58Z",
+          "longitude_wgs84": 4.2806,
+          "latitude_wgs84": 51.26385
+        },
+        {
+          "state": "CLOSED",
+          "lock_door_id": "NR2",
+          "operational_state": "WORKING",
+          "state_since_in_utc": "2026-11-28T10:24:51Z",
+          "operational_state_since_in_utc": "2026-11-25T13:04:36Z",
+          "longitude_wgs84": 4.28024,
+          "latitude_wgs84": 51.26384
+        },
+        {
+          "state": "OPEN",
+          "lock_door_id": "NR3",
+          "operational_state": "WORKING",
+          "state_since_in_utc": "2026-11-28T08:22:40Z",
+          "operational_state_since_in_utc": "2026-11-16T10:40:23Z",
+          "longitude_wgs84": 4.27568,
+          "latitude_wgs84": 51.26385
+        },
+        {
+          "state": "OPEN",
+          "lock_door_id": "NR4",
+          "operational_state": "WORKING",
+          "state_since_in_utc": "2026-11-28T10:45:11Z",
+          "operational_state_since_in_utc": "2026-11-18T12:43:54Z",
+          "longitude_wgs84": 4.27532,
+          "latitude_wgs84": 51.26384
+        }
+      ]
+    },
+    {
+      "description": "Kieldrechtsluis",
+      "lock_id": "KIS",
+      "longitude_wgs84": 4.24787,
+      "latitude_wgs84": 51.27915,
+      "lock_doors": [
+        {
+          "state": "CLOSED",
+          "lock_door_id": "NR1",
+          "operational_state": "WORKING",
+          "state_since_in_utc": "2026-11-28T10:41:38Z",
+          "operational_state_since_in_utc": "2026-09-28T06:39:38Z",
+          "longitude_wgs84": 4.24958,
+          "latitude_wgs84": 51.28083
+        },
+        {
+          "state": "OPEN",
+          "lock_door_id": "NR2",
+          "operational_state": "WORKING",
+          "state_since_in_utc": "2026-11-28T07:35:01Z",
+          "operational_state_since_in_utc": "2026-09-28T06:39:38Z",
+          "longitude_wgs84": 4.2494,
+          "latitude_wgs84": 51.28065
+        },
+        {
+          "state": "OPEN",
+          "lock_door_id": "NR3",
+          "operational_state": "WORKING",
+          "state_since_in_utc": "2026-11-28T11:07:24Z",
+          "operational_state_since_in_utc": "2026-09-28T06:39:38Z",
+          "longitude_wgs84": 4.2458,
+          "latitude_wgs84": 51.27714
+        },
+        {
+          "state": "OPEN",
+          "lock_door_id": "NR4",
+          "operational_state": "WORKING",
+          "state_since_in_utc": "2026-11-28T06:48:41Z",
+          "operational_state_since_in_utc": "2026-11-27T12:05:24Z",
+          "longitude_wgs84": 4.24562,
+          "latitude_wgs84": 51.27697
+        }
+      ]
+    },
+    {
+      "description": "Van Cauwelaertsluis",
+      "lock_id": "VCS",
+      "longitude_wgs84": 4.33092,
+      "latitude_wgs84": 51.27584,
+      "lock_doors": [
+        {
+          "state": "OPEN",
+          "lock_door_id": "NR1",
+          "operational_state": "WORKING",
+          "state_since_in_utc": "2026-11-28T08:24:05Z",
+          "operational_state_since_in_utc": "2026-11-22T08:57:08Z",
+          "longitude_wgs84": 4.32945,
+          "latitude_wgs84": 51.27678
+        },
+        {
+          "state": "OPEN",
+          "lock_door_id": "NR2",
+          "operational_state": "WORKING",
+          "state_since_in_utc": "2026-11-28T10:34:44Z",
+          "operational_state_since_in_utc": "2026-11-22T15:07:55Z",
+          "longitude_wgs84": 4.32966,
+          "latitude_wgs84": 51.27665
+        },
+        {
+          "state": "OPEN",
+          "lock_door_id": "NR3",
+          "operational_state": "WORKING",
+          "state_since_in_utc": "2026-11-28T09:44:39Z",
+          "operational_state_since_in_utc": "2026-11-27T07:02:11Z",
+          "longitude_wgs84": 4.33192,
+          "latitude_wgs84": 51.27508
+        },
+        {
+          "state": "CLOSED",
+          "lock_door_id": "NR4",
+          "operational_state": "WORKING",
+          "state_since_in_utc": "2026-11-28T10:12:19Z",
+          "operational_state_since_in_utc": "2026-11-24T09:17:38Z",
+          "longitude_wgs84": 4.33213,
+          "latitude_wgs84": 51.27493
+        }
+      ]
+    },
+    {
+      "description": "Zandvlietsluis",
+      "lock_id": "ZAS",
+      "longitude_wgs84": 4.28614,
+      "latitude_wgs84": 51.34632,
+      "lock_doors": [
+        {
+          "state": "CLOSED",
+          "lock_door_id": "NR1",
+          "operational_state": "WORKING",
+          "state_since_in_utc": "2026-11-28T07:49:10Z",
+          "operational_state_since_in_utc": "2026-11-25T09:27:41Z",
+          "longitude_wgs84": 4.28248,
+          "latitude_wgs84": 51.34645
+        },
+        {
+          "state": "OPEN",
+          "lock_door_id": "NR2",
+          "operational_state": "WORKING",
+          "state_since_in_utc": "2026-11-28T06:07:29Z",
+          "operational_state_since_in_utc": "2026-11-25T09:27:41Z",
+          "longitude_wgs84": 4.28287,
+          "latitude_wgs84": 51.34643
+        },
+        {
+          "state": "CLOSED",
+          "lock_door_id": "NR3",
+          "operational_state": "WORKING",
+          "state_since_in_utc": "2026-11-28T11:02:44Z",
+          "operational_state_since_in_utc": "2026-11-25T09:27:41Z",
+          "longitude_wgs84": 4.28939,
+          "latitude_wgs84": 51.34603
+        },
+        {
+          "state": "OPEN",
+          "lock_door_id": "NR4",
+          "operational_state": "WORKING",
+          "state_since_in_utc": "2026-11-28T08:07:35Z",
+          "operational_state_since_in_utc": "2026-11-25T09:27:41Z",
+          "longitude_wgs84": 4.28978,
+          "latitude_wgs84": 51.34602
+        }
+      ]
+    }
+  ]
+}
