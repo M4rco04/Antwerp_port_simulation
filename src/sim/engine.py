@@ -1307,20 +1307,28 @@ class Simulation:
             ship.note(now, "pilot_booked", zone=z, eta_min=round(eta - now))
         return True
 
+    def off_fairway_node(self, ship, head, zone):
+        """Where a ship that must wait for a pilot lies: on the river or at sea, the nearest anchorage within
+        OFF_FAIRWAY_ANCHORAGE_M (Vlissingen roads, Schaar van Ouden Doel, ...) that takes it (its length, draught
+        and cargo, as for anchoring) and that it can sail from at high water; else, and in the docks, where it is.
+        Ships of 10-12 m out of the Terneuzen lock were put on Zuid Everingen, too shallow for them: no route led
+        out again and each lay there for weeks with its river pilot on board (runs 201-204)."""
+        if zone not in ("sea", "river") or head is None:
+            return head
+        fit = {a.name for a in choose_anchorage(self.anchorages, ship.loa, ship.draught, dangerous_signals=ship.dg == "A",
+                                                tide_dependent=ship.tide_dependent, level_m=0.0)}
+        near = [(math.hypot(self.fg.x[a] - self.fg.x[head], self.fg.y[a] - self.fg.y[head]), a)
+                for name, a in self.anchorage_node.items() if name in fit]
+        near = [x for x in near if x[0] <= OFF_FAIRWAY_ANCHORAGE_M and self.reachable_between(head, x[1], ship)]
+        return min(near)[1] if near else head
+
     def wait_for_pilot(self, ship, zone, now):
-        """No pilot for the next stretch: the ship gets out of the fairway and waits, at an anchorage
-        within OFF_FAIRWAY_ANCHORAGE_M (Vlissingen roads, Schaar van Ouden Doel, ...) on the river or at
-        sea, or off the mesh where it is in the docks; it carries on when a pilot is free."""
+        """No pilot for the next stretch: the ship gets out of the fairway and waits (off_fairway_node), off the
+        mesh; it carries on when a pilot is free."""
         head = ship.cells[-1] if ship.cells else ship.at
         self.mover.release(ship)
-        node = head
-        if zone in ("sea", "river") and head is not None:
-            near = [(math.hypot(self.fg.x[a] - self.fg.x[head], self.fg.y[a] - self.fg.y[head]), a)
-                    for a in self.anchorage_node.values()]
-            near = [x for x in near if x[0] <= OFF_FAIRWAY_ANCHORAGE_M]
-            if near:
-                node = min(near)[1]
-        ship.at, ship.off_fairway, ship.wait_zone = node, True, zone
+        node = self.off_fairway_node(ship, head, zone)
+        ship.at, ship.off_fairway, ship.wait_zone, ship.off_fairway_from = node, True, zone, head
         ship.set_state(State.WAIT_PILOT, now, zone=zone)
         ship.note(now, "wait_pilot_off_fairway", zone=zone, at=int(node) if node is not None else None)
 
@@ -1900,6 +1908,12 @@ class Simulation:
                 if ship.timer <= 0:
                     if getattr(ship, "off_fairway", False):   # back from waiting off the fairway
                         route = self.plan_route(ship, now)
+                        back = getattr(ship, "off_fairway_from", None)
+                        if route is None and back is not None and ship.at != back:
+                            # no way on from where it waited: from where it left the fairway, which it reached
+                            ship.note(now, "off_fairway_back", at=int(back))
+                            ship.at = back
+                            route = self.plan_route(ship, now)
                         if route is None:
                             ship.timer = DT_MIN                # no water yet: try again next step
                             continue

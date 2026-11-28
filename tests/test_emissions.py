@@ -82,3 +82,17 @@ def test_auxiliaries_by_phase_and_small_engines():
 
 def test_dwt_from_dimensions():
     assert 35000 < E.dwt_from_dimensions(190, 32, 11.0) < 55000    # a handymax bulk carrier
+
+
+def test_waiting_to_moor_is_waiting_not_manoeuvring():
+    """MODEL.md §17.1: 20 % MCR while a timer runs (boarding, pilot change, mooring, unmooring). A ship off a quay
+    still taken, or waiting for the tide, tugs or boatmen, has no timer yet: it waits at standby, as at a lock."""
+    from types import SimpleNamespace
+
+    from ship import State
+
+    acc = E.Accounting.__new__(E.Accounting)                    # activity() reads only the ship
+    for st in (State.MOORING, State.UNMOORING):
+        assert acc.activity(SimpleNamespace(state=st, timer=None), State) == ("waiting", "manoeuvring", "standby")
+        assert acc.activity(SimpleNamespace(state=st, timer=25.0), State) == ("manoeuvring", "manoeuvring", "manoeuvre")
+    assert acc.activity(SimpleNamespace(state=State.PILOT_CHANGE, timer=10.0), State)[0] == "manoeuvring"

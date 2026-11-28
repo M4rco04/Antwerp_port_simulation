@@ -87,6 +87,9 @@ the canal scaling per canal and Rijkswaterstaat's lock counts. Re-fit and re-val
   for it (a factor there would hide a movement error behind a fuel one).
 - **Validation, next.** The yearly totals of the Flemish (VMM, EMMOSS: on request) and Dutch (Emissieregistratie)
   inventories for the Scheldt and the ports; berth fuel from a source with hours at berth.
+- **Rerun the AIS-track comparison after the fixes of 27 November 2026** (MODEL.md §9 and §17.1): the wait before
+  (un)mooring at standby and no ships stuck off Terneuzen each lower the area's fuel by about 1 % at normal
+  traffic, so the 0.98 above is likely 0.96–0.97 now.
 - **Not counted.** Tugs (EMEP Table 3-17 gives their power from GT; the tug list has no GT), pilot boats, and the
   container ships' time slowed at sea before the area (the fuel the virtual arrival saves).
 - **Shallow water for sea-going ships.** Bolt's term is for inland hulls; the river leg of deep ships is likely low.

@@ -161,6 +161,7 @@ def command(settings, item, eval_label):
            "--reps", str(s["reps"]), "--seed", str(s["seed"]), "--workers", str(s["workers"]),
            "--start", s["start"], "--weather", s["weather"], "--containers", s["containers"],
            "--container-rate", str(s["container_rate"]), "--background-rate", str(s["background_rate"]),
+           "--no-validation",                                 # the comparison reads the summary only (METRICS)
            "--vts", item["strategy"]]
     for k, v in (item.get("options") or {}).items():
         cmd += ["--vts-option", f"{k}={json.dumps(v)}"]

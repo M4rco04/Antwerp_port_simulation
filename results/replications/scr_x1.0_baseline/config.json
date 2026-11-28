@@ -1,0 +1,22 @@
+{
+  "label": "scr_x1.0_baseline",
+  "reps": 4,
+  "seed": 2,
+  "start": "2026-10-21 00:00",
+  "days": 20.0,
+  "warmup": 11.0,
+  "delays": true,
+  "background": true,
+  "weather": "bootstrap",
+  "containers": "nhpp",
+  "container_rate": 1.0,
+  "bunching": true,
+  "routing": "lanes",
+  "checks": false,
+  "measure_until": null,
+  "holdout": null,
+  "set": [],
+  "vts": "baseline",
+  "vts_options": {},
+  "background_rate": 1.0
+}

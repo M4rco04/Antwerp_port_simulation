@@ -4,7 +4,8 @@
     container_first   an example: the baseline with container ships first in the clearance and lock queues
     template          every hook, documented, doing what the baseline does: copy it to start a new strategy
     local_lookahead   S1: each resource on its own with a short look-ahead (docs/strategies/port_management_strategies.md)
-    chain_planning    S2: a rolling plan of time slots with buffers and a degraded mode
+    chain_planning    S2: the call chain in step: departures first, clearance whenever the resources are free,
+                      just-in-time speeds to the lock entry for sea-going ships and inland craft
     equilibrium_guidance   S3: an approximate Nash equilibrium of the ships' guidance game each round (PULSE)
     evolutionary_guidance  S4: the same game searched by a genetic algorithm on perturbed futures
 

@@ -44,6 +44,7 @@ def test_the_command_is_a_replicate_call_with_the_strategy_and_its_options():
     assert cmd[cmd.index("--vts") + 1] == "local_lookahead"
     assert cmd[cmd.index("--vts-option") + 1] == "jit=false"
     assert cmd[cmd.index("--background-rate") + 1] == "1.25" and cmd[cmd.index("--workers") + 1] == "3"
+    assert "--no-validation" in cmd                             # a comparison reads the summary, not the v.* numbers
 
 
 def test_the_replication_folder_is_read_from_the_log(tmp_path):

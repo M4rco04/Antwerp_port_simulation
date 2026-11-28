@@ -1,9 +1,10 @@
 # Strategies for running the whole port: local look-ahead, chain planning, equilibrium guidance, evolutionary planning
 
-Status: **S1–S4 implemented (2026-11-26), not yet run.** Code: `src/strategies/local_lookahead.py`, `chain_planning.py`,
+Status: **S1–S4 implemented (2026-11-26).** Code: `src/strategies/local_lookahead.py`, `chain_planning.py`,
 `equilibrium_guidance.py`, `evolutionary_guidance.py`, helpers `_common.py` (B1, B2, B4) and `_games.py`; unit tests
-`tests/test_port_strategies.py`; selectable on the setup page. Not built yet: B3 as a separate forecast (S2 folds it into
-its pilot tables), B5 (disruption wrapper), B6 (metrics script), S2's announcement variant and one-way restrictions.
+`tests/test_port_strategies.py`; selectable on the setup page. **S2 was rebuilt on 2026-11-27 (version 2, §5.0)** after
+the 60-day runs 201–204 showed that its slot plan held ships whose resources were free. Not built yet: B3 as a
+separate forecast, B5 (disruption wrapper), B6 (metrics script), S2's announcement variant and one-way restrictions.
 S4 was built on S3's game (the user's "equilibrium guidance with an evolutionary algorithm inside") rather than on S2's
 slot builder as §6b first proposed; its chromosome, robust fitness, seeds and operators are as §6b describes.
 
@@ -17,19 +18,19 @@ and quay; when and how fast), **resource allocation** (pilots, pilot boats, quay
 and **lock operation** (when a chamber closes, which chamber a ship takes, who goes first). The three differ in
 *how* they decide, not in what they touch:
 
-| | **S1 Local look-ahead** | **S2 Chain planning** | **S3 Equilibrium guidance** |
+| | **S1 Local look-ahead** | **S2 Chain planning** (version 2, §5.0) | **S3 Equilibrium guidance** |
 |---|---|---|---|
-| Paradigm | Decentralised rules, each resource on its own | Central plan with time slots, re-planned | Approximate Nash equilibrium of the ships' guidance game |
-| From the reading | VTS 1 (loosely coupled), with the foresight it lacks | VTS 3 (chain planning, "aviation-like" slots), with buffers | PULSE and its simulator: polymatrix games, replicator dynamics |
-| Horizon | Now plus at most ~1 h | 6 h (12 h with announcements) | To the ship's next shared resource, every 15 min |
-| Routing | Twin lock / complex with the least expected delay; wait at sea or anchor by expected wait; just-in-time (JIT) speed to locks | Lock, complex, anchorage, berth and quay taken from the plan | Lock, complex, time and speed are each ship's strategies in the game |
-| Resource allocation | Clearance by a priority index, with small reserves of pilots and boats | Reservation tables for pilots, boats, chambers and quay | Pairwise contention payoffs; the VTS tunes how much each ship internalises |
-| Lock operation | Wait only for a ship really coming; fill when busy; earliest-entry chamber | Lockages planned (members, chamber, time) | Lockage membership emerges from the ships' equilibrium choices |
-| Fuel | JIT speeds to locks | JIT along the plan, entry windows at sea | Fuel is part of every ship's payoff |
+| Paradigm | Decentralised rules, each resource on its own | The call chain kept in step: the port's own plan (quay bookings, planned departures, lockages) times the ships; no slot gate | Approximate Nash equilibrium of the ships' guidance game |
+| From the reading | VTS 1 (loosely coupled), with the foresight it lacks | VTS 3 (chain planning, "aviation-like" slots); version 1 had buffers and a degraded mode | PULSE and its simulator: polymatrix games, replicator dynamics |
+| Horizon | Now plus at most ~1 h | To the ship's next lock or quay | To the ship's next shared resource, every 15 min |
+| Routing | Twin lock / complex with the least expected delay; wait at sea or anchor by expected wait; just-in-time (JIT) speed to locks | S1's, with JIT speeds to the lock entry for sea-going ships too (and, on request, to the quay coming free) | Lock, complex, time and speed are each ship's strategies in the game |
+| Resource allocation | Clearance by a priority index, with small reserves of pilots and boats | Late container ships first; cleared whenever the resources are free (S1's reserves); departures first on request | Pairwise contention payoffs; the VTS tunes how much each ship internalises |
+| Lock operation | Wait only for a ship really coming; fill when busy; earliest-entry chamber | S1's earliest-entry chambers; no look-ahead lockages (an option) | Lockage membership emerges from the ships' equilibrium choices |
+| Fuel | JIT speeds to locks | JIT speeds to the locks for all ships | Fuel is part of every ship's payoff |
 | Authority tier (VTS_API §8) | 2 | 3, plus a tier-2 variant | 2 (same levers as S1) |
-| Information | `view` only | `view`; a variant adds announced arrivals | `view` only |
+| Information | `view` only | `view` only (the announcement variant, §5.6, is not built) | `view` only |
 | Build effort (rough) | ~1 week | ~3 weeks, plus an API extension for the variant | ~2 weeks |
-| Main risk | Myopia: no coordination between resources | Brittleness and model mismatch | Approximate payoffs; convergence of the solver |
+| Main risk | Myopia: no coordination between resources | Speeds set on estimates (a ship paced too slowly misses its lockage) | Approximate payoffs; convergence of the solver |
 
 S1 and S3 use the same levers, so comparing them isolates *rules against equilibrium*. S2 at tier 3 against its
 tier-2 variant separates *more power* from *a better algorithm*. S2 with and without announcements separates
@@ -184,7 +185,98 @@ There is no plan and no reservation beyond what the engine already makes. `class
 
 ## 5. Strategy 2: rolling-horizon chain planning ("VTS 3, with buffers")
 
-**Idea.** Plan ahead like the reading's VTS 3: every ship gets a chain of time slots across the resources it will
+### 5.0 Version 2 (27 November 2026): the chain in step, no slot gate
+
+**What version 1 did** (the design of §5.1–5.5, as built): every 15-min round, each pilot ship in priority order
+(distress, tide-dependent, container ships by berth time, then first come first served) got the earliest start, in
+15-min steps up to 6 h, at which its whole voyage fitted reservation tables with buffers: pilots per zone and bin (a
+job held a pilot for its time on board and its return, 15 min more each side), pilot boats, lockage windows per
+lock side, and a container terminal's quay (the longest free stretch had to take the ship and every other ship
+planned there within ±12 h, 30 min later). A ship was cleared only when that start was now; a later one waited off
+the station, at anchor or at its berth. With more than 30 % of the slots due in the last hour missed, it used S1's
+rules for 2 h. Locks, chambers and speeds were S1's.
+
+**What the runs showed.** Sets 201–204 (from 21 October 2026, 60 days of which 15 warm-up, seeds 2–5, containers
+nhpp, background traffic at the same rate, ×1.0 and ×1.5), paired differences against the baseline with 95 %
+intervals:
+
+- ×1.0: container ships reached their quay 0.5 h later (13.3 → 13.8 h from entering the area); berth delay
+  +0.54 ± 0.38 h, more than 12 h late +1.8 ± 1.1 points, time in the area +0.72 ± 0.18 h. The calls were the same
+  (412 container ships in both: the port is not full at ×1.0). Fuel −0.1 % (not significant).
+- ×1.5: every sea-going class waited longer for clearance (container ships +1.54 ± 1.47 h); a ship ready to leave
+  left 1.1 h (container), 1.3 h (bulk) and 1.65 h (tanker) later; about 3 % fewer calls were completed (not
+  significant); fuel +2.6 % (not significant).
+- The one clear saving came from S1's part: inland craft burnt 3–8 % less with their JIT speeds to the locks.
+
+**Why.** (1) The plan only held ships back. The parts of §5.3 that put the waiting to use (arrival delays at sea,
+speeds to the slot for sea-going ships, a plan kept between rounds) were not built, so every slot later than now
+was a wait, at ×1.0 mostly for nothing. (2) The tables were stricter than the port: the buffers on every pilot job,
+and above all the quay test, held container ships whose quay the engine would have planned for them. (3) Departures
+came after the arriving container ships; a ship waiting to leave keeps its berth, so the next ship waited at anchor
+or off the quay (MOORING, with its main engine at manoeuvring load, MODEL.md §17.1). (4) The waiting was in the area.
+A model fault made ×1.5 worse for both strategies: ships out of the Terneuzen lock with no river pilot free were put
+on an anchorage too shallow for them and lay there for weeks with their pilot on board (on average 6.5 of the 51
+river pilots in the baseline, 9.6 under S2). The engine was fixed the same day (MODEL.md §9, waiting for a pilot).
+
+**Version 2** keeps the levers and the tier and uses the plan to time ships, not to gate them:
+
+- *Order*: after distress and tide-dependent ships, container ships late for their berth time first, then by
+  request time. Departures before arrivals only on request (`departures_first`): at ×1.5 it changed neither the
+  time in the area nor the calls and cost 5 ± 3 t of fuel a day; the departures version 1 delayed were held by its
+  slot gate, not by the order.
+- *Clearance*: as soon as the engine's checks pass (route, weather, tide, pilots, destination), with S1's small
+  pilot and boat reserves for tide-dependent ships and S1's choice between waiting off the station and anchoring.
+- *Locks*: S1's balancing and earliest-entry chambers. S1's look-ahead lockages only on request: in screening runs,
+  holding a chamber open for a ship coming cost the ships inside more than the ship coming gained (inland craft
+  0.1 h a passage, the sea-going ships' shorter queue taken back in the chamber). S1's JIT speeds to the lock entry,
+  also for sea-going ships (not tide-dependent ships or ULCVs), which aim to arrive 30 min before they can go in
+  (inland craft 10 min) and count only the sea-going ships before them: they go in before the inland craft queued
+  at their side (lock priority 3 against 4). Counting the craft too, as S1's estimate does, slowed them for waits
+  they did not have (container ships sailed 0.26 h longer).
+- *Quay*: tier 3 still chooses where along the quay a container ship lies (the stretch that leaves the longest free
+  quay). On request (`quay_jit`), a container ship sailing to a stretch of quay that will still be taken when it
+  gets there (the planned departures of the ships lying on it; a ship ready but not yet cleared counted as gone in
+  90 min) slows down to arrive as it comes free. Off by default: in screening runs it cost container ships time,
+  and once a ship waiting off a quay is counted at standby (MODEL.md §17.1) it saves little.
+- Options: those of `local_lookahead` (here `lookahead` is off and `jit_sea_going` on), `departures_first` (False),
+  `quay_jit` (False), `jit_margin_sea_min` (30), `jit_margin_inland_min` (10), `quay` (tier 3; False: tier 2).
+  Version 1 is in the history (commit `f2fc5b2c`).
+
+What it should change: no container ship held for a free quay, less fuel sailing to the locks, no ship slower in
+the area. What could go wrong: a ship paced on a wrong estimate misses its lockage and waits a cycle (inland craft
+sail 0.1–0.3 h longer and still queue), and a sea-going ship paced keeps its pilot longer.
+
+**Screening runs (27 November 2026)**, after the two engine fixes of that day, so against a new baseline: from
+21 October, seeds 2–5, containers nhpp with the background traffic at the same rate; ×1.0 for 20 days (11 of
+warm-up, 9 measured), ×1.5 for 22.5 days (12.5 of warm-up, 10 measured; by Welch the port is still filling at
+×1.5, so these are paired differences, not a steady state). Version 2 against the baseline, mean paired difference
+and 95 % interval (`results/replications/scr2_x1.0_baseline`, `scr2_x1.0_s2final`, `scr_x1.5_baseline`,
+`scr2_x1.5_s2final_nodep`):
+
+| | ×1.0 | ×1.5 |
+|---|---|---|
+| Fuel in the area | −16 ± 10 t/day (−1.1 %) | −45 ± 6 t/day (−2.0 %) |
+| CO₂ | −51 ± 33 t/day (−1.1 %) | −145 ± 20 t/day (−2.0 %) |
+| NOₓ | −0.7 ± 0.5 t/day (−1.2 %) | −2.2 ± 0.6 t/day (−2.5 %) |
+| Time in the area per call, all ships | +0.01 ± 0.19 h | +0.01 ± 0.52 h |
+| — sea-going ships | −0.12 ± 0.18 h | −0.13 ± 0.89 h |
+| Container berth delay | −0.55 ± 1.45 h (−10 %) | −0.97 ± 2.26 h (−12 %) |
+| Calls completed, sea-going | −1.0 ± 1.3 (all served: set by the arrivals) | +8 ± 29 (+1.3 %) |
+| River pilots busy | +0.05 ± 0.22 | −0.01 ± 0.29 |
+
+The ×1.0 row is the run with departures first (then the default); at ×1.5 that rule changed only the fuel (above).
+The fuel falls in every class at ×1.5 (container ships −16, bulk −6, inland craft −13 t/day, the last from their JIT
+speeds) and comes from sailing (−30 t/day) and manoeuvring; the times and calls are within the noise of 9–10
+measured days. The steps on the way, against the same baselines: version 2 with look-ahead lockages cost every ship
++0.17 h a call at ×1.0 (inland craft 0.1 h more in the chamber), without them −0.01 h; sea-going ships paced on
+S1's lock estimate sailed longer (container ships +0.26 h at ×1.0, +0.47 h at ×1.5) and kept the river pilots 2 %
+busier; on the corrected estimate +0.11 h and +0.06 h (both within the noise) and no busier pilots. The 60-day
+evaluation of version 2 is still to come.
+
+The original design follows for the record (§5.1–5.6); §5.3's arrival delays and the announcement variant are
+still open.
+
+**Idea (version 1).** Plan ahead like the reading's VTS 3: every ship gets a chain of time slots across the resources it will
 use, so services are synchronised before the ship moves. Then guard against VTS 3's weakness, stiffness, with
 buffers, a frozen near-term plan and a degraded mode. `class ChainPlanner(Baseline)`, tier 3: the S1 levers plus
 `berth`, `quay_position` and `restriction`. A tier-2 variant (no berth, quay or restriction) is run as well.
@@ -421,7 +513,8 @@ go/no-go gate. It tunes a strategy; it is not a strategy of its own.
   baseline; refused orders.
 - **Resilience** (from the reading's lens): during and after a disruption, the peak excess queue, the excess
   ship-hours, and the **recovery time** until the queue is within 10 % of the undisturbed run.
-- **Per strategy**: S2's slot adherence and time in degraded mode; S3's regret and price of anarchy; S4's predicted
+- **Per strategy**: S2's speed orders (lock and quay) and the waits they replace (version 1: slot adherence and time
+  in degraded mode); S3's regret and price of anarchy; S4's predicted
   against realised cost per cycle, and its gain over its S2 seed.
 - **Budget**: about 70–75 min per scenario for 3 seeds. Three scenarios plus two disruptions is about 6 h per
   strategy, so about 30 h for the baseline plus four strategies, before parameter sweeps.

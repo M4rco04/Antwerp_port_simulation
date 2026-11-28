@@ -158,6 +158,19 @@ class LocalLookahead(Baseline):
         super().not_cleared(ship, result)
 
     # ------------------------------------------------------------------ speed: just in time to the lock
+    def jit_ok(self, ship):
+        """May the just-in-time speeds pace this ship? Inland craft always; sea-going ships when asked."""
+        return not ship.sea_going or self.jit_sea_going
+
+    def jit_margin(self, ship):
+        """Minutes before it can go in that a paced ship is to reach the lock."""
+        return 10.0
+
+    def lock_entry(self, model, lock, side, ship, ahead, ahead_sea):
+        """Minutes until the ship can go into the lock: every ship queued or coming before it counts (ahead: ships
+        coming before it, ahead_sea: the sea-going ones among them)."""
+        return model.entry_min(lock, side, ship.loa, ship.beam, ahead=ahead)
+
     def pace(self):
         model, com = self.snapshot()
         for sid, lock in list(self.slowed.items()):
@@ -168,13 +181,14 @@ class LocalLookahead(Baseline):
                 self.control.clear_speed(s)
                 del self.slowed[sid]
         for (lock, side), ships in com.items():
-            ahead = 0
+            ahead = ahead_sea = 0
             for t, s in ships:
-                entry = model.entry_min(lock, side, s.loa, s.beam, ahead=ahead)
+                entry = self.lock_entry(model, lock, side, s, ahead, ahead_sea)
                 ahead += 1
-                if entry is None or (s.sea_going and not self.jit_sea_going):
+                ahead_sea += 1 if s.sea_going else 0
+                if entry is None or not self.jit_ok(s):
                     continue
-                kn = C.jit_speed(s, entry - t)
+                kn = C.jit_speed(s, entry - t, margin_min=self.jit_margin(s))
                 if kn is not None and self.control.set_speed(s, kn).ok:
                     self.slowed[s.id] = lock
 
